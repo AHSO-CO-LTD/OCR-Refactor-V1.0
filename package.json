@@ -1,0 +1,21 @@
+{
+  "name": "ocr-metal-core-washing-refactor",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Local desktop refactor for OCR Metal Core Washing.",
+  "workspaces": [
+    "frontend",
+    "backend",
+    "shared"
+  ],
+  "scripts": {
+    "dev": "npm run dev --workspaces --if-present",
+    "build": "npm run build --workspaces --if-present",
+    "lint": "npm run lint --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}
+

@@ -1,0 +1,180 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum RoleCode {
+  dev
+  admin
+  engineer
+  operator
+}
+
+enum InspectionStatus {
+  pending
+  running
+  stopped
+  completed
+  failed
+}
+
+enum InspectionResult {
+  OK
+  NG
+  UNKNOWN
+}
+
+model User {
+  id             String           @id @default(cuid())
+  username       String           @unique
+  passwordHash   String
+  fullName       String
+  department     String?
+  employeeNo     String?
+  roleCode       RoleCode
+  active         Boolean          @default(true)
+  failedAttempts Int              @default(0)
+  lastLoginAt    DateTime?
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+  role           Role             @relation(fields: [roleCode], references: [code])
+  permissions    UserPermission[]
+  auditLogs      AuditLog[]
+  inspectionJobs InspectionJob[]
+}
+
+model Role {
+  code        RoleCode         @id
+  name        String
+  visible     Boolean          @default(true)
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+  users       User[]
+  permissions RolePermission[]
+}
+
+model Permission {
+  key             String           @id
+  name            String
+  group           String
+  devOnly         Boolean          @default(false)
+  createdAt       DateTime         @default(now())
+  rolePermissions RolePermission[]
+  userPermissions UserPermission[]
+}
+
+model RolePermission {
+  roleCode      RoleCode
+  permissionKey String
+  role          Role       @relation(fields: [roleCode], references: [code], onDelete: Cascade)
+  permission    Permission @relation(fields: [permissionKey], references: [key], onDelete: Cascade)
+
+  @@id([roleCode, permissionKey])
+}
+
+model UserPermission {
+  userId        String
+  permissionKey String
+  user          User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  permission    Permission @relation(fields: [permissionKey], references: [key], onDelete: Cascade)
+
+  @@id([userId, permissionKey])
+}
+
+model Product {
+  id              String   @id @default(cuid())
+  code            String   @unique
+  name            String   @unique
+  defaultNumber   Int      @default(160)
+  batchSize       Int      @default(160)
+  exposure        Int      @default(3500)
+  thresholdAccept Decimal  @default(0.5) @db.Decimal(4, 2)
+  thresholdMns    Decimal  @default(0.5) @db.Decimal(4, 2)
+  modelPath       String?
+  active          Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  cameraConfig    CameraConfig?
+  roiRegions      RoiRegion[]
+}
+
+model CameraConfig {
+  id         String   @id @default(cuid())
+  productId  String?  @unique
+  sourceType String   @default("usb")
+  deviceName String?
+  rtspUrl    String?
+  exposure   Int      @default(3500)
+  imageWidth Int      @default(2500)
+  imageHeight Int     @default(1000)
+  offsetX    Int      @default(300)
+  offsetY    Int      @default(1400)
+  zoomFactor Decimal  @default(0.4) @db.Decimal(4, 2)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  product    Product? @relation(fields: [productId], references: [id], onDelete: Cascade)
+}
+
+model RoiRegion {
+  id        String   @id @default(cuid())
+  productId String?
+  index     Int
+  x         Int
+  y         Int
+  width     Int
+  height    Int
+  rotation  Decimal  @default(0) @db.Decimal(6, 2)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  product   Product? @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@unique([productId, index])
+}
+
+model InspectionJob {
+  id          String           @id @default(cuid())
+  productId   String
+  operatorId  String
+  status      InspectionStatus @default(pending)
+  startedAt   DateTime?
+  stoppedAt   DateTime?
+  note        String?
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+  operator    User             @relation(fields: [operatorId], references: [id])
+  logs        InspectionLog[]
+}
+
+model InspectionLog {
+  id           String           @id @default(cuid())
+  jobId        String
+  result       InspectionResult @default(UNKNOWN)
+  text         String?
+  confidence   Decimal?         @db.Decimal(5, 4)
+  imagePath    String?
+  errorMessage String?
+  capturedAt   DateTime         @default(now())
+  job          InspectionJob    @relation(fields: [jobId], references: [id], onDelete: Cascade)
+}
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  actorId   String?
+  action    String
+  target    String?
+  details   Json?
+  createdAt DateTime @default(now())
+  actor     User?    @relation(fields: [actorId], references: [id])
+}
+
+model LicenseLog {
+  id        String   @id @default(cuid())
+  status    String
+  code      String?
+  message   String?
+  createdAt DateTime @default(now())
+}
