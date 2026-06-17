@@ -1,10 +1,13 @@
 "use client";
 
 import {
+  ChangeEvent,
   ComponentProps,
   FormEvent,
   KeyboardEvent,
   PointerEvent,
+  useEffect,
+  useEffectEvent,
   useMemo,
   useRef,
   useState,
@@ -14,6 +17,7 @@ import {
   Copy,
   Plus,
   Redo2,
+  RefreshCcw,
   RotateCw,
   Save,
   Trash2,
@@ -21,16 +25,22 @@ import {
   X,
 } from "lucide-react";
 import { toast } from "sonner";
-import { UserVirtualKeyboardButton } from "@/components/users/user-virtual-keyboard-button";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import type {
+import { Select } from "@/components/ui/select";
+import {
+  ApiError,
+  listCameraDevices,
+  type CameraDevice,
   ProductProfile,
   ProductProfilePayload,
   RoiRegion,
 } from "@/lib/api";
+import { CameraPreviewImage } from "@/components/camera/camera-preview-image";
+import { useConnectedCameraPreview } from "@/components/camera/use-connected-camera-preview";
 import { useI18n } from "@/lib/i18n";
+import { getAccessToken } from "@/lib/session";
 
 type ProductProfileFormProps = {
   product?: ProductProfile | null;
@@ -85,6 +95,9 @@ const defaultDraft: ProductProfilePayload = {
     offsetX: 0,
     offsetY: 0,
     zoomFactor: 1,
+    previewPanX: 0,
+    previewPanY: 0,
+    previewRotation: 0,
   },
   roiRegions: [],
 };
@@ -129,6 +142,10 @@ function toDraft(product?: ProductProfile | null): ProductProfilePayload {
 
 function clamp(value: number, min: number, max: number) {
   return Math.min(Math.max(value, min), max);
+}
+
+function cameraDeviceValue(device: CameraDevice) {
+  return device.friendly_name;
 }
 
 function regionFromClientPoint(
@@ -461,6 +478,9 @@ export function ProductProfileForm({
     toDraft(product),
   );
   const [copySourceId, setCopySourceId] = useState("");
+  const [cameraDevices, setCameraDevices] = useState<CameraDevice[]>([]);
+  const [loadingCameraDevices, setLoadingCameraDevices] = useState(false);
+  const [cameraDeviceError, setCameraDeviceError] = useState("");
   const [advancedOpen, setAdvancedOpen] = useState(Boolean(product));
   const [validationMessages, setValidationMessages] = useState<string[]>([]);
   const [selectedRegionIndex, setSelectedRegionIndex] = useState<number | null>(
@@ -496,7 +516,11 @@ export function ProductProfileForm({
     current: { x: number; y: number };
   } | null>(null);
   const [roiAssist, setRoiAssist] = useState<RoiAssist | null>(null);
+  const {
+    imageSrc: livePreviewImageSrc,
+  } = useConnectedCameraPreview(draft.camera.deviceName);
   const previewRef = useRef<HTMLDivElement | null>(null);
+  const modelFileInputRef = useRef<HTMLInputElement | null>(null);
   const lastPreviewPointRef = useRef<Point | null>(null);
   const rotatingSessionRef = useRef<{
     indexes: number[];
@@ -507,6 +531,13 @@ export function ProductProfileForm({
   } | null>(null);
   const rotateCleanupRef = useRef<(() => void) | null>(null);
   const isEditing = Boolean(product);
+  const loadInitialCameraDevices = useEffectEvent(() => {
+    void refreshCameraDevices(false);
+  });
+
+  useEffect(() => {
+    loadInitialCameraDevices();
+  }, []);
 
   const roiRegions = useMemo(
     () => [...draft.roiRegions].sort((a, b) => a.index - b.index),
@@ -797,6 +828,38 @@ export function ProductProfileForm({
     setDraft((current) => ({ ...current, [field]: Number(value) }));
   }
 
+  function handleBrowseModelFile() {
+    modelFileInputRef.current?.click();
+  }
+
+  function handleModelFileChange(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+
+    if (!file) {
+      return;
+    }
+
+    const nativePath = (file as File & { path?: string }).path?.trim();
+    const inputValue = event.target.value.trim();
+    const browserValue =
+      inputValue && !/fakepath/i.test(inputValue) ? inputValue : file.name;
+    const resolvedPath = nativePath || browserValue;
+
+    setDraft((current) => ({ ...current, modelPath: resolvedPath }));
+    toast.success(t("products.modelFileSelected"));
+
+    if (!nativePath) {
+      toast.warning(t("products.modelPathBrowserFallback"));
+    }
+
+    event.target.value = "";
+  }
+
+  function handleClearModelPath() {
+    setDraft((current) => ({ ...current, modelPath: "" }));
+    toast.success(t("products.modelFileCleared"));
+  }
+
   function updateCameraNumber(
     field: keyof ProductProfilePayload["camera"],
     value: string,
@@ -805,6 +868,56 @@ export function ProductProfileForm({
     setDraft((current) => ({
       ...current,
       camera: { ...current.camera, [field]: Number(value) },
+    }));
+  }
+
+  async function refreshCameraDevices(showToast = true) {
+    const accessToken = getAccessToken();
+
+    if (!accessToken) {
+      setCameraDeviceError(t("users.missingSession"));
+      return;
+    }
+
+    setLoadingCameraDevices(true);
+    setCameraDeviceError("");
+
+    try {
+      const response = await listCameraDevices(accessToken);
+      setCameraDevices(response.data);
+
+      if (showToast) {
+        toast.success(t("products.cameraDevicesLoaded"));
+      }
+    } catch (cause) {
+      const message =
+        cause instanceof ApiError
+          ? cause.message
+          : t("products.cameraDevicesLoadError");
+
+      setCameraDeviceError(message);
+
+      if (showToast) {
+        toast.error(message);
+      }
+    } finally {
+      setLoadingCameraDevices(false);
+    }
+  }
+
+  function selectCameraDevice(value: string) {
+    const selectedDevice = cameraDevices.find(
+      (device) => cameraDeviceValue(device) === value,
+    );
+    const deviceName = selectedDevice?.friendly_name ?? value;
+
+    setDraft((current) => ({
+      ...current,
+      camera: {
+        ...current.camera,
+        sourceType: "usb",
+        deviceName,
+      },
     }));
   }
 
@@ -1391,7 +1504,6 @@ export function ProductProfileForm({
             </p>
           </div>
           <div className="flex shrink-0 flex-col gap-2 sm:flex-row">
-            <UserVirtualKeyboardButton />
             <Button
               type="button"
               variant="outline"
@@ -1436,6 +1548,7 @@ export function ProductProfileForm({
             <TextField
               label={`${t("products.code")} *`}
               value={draft.code}
+              hint={t("products.codeHint")}
               onChange={(value) =>
                 setDraft((current) => ({ ...current, code: value }))
               }
@@ -1447,13 +1560,52 @@ export function ProductProfileForm({
                 setDraft((current) => ({ ...current, name: value }))
               }
             />
-            <TextField
-              label={t("products.modelPath")}
-              value={draft.modelPath ?? ""}
-              onChange={(value) =>
-                setDraft((current) => ({ ...current, modelPath: value }))
-              }
-            />
+            <div className="block text-sm font-medium text-slate-700 min-[900px]:col-span-2">
+              {t("products.modelPath")}
+              <div className="mt-2 flex flex-col gap-2 min-[900px]:flex-row">
+                <Input
+                  value={draft.modelPath ?? ""}
+                  inputMode="text"
+                  autoComplete="off"
+                  onChange={(event) =>
+                    setDraft((current) => ({
+                      ...current,
+                      modelPath: event.target.value,
+                    }))
+                  }
+                  className="h-12 flex-1 text-base"
+                />
+                <input
+                  ref={modelFileInputRef}
+                  type="file"
+                  accept=".onnx,.pt,.pth,.engine,.xml,.bin,.trt,.tflite,.pb"
+                  className="hidden"
+                  onChange={handleModelFileChange}
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="h-12 px-4 text-base"
+                  onClick={handleBrowseModelFile}
+                >
+                  {t("products.browseModel")}
+                </Button>
+                {draft.modelPath ? (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="h-12 px-4 text-base"
+                    onClick={handleClearModelPath}
+                  >
+                    <X className="h-4 w-4" aria-hidden="true" />
+                    {t("products.clearModelPath")}
+                  </Button>
+                ) : null}
+              </div>
+              <p className="mt-2 text-xs text-slate-500">
+                {t("products.modelPathHint")}
+              </p>
+            </div>
             <NumberField
               label={t("products.batchSize")}
               value={draft.batchSize}
@@ -1470,7 +1622,7 @@ export function ProductProfileForm({
           <div className="grid gap-3 min-[900px]:grid-cols-[minmax(220px,320px)_auto_1fr] min-[900px]:items-end">
             <label className="block text-sm font-medium text-slate-700">
               {t("products.templateProfile")}
-              <select
+              <Select
                 value={copySourceId}
                 onChange={(event) => setCopySourceId(event.target.value)}
                 className="mt-2 flex h-12 w-full border border-slate-300 bg-white px-4 py-2 text-base text-slate-950 outline-none transition focus:border-cyan-600 focus:ring-2 focus:ring-cyan-100"
@@ -1483,7 +1635,7 @@ export function ProductProfileForm({
                       {item.code}
                     </option>
                   ))}
-              </select>
+              </Select>
             </label>
             <Button
               type="button"
@@ -1549,11 +1701,115 @@ export function ProductProfileForm({
             </section>
 
             <section className="border border-slate-200 p-4">
-              <div className="mb-3 font-semibold">
-                {t("products.groupCamera")}
+              <div className="mb-3 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                <div>
+                  <div className="font-semibold">{t("products.groupCamera")}</div>
+                  <p className="mt-1 text-sm text-slate-500">
+                    {t("products.cameraSelectHint")}
+                  </p>
+                </div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => void refreshCameraDevices()}
+                  disabled={loadingCameraDevices}
+                  className="h-11 px-4"
+                >
+                  <RefreshCcw className="h-4 w-4" aria-hidden="true" />
+                  {loadingCameraDevices
+                    ? t("products.cameraDevicesLoading")
+                    : t("products.refreshCameraDevices")}
+                </Button>
               </div>
-              <div className="grid gap-4 min-[900px]:grid-cols-4">
-                <TextField
+              <div className="grid gap-4 min-[900px]:grid-cols-[minmax(180px,0.7fr)_minmax(260px,1.3fr)_repeat(2,minmax(0,1fr))]">
+                <label className="block text-sm font-medium text-slate-700">
+                  {t("products.sourceType")}
+                  <Select
+                    value={draft.camera.sourceType}
+                    onChange={(event) =>
+                      setDraft((current) => ({
+                        ...current,
+                        camera: {
+                          ...current.camera,
+                          sourceType: event.target.value,
+                        },
+                      }))
+                    }
+                    className="mt-2 flex h-12 w-full border border-slate-300 bg-white px-4 py-2 text-base text-slate-950 outline-none transition focus:border-cyan-600 focus:ring-2 focus:ring-cyan-100"
+                  >
+                    <option value="usb">{t("products.cameraSourceUsb")}</option>
+                    <option value="rtsp">{t("products.cameraSourceRtsp")}</option>
+                  </Select>
+                </label>
+                {draft.camera.sourceType === "usb" ? (
+                  <label className="block text-sm font-medium text-slate-700">
+                    {t("products.deviceName")}
+                    <Select
+                      value={draft.camera.deviceName ?? ""}
+                      onChange={(event) => selectCameraDevice(event.target.value)}
+                      className="mt-2 flex h-12 w-full border border-slate-300 bg-white px-4 py-2 text-base text-slate-950 outline-none transition focus:border-cyan-600 focus:ring-2 focus:ring-cyan-100"
+                    >
+                      <option value="">
+                        {loadingCameraDevices
+                          ? t("products.cameraDevicesLoading")
+                          : t("products.selectCameraDevice")}
+                      </option>
+                      {cameraDevices.map((device) => (
+                        <option
+                          key={`${device.index}-${device.serial_number ?? device.friendly_name}`}
+                          value={cameraDeviceValue(device)}
+                        >
+                          #{device.index} {device.friendly_name}
+                          {device.serial_number ? ` · ${device.serial_number}` : ""}
+                        </option>
+                      ))}
+                      {draft.camera.deviceName &&
+                      !cameraDevices.some(
+                        (device) =>
+                          cameraDeviceValue(device) === draft.camera.deviceName,
+                      ) ? (
+                        <option value={draft.camera.deviceName}>
+                          {draft.camera.deviceName}
+                        </option>
+                      ) : null}
+                    </Select>
+                    {cameraDeviceError ? (
+                      <div className="mt-2 border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                        {t("products.cameraManualFallback")}
+                      </div>
+                    ) : null}
+                  </label>
+                ) : (
+                  <TextField
+                    label={t("products.rtspUrl")}
+                    value={draft.camera.rtspUrl ?? ""}
+                    onChange={(value) =>
+                      setDraft((current) => ({
+                        ...current,
+                        camera: { ...current.camera, rtspUrl: value },
+                      }))
+                    }
+                  />
+                )}
+                {draft.camera.sourceType === "usb" && cameraDeviceError ? (
+                  <TextField
+                    label={t("products.manualDeviceName")}
+                    value={draft.camera.deviceName ?? ""}
+                    onChange={(value) =>
+                      setDraft((current) => ({
+                        ...current,
+                        camera: { ...current.camera, deviceName: value },
+                      }))
+                    }
+                  />
+                ) : null}
+                {draft.camera.sourceType !== "usb" ? null : (
+                  <div className="hidden min-[900px]:block" />
+                )}
+                {/* Preserve direct source editing for unsupported future camera types. */}
+                {draft.camera.sourceType !== "usb" &&
+                draft.camera.sourceType !== "rtsp" ? (
+                  <TextField
                   label={t("products.sourceType")}
                   value={draft.camera.sourceType}
                   onChange={(value) =>
@@ -1562,17 +1818,8 @@ export function ProductProfileForm({
                       camera: { ...current.camera, sourceType: value },
                     }))
                   }
-                />
-                <TextField
-                  label={t("products.deviceName")}
-                  value={draft.camera.deviceName ?? ""}
-                  onChange={(value) =>
-                    setDraft((current) => ({
-                      ...current,
-                      camera: { ...current.camera, deviceName: value },
-                    }))
-                  }
-                />
+                  />
+                ) : null}
                 <NumberField
                   label={t("products.cameraExposure")}
                   value={draft.camera.exposure}
@@ -1683,13 +1930,22 @@ export function ProductProfileForm({
               <div
                 ref={previewRef}
                 tabIndex={0}
-                className="relative aspect-[3/1] w-full touch-none overflow-hidden border border-slate-700 bg-black bg-[url('/preview-background.png')] bg-cover bg-center outline-none focus:ring-2 focus:ring-cyan-400"
+                className="relative aspect-[3/1] w-full touch-none overflow-hidden border border-slate-700 bg-black outline-none focus:ring-2 focus:ring-cyan-400"
                 onPointerDown={handlePreviewPointerDown}
                 onPointerMove={handlePreviewPointerMove}
                 onPointerUp={finishDrawingRegion}
                 onPointerLeave={finishDrawingRegion}
                 onKeyDown={handlePreviewKeyDown}
               >
+                <div className="pointer-events-none absolute inset-0 opacity-95">
+                  <CameraPreviewImage
+                    imageSource={livePreviewImageSrc}
+                    zoomFactor={draft.camera.zoomFactor}
+                    previewPanX={draft.camera.previewPanX}
+                    previewPanY={draft.camera.previewPanY}
+                    previewRotation={draft.camera.previewRotation}
+                  />
+                </div>
                 <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(to_right,rgba(255,255,255,.08)_1px,transparent_1px),linear-gradient(to_bottom,rgba(255,255,255,.08)_1px,transparent_1px)] bg-[size:10%_20%]" />
                 <div className="pointer-events-none absolute left-3 top-3 border border-white/20 bg-black/70 px-2 py-1 text-xs text-white">
                   3000 x 1000
@@ -1950,7 +2206,7 @@ export function ProductProfileForm({
               </div>
               <label className="block max-w-xs text-sm font-medium text-slate-700">
                 {t("products.status")}
-                <select
+                <Select
                   value={draft.active ? "active" : "inactive"}
                   onChange={(event) =>
                     setDraft((current) => ({
@@ -1962,7 +2218,7 @@ export function ProductProfileForm({
                 >
                   <option value="active">{t("products.active")}</option>
                   <option value="inactive">{t("products.inactive")}</option>
-                </select>
+                </Select>
               </label>
             </section>
           </div>
@@ -1976,13 +2232,17 @@ function TextField({
   label,
   value,
   className,
+  hint,
   inputMode = "text",
+  placeholder,
   onChange,
 }: {
   label: string;
   value: string;
   className?: string;
+  hint?: string;
   inputMode?: ComponentProps<"input">["inputMode"];
+  placeholder?: string;
   onChange: (value: string) => void;
 }) {
   return (
@@ -1992,9 +2252,11 @@ function TextField({
         value={value}
         inputMode={inputMode}
         autoComplete="off"
+        placeholder={placeholder}
         onChange={(event) => onChange(event.target.value)}
         className="mt-2 h-12 text-base"
       />
+      {hint ? <p className="mt-2 text-xs text-slate-500">{hint}</p> : null}
     </label>
   );
 }

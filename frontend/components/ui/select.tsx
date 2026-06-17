@@ -1,16 +1,63 @@
-import * as React from "react";
-import { cn } from "@/lib/utils";
+"use client";
 
-function Select({ className, ...props }: React.ComponentProps<"select">) {
+import * as React from "react";
+import { ListboxSelect } from "@/components/ui/listbox-select";
+
+type SelectProps = Omit<
+  React.ComponentProps<"select">,
+  "children" | "onChange"
+> & {
+  children: React.ReactNode;
+  onChange?: (event: { target: { value: string } }) => void;
+};
+
+export function Select({
+  children,
+  className,
+  disabled,
+  id,
+  onChange,
+  title,
+  value,
+  ...props
+}: SelectProps) {
+  const options = React.Children.toArray(children).flatMap((child) => {
+    if (!React.isValidElement<React.ComponentProps<"option">>(child)) {
+      return [];
+    }
+
+    if (child.type !== "option") {
+      return [];
+    }
+
+    const optionValue =
+      typeof child.props.value === "string"
+        ? child.props.value
+        : String(child.props.value ?? "");
+    const label = React.Children.toArray(child.props.children).join("");
+
+    return [
+      {
+        value: optionValue,
+        label,
+      },
+    ];
+  });
+
   return (
-    <select
-      className={cn(
-        "flex h-10 w-full cursor-pointer border border-slate-300 bg-white px-3 py-2 text-sm text-slate-950 outline-none transition focus:border-cyan-600 focus:ring-2 focus:ring-cyan-100 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:opacity-70",
-        className,
-      )}
-      {...props}
+    <ListboxSelect
+      id={id}
+      value={typeof value === "string" ? value : String(value ?? "")}
+      disabled={disabled}
+      title={title}
+      ariaLabel={
+        typeof props["aria-label"] === "string" ? props["aria-label"] : undefined
+      }
+      ariaInvalid={Boolean(props["aria-invalid"])}
+      triggerClassName={className}
+      options={options}
+      onChange={(nextValue) => onChange?.({ target: { value: nextValue } })}
+      emptyLabel={options[0]?.label}
     />
   );
 }
-
-export { Select };

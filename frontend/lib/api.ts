@@ -88,6 +88,39 @@ export type CameraProfile = {
   offsetX: number;
   offsetY: number;
   zoomFactor: number;
+  previewPanX: number;
+  previewPanY: number;
+  previewRotation: number;
+};
+
+export type CameraRuntimeStatus = {
+  success: boolean;
+  data: {
+    connected?: boolean;
+    is_grabbing?: boolean;
+    device_name?: string | null;
+    image_width?: number | null;
+    image_height?: number | null;
+    [key: string]: unknown;
+  };
+};
+
+export type CameraDevice = {
+  index: number;
+  friendly_name: string;
+  model_name?: string | null;
+  serial_number?: string | null;
+  device_class?: string | null;
+};
+
+export type CameraFrame = {
+  success: boolean;
+  width: number;
+  height: number;
+  channels: number;
+  capture_time_ms: number;
+  image_base64: string;
+  encode_format: string;
 };
 
 export type RoiRegion = {
@@ -114,6 +147,57 @@ export type ProductProfile = {
   roiRegions: RoiRegion[];
   createdAt: string;
   updatedAt: string;
+};
+
+export type HealthResponse = {
+  data: {
+    status: string;
+    service: string;
+    timestamp: string;
+  };
+};
+
+export type SystemLicenseState = {
+  status: "licensed" | "unlicensed" | "unknown";
+  licensed: boolean | null;
+  donglePresent: boolean | null;
+  lastCheckedAt: string | null;
+  code: string | null;
+  message: string | null;
+};
+
+export type InspectionSlotState = {
+  slotIndex: number | null;
+  slotLabel: string | null;
+  expectedText: string | null;
+  rawText: string | null;
+  result: "OK" | "NG" | "UNKNOWN";
+  errorMessage: string | null;
+};
+
+export type CurrentInspectionState = {
+  jobId: string;
+  status: string;
+  productId: string;
+  productCode: string;
+  currentProductCode?: string;
+  operatorId: string;
+  startedAt: string | null;
+  stoppedAt: string | null;
+  batchSize: number;
+  quantity: number;
+  count: number;
+  batch: number;
+  okCount: number;
+  ngCount: number;
+  latestScanAt: string | null;
+  lastResult: {
+    result: "OK" | "NG" | "UNKNOWN";
+    text: string | null;
+    confidence: number | null;
+    capturedAt: string;
+  } | null;
+  slots: InspectionSlotState[];
 };
 
 export type ProductProfilePayload = {
@@ -206,6 +290,121 @@ export async function getCurrentSession(accessToken: string) {
   }
 
   return (await response.json()) as MeResponse;
+}
+
+export async function getApiHealth() {
+  const response = await fetch(`${API_BASE_URL}/health`);
+
+  if (!response.ok) {
+    throw new ApiError(await parseError(response), response.status);
+  }
+
+  return (await response.json()) as HealthResponse;
+}
+
+export async function getCurrentInspection(accessToken: string) {
+  const response = await fetch(`${API_BASE_URL}/inspections/current`, {
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+    },
+  });
+
+  if (!response.ok) {
+    throw new ApiError(await parseError(response), response.status);
+  }
+
+  return (await response.json()) as { data: CurrentInspectionState | null };
+}
+
+export async function getSystemLicense(accessToken: string) {
+  const response = await fetch(`${API_BASE_URL}/system/license`, {
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+    },
+  });
+
+  if (!response.ok) {
+    throw new ApiError(await parseError(response), response.status);
+  }
+
+  return (await response.json()) as { data: SystemLicenseState };
+}
+
+export async function getCameraStatus(accessToken: string) {
+  const response = await fetch(`${API_BASE_URL}/camera/status`, {
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+    },
+  });
+
+  if (!response.ok) {
+    throw new ApiError(await parseError(response), response.status);
+  }
+
+  return (await response.json()) as CameraRuntimeStatus;
+}
+
+export async function listCameraDevices(accessToken: string) {
+  const response = await fetch(`${API_BASE_URL}/camera/devices`, {
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+    },
+  });
+
+  if (!response.ok) {
+    throw new ApiError(await parseError(response), response.status);
+  }
+
+  return (await response.json()) as { data: CameraDevice[] };
+}
+
+export async function connectCamera(
+  accessToken: string,
+  camera: CameraProfile,
+) {
+  const response = await fetch(`${API_BASE_URL}/camera/connect`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(camera),
+  });
+
+  if (!response.ok) {
+    throw new ApiError(await parseError(response), response.status);
+  }
+
+  return (await response.json()) as CameraRuntimeStatus;
+}
+
+export async function grabCameraFrame(accessToken: string) {
+  const response = await fetch(`${API_BASE_URL}/camera/grab`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ encodeFormat: ".jpg", jpegQuality: 90 }),
+  });
+
+  if (!response.ok) {
+    throw new ApiError(await parseError(response), response.status);
+  }
+
+  return (await response.json()) as CameraFrame;
+}
+
+export function getCameraStreamUrl(
+  accessToken: string,
+  options: { fps?: number; jpegQuality?: number } = {},
+) {
+  const url = new URL(`${API_BASE_URL}/camera/stream`);
+  url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
+  url.searchParams.set("token", accessToken);
+  url.searchParams.set("fps", String(options.fps ?? 8));
+  url.searchParams.set("jpegQuality", String(options.jpegQuality ?? 80));
+  return url.toString();
 }
 
 export async function listRoles(accessToken: string) {

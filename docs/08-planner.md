@@ -21,7 +21,7 @@ Build order:
 
 ## Current Status Snapshot
 
-Last updated: 2026-06-10
+Last updated: 2026-06-16
 
 Completed:
 
@@ -38,6 +38,9 @@ Completed:
 - AppShell fixed chrome behavior is implemented so only page content scrolls.
 - Product profile foundation is implemented with product code, model path, per-product camera config, per-product ROI regions, and template apply flow.
 - Product profile ROI editor now supports direct drawing, move/resize/rotate, undo/redo, copy/paste, multi-select, assist overlays, and overlap validation.
+- Product profile `batchSize` is persisted and can be updated from the operator runtime dashboard.
+- Operator runtime dashboard foundation exists on `/dashboard` with product selector, ROI preview, API/demo product loading, and OK/NG/batch counters.
+- Backend inspection foundation now includes Device Tool client wiring plus `/api/inspections/start`, `/api/inspections/current`, and `/api/inspections/:jobId/stop` with per-ROI inspection logs.
 
 In progress:
 
@@ -45,10 +48,14 @@ In progress:
 - Role-based layout verification: `dev/admin` sidebar, `engineer/operator` navbar.
 - Product module persisted save/load verification and later Camera/ROI integration with product profiles.
 - Touch-first hardening for the single-screen factory touchscreen, including virtual-keyboard-friendly setup forms.
+- Operator runtime foundation needs to be moved from demo-assisted UI behavior to the new inspection backend flow.
+- Dedicated `camera`, `roi`, `history`, and `reports` routes/screens are still missing behind existing menu permissions.
 
 Not started:
 
-- Operational modules.
+- Dedicated camera config screen/module.
+- Dedicated ROI config screen/module.
+- Dedicated history/reports screens and query flows.
 - Electron shell.
 - Dongle boot gate.
 - AI integration.
@@ -187,8 +194,8 @@ Tasks:
 
 - product list `[foundation done]`
 - create/edit product `[foundation done]`
-- product thresholds
-- product batch size per profile
+- product thresholds `[done]`
+- product batch size per profile `[done]`
 - product model path in basic profile fields `[done]`
 - product code profile with camera and ROI data `[foundation done]`
 - apply one product profile as template to all or selected product codes `[foundation done]`
@@ -197,10 +204,10 @@ Tasks:
 - ROI editor undo/redo `[done]`
 - ROI editor copy/paste and multi-select `[done]`
 - overlap prevention before save `[done]`
-- camera config form
-- image size and offset config
-- ROI config screen
-- save and restore ROI config
+- camera config form `[foundation done inside product profile]`
+- image size and offset config `[foundation done inside product profile]`
+- ROI config screen `[not started as a dedicated page]`
+- save and restore ROI config `[done inside product profiles]`
 
 Done when:
 
@@ -214,14 +221,14 @@ Goal: build the operator-facing runtime flow.
 
 Tasks:
 
-- product selector
+- product selector `[ui foundation done]`
 - start inspection
 - stop inspection
-- current status panel
-- OK/NG counters
+- current status panel `[ui foundation done]`
+- OK/NG counters `[ui foundation done]`
 - latest OCR result panel
 - exception checkbox/action
-- ROI adjustment if permission allows
+- ROI adjustment if permission allows `[preview foundation exists]`
 - history preview
 
 Done when:
@@ -352,7 +359,7 @@ Reason:
 The next practical milestone is:
 
 ```text
-Responsive admin shell hardening -> Product module -> Camera/ROI config modules
+Responsive admin shell hardening -> Product verification -> Dedicated Camera/ROI/History/Reports screens -> Real runtime flow
 ```
 
 Reason:

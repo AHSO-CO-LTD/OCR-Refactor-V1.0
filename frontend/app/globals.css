@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@import "react-simple-keyboard/build/css/index.css";
 
 :root {
   --background: #f1f5f9;
@@ -162,36 +163,12 @@ input[type="radio"]:not(:disabled) {
   }
 }
 
-@keyframes operator-roi-cell-flash {
-  0% {
-    background: rgba(255, 220, 0, 0.95);
-    border-color: rgba(255, 221, 87, 0.92);
-    box-shadow: inset 0 0 10px rgba(255, 248, 180, 0.9);
-    opacity: 1;
-  }
-  35% {
-    background: rgba(255, 200, 0, 0.6);
-    border-color: rgba(255, 210, 77, 0.7);
-  }
-  70% {
-    background: rgba(255, 190, 0, 0.22);
-    border-color: rgba(255, 214, 10, 0.26);
-    box-shadow: none;
-  }
-  100% {
-    background: transparent;
-    border-color: rgba(255, 214, 10, 0.12);
-    box-shadow: none;
-    opacity: 0.45;
-  }
-}
-
 .operator-roi-scan-surface {
   position: absolute;
   inset: 0;
   background:
-    radial-gradient(circle at 50% 50%, rgba(0, 255, 231, 0.08), transparent 70%),
-    rgba(0, 255, 231, 0.04);
+    radial-gradient(circle at 50% 50%, rgba(0, 255, 231, 0.06), transparent 72%),
+    rgba(0, 255, 231, 0.03);
 }
 
 .operator-roi-scan-frame {
@@ -233,21 +210,49 @@ input[type="radio"]:not(:disabled) {
   border-width: 0 2px 2px 0;
 }
 
-.operator-roi-scan-grid-container {
-  position: absolute;
-  inset: 0;
-  display: grid;
-  grid-template-columns: repeat(8, 1fr);
-  grid-template-rows: repeat(8, 1fr);
-  gap: 1px;
-  padding: 4px;
+.virtual-text-keyboard .simple-keyboard {
+  background: transparent;
 }
 
-.operator-roi-scan-cell {
-  border: 1px solid rgba(0, 255, 231, 0.06);
-  background: transparent;
-  opacity: 0.4;
-  animation: operator-roi-cell-flash 2.6s linear infinite;
+.virtual-text-keyboard .hg-rows {
+  display: grid;
+  gap: 8px;
+}
+
+.virtual-text-keyboard .hg-row {
+  display: grid;
+  grid-template-columns: repeat(10, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.virtual-text-keyboard .hg-button {
+  height: 48px;
+  border: 1px solid #cbd5e1;
+  border-radius: 0;
+  box-shadow: none;
+  background: #ffffff;
+  color: #0f172a;
+  font-family: inherit;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.virtual-text-keyboard .hg-button:hover {
+  background: #f8fafc;
+}
+
+.virtual-text-keyboard .hg-button.hg-functionBtn {
+  background: #f8fafc;
+  font-size: 14px;
+}
+
+.virtual-text-keyboard .hg-button.hg-activeButton {
+  background: #dbeafe;
+  border-color: #38bdf8;
+}
+
+.virtual-text-keyboard .hg-button span {
+  pointer-events: none;
 }
 
 .operator-roi-scan-glow {
@@ -255,8 +260,14 @@ input[type="radio"]:not(:disabled) {
   left: 0;
   right: 0;
   top: 0;
-  height: 56px;
-  background: linear-gradient(to bottom, rgba(0, 255, 231, 0.12), transparent);
+  height: 88px;
+  background: linear-gradient(
+    to bottom,
+    rgba(0, 255, 231, 0.32),
+    rgba(0, 255, 231, 0.1),
+    transparent
+  );
+  filter: blur(1px);
   animation: operator-roi-scan-glow-move 2.6s linear infinite;
 }
 
@@ -265,18 +276,21 @@ input[type="radio"]:not(:disabled) {
   left: 0;
   right: 0;
   top: 0;
-  height: 2px;
+  height: 4px;
   background: linear-gradient(
     90deg,
     transparent,
-    rgba(0, 255, 231, 0.1),
+    rgba(0, 255, 231, 0.16),
     rgba(0, 255, 231, 1),
-    rgba(0, 255, 231, 0.1),
+    rgba(255, 255, 255, 0.94),
+    rgba(0, 255, 231, 1),
+    rgba(0, 255, 231, 0.16),
     transparent
   );
   box-shadow:
-    0 0 12px 3px rgba(0, 255, 231, 0.4),
-    0 0 2px rgba(255, 255, 255, 0.65);
+    0 0 18px 4px rgba(0, 255, 231, 0.55),
+    0 0 28px 8px rgba(0, 255, 231, 0.22),
+    0 0 4px rgba(255, 255, 255, 0.9);
   z-index: 2;
   animation: operator-roi-scan-line-move 2.6s linear infinite;
 }
