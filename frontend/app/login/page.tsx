@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { LanguageToggle } from "@/components/language-toggle";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
+import { useVirtualKeyboard } from "@/components/ui/virtual-keyboard";
 import { ApiError, getCurrentSession, login } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
 import {
@@ -16,6 +17,7 @@ import {
 export default function LoginPage() {
   const router = useRouter();
   const { apiError, t } = useI18n();
+  const { isKeyboardOpen } = useVirtualKeyboard();
   const [username, setUsername] = useState("admin");
   const [password, setPassword] = useState("admin123");
   const [error, setError] = useState("");
@@ -59,8 +61,18 @@ export default function LoginPage() {
   }
 
   return (
-    <main className="flex min-h-[100dvh] items-center justify-center bg-slate-100 p-4 text-[var(--foreground)] sm:p-6">
-      <section className="w-full max-w-md">
+    <main
+      className={[
+        "flex min-h-[100dvh] justify-center bg-slate-100 p-4 text-[var(--foreground)] transition-all duration-200 sm:p-6",
+        isKeyboardOpen ? "items-start pt-6 sm:pt-8" : "items-center",
+      ].join(" ")}
+    >
+      <section
+        className={[
+          "w-full max-w-md transition-transform duration-200",
+          isKeyboardOpen ? "translate-y-0" : "",
+        ].join(" ")}
+      >
         <div className="mb-6 flex flex-col items-center text-center">
           <div className="text-sm font-semibold uppercase tracking-[0.18em] text-cyan-700">
             {t("app.brand")}

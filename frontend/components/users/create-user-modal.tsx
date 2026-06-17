@@ -1,7 +1,6 @@
 "use client";
 
 import { CreateUserForm } from "@/components/users/create-user-form";
-import { UserVirtualKeyboardButton } from "@/components/users/user-virtual-keyboard-button";
 import type { AssignableRole, CreateUserPayload } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
 
@@ -49,7 +48,6 @@ export function CreateUserModal({
                 {t("users.createHint")}
               </p>
             </div>
-            <UserVirtualKeyboardButton />
           </div>
         </div>
         <CreateUserForm

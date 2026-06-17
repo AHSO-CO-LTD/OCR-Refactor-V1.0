@@ -3,7 +3,6 @@
 import { useState } from "react";
 import { toast } from "sonner";
 import { Save } from "lucide-react";
-import { UserVirtualKeyboardButton } from "@/components/users/user-virtual-keyboard-button";
 import { Button } from "@/components/ui/button";
 import { ConfirmModal } from "@/components/ui/confirm-modal";
 import { Input } from "@/components/ui/input";
@@ -120,7 +119,6 @@ export function EditUserModal({
                   {user.username} / {t(`role.${user.role}`)}
                 </p>
               </div>
-              <UserVirtualKeyboardButton />
             </div>
           </div>
 

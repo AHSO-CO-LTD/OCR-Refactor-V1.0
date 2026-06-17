@@ -48,11 +48,13 @@ Backend:
 - Backend protects `dev` and `admin` role permission management from normal admin users.
 - Backend protects the system from deleting, deactivating, or demoting the last active admin account.
 - Swagger API documentation is implemented at `/api/docs`.
+- Backend inspection foundation now includes a Device Tool client plus `/api/inspections/start`, `/api/inspections/current`, and `/api/inspections/:jobId/stop` with per-ROI inspection logs.
 
 Frontend:
 
 - Login exists.
 - Dashboard exists.
+- Dashboard currently renders an operator runtime foundation with product selector, API/demo product loading, persisted batch-size save, ROI preview, and OK/NG/batch counters.
 - Role permission screen exists.
 - User list screen exists.
 - User create/edit/delete UI exists.
@@ -78,6 +80,7 @@ Frontend:
 - Error/not-found screens exist with retry/home/report actions and language-aware copy.
 - AppShell uses fixed application chrome: sidebar/header/navbar do not scroll with page content.
 - Responsive behavior is being standardized around the 1280x1080 factory-machine viewport, but still needs a final pass across existing screens.
+- Dedicated `camera`, `roi`, `history`, and `reports` pages are not created yet even though their menu permissions already exist.
 
 Electron/packaging:
 
@@ -94,8 +97,8 @@ Finish frontend hardening for the first operational module:
 1. Complete final responsive verification for dashboard, roles, users, and products at 1280x1080.
 2. Re-check smaller/larger viewports and remove any remaining page-level horizontal overflow.
 3. Verify product profile ROI editor behavior with real backend restart and persisted save/load flow.
-4. Start the first dedicated Camera/ROI operational screens on top of the product profile foundation.
-5. Continue toward runtime inspection flow after product/setup behavior is stable.
+4. Create the first dedicated Camera/ROI screens and remove the current menu-to-missing-route gap for future operational modules.
+5. Move the dashboard runtime foundation from demo-assisted UI behavior toward the new inspection backend flow after product/setup behavior is stable.
 
 ## Non-Negotiable Rules
 

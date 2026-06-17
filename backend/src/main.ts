@@ -1,7 +1,9 @@
 import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
+import type { Server } from 'node:http';
 import { AppModule } from './app.module';
+import { CameraStreamGateway } from './camera/camera-stream.gateway';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
@@ -28,6 +30,7 @@ async function bootstrap() {
 
   const port = process.env.BACKEND_PORT ?? 4000;
   await app.listen(port);
+  app.get(CameraStreamGateway).attach(app.getHttpServer() as Server);
 }
 bootstrap().catch((error) => {
   console.error('Failed to start API service', error);
