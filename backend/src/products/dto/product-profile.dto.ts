@@ -60,6 +60,24 @@ export class CameraProfileDto {
   @Min(0)
   @Max(10)
   zoomFactor!: number;
+
+  @ApiProperty({ example: 0 })
+  @IsNumber()
+  @Min(-1)
+  @Max(1)
+  previewPanX!: number;
+
+  @ApiProperty({ example: 0 })
+  @IsNumber()
+  @Min(-1)
+  @Max(1)
+  previewPanY!: number;
+
+  @ApiProperty({ example: 0 })
+  @IsNumber()
+  @Min(-360)
+  @Max(360)
+  previewRotation!: number;
 }
 
 export class RoiRegionDto {

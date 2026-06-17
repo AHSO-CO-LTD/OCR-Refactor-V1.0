@@ -23,6 +23,7 @@ type AppShellProps = {
 
 const menuItems = [
   { labelKey: "nav.dashboard", href: "/dashboard", permission: null },
+  { labelKey: "nav.line", href: "/dashboard/line", permission: null },
   { labelKey: "nav.users", href: "/dashboard/users", permission: "user.manage" },
   { labelKey: "nav.roles", href: "/dashboard/roles", permission: "role.manage" },
   {
@@ -40,7 +41,7 @@ const menuItems = [
   permission: string | null;
 }>;
 
-export function AppShell({ children, titleKey, descriptionKey }: AppShellProps) {
+export function AppShell({ children }: AppShellProps) {
   const router = useRouter();
   const pathname = usePathname();
   const { t } = useI18n();
@@ -157,72 +158,48 @@ export function AppShell({ children, titleKey, descriptionKey }: AppShellProps) 
           </div>
         </header>
 
-      {usesSidebar ? (
-        <div className="min-h-0 min-w-0 flex-1 overflow-hidden lg:grid lg:grid-cols-[220px_minmax(0,1fr)] xl:grid-cols-[240px_minmax(0,1fr)]">
-          <div className="shrink-0 overflow-x-auto border-b border-slate-200 bg-white px-4 py-3 lg:hidden">
-            <nav className="flex min-w-max items-center gap-2">
-              {visibleMenuItems.map((item) => {
-                const active = pathname === item.href;
+        {usesSidebar ? (
+          <div className="min-h-0 min-w-0 flex-1 overflow-hidden lg:grid lg:grid-cols-[220px_minmax(0,1fr)] xl:grid-cols-[240px_minmax(0,1fr)]">
+            <div className="shrink-0 overflow-x-auto border-b border-slate-200 bg-white px-4 py-3 lg:hidden">
+              <nav className="flex min-w-max items-center gap-2">
+                {visibleMenuItems.map((item) => {
+                  const active = pathname === item.href;
 
-                return (
-                  <Link
-                    key={item.href}
-                    href={item.href}
-                    className={[
-                      "flex h-10 items-center border px-3 text-left text-sm font-medium transition",
-                      active
-                        ? "border-cyan-200 bg-cyan-50 text-cyan-900"
-                        : "border-transparent text-slate-700 hover:border-slate-200 hover:bg-slate-50",
-                    ].join(" ")}
-                  >
-                    {t(item.labelKey)}
-                  </Link>
-                );
-              })}
-            </nav>
+                  return (
+                    <Link
+                      key={item.href}
+                      href={item.href}
+                      className={[
+                        "flex h-10 items-center border px-3 text-left text-sm font-medium transition",
+                        active
+                          ? "border-cyan-200 bg-cyan-50 text-cyan-900"
+                          : "border-transparent text-slate-700 hover:border-slate-200 hover:bg-slate-50",
+                      ].join(" ")}
+                    >
+                      {t(item.labelKey)}
+                    </Link>
+                  );
+                })}
+              </nav>
+            </div>
+
+            <aside className="hidden min-h-0 overflow-y-auto border-r border-slate-200 bg-white p-4 lg:block">
+              {navLinks}
+            </aside>
+
+            <div className="flex min-h-0 min-w-0 flex-col">
+              <section className="min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto p-4 sm:p-5 lg:p-5 xl:p-6">
+                {children}
+              </section>
+            </div>
           </div>
-
-          <aside className="hidden min-h-0 overflow-y-auto border-r border-slate-200 bg-white p-4 lg:block">
-            {navLinks}
-          </aside>
-
-          <div className="flex min-h-0 min-w-0 flex-col">
-          <section className="min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto p-4 sm:p-5 lg:p-5 xl:p-6">
-              {titleKey || descriptionKey ? (
-                <div className="mb-5">
-                  {titleKey ? (
-                    <h1 className="text-2xl font-semibold">{t(titleKey)}</h1>
-                  ) : null}
-                  {descriptionKey ? (
-                    <p className="mt-1 max-w-3xl text-sm text-slate-500">
-                      {t(descriptionKey)}
-                    </p>
-                  ) : null}
-                </div>
-              ) : null}
+        ) : (
+          <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+            <section className="min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto p-4 sm:p-5 lg:p-6">
               {children}
             </section>
           </div>
-        </div>
-      ) : (
-        <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-          <section className="min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto p-4 sm:p-5 lg:p-6">
-            {titleKey || descriptionKey ? (
-              <div className="mb-5">
-                {titleKey ? (
-                  <h1 className="text-2xl font-semibold">{t(titleKey)}</h1>
-                ) : null}
-                {descriptionKey ? (
-                  <p className="mt-1 max-w-3xl text-sm text-slate-500">
-                    {t(descriptionKey)}
-                  </p>
-                ) : null}
-              </div>
-            ) : null}
-            {children}
-          </section>
-        </div>
-      )}
+        )}
       </div>
     </main>
   );

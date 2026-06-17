@@ -70,25 +70,27 @@ scripts/   future automation scripts
 - User form validation, required markers, advanced fields, and inline errors are implemented.
 - Sonner notifications are language-aware and visually vary by notification type.
 - 404/not-found/error screens exist with retry/home/report actions and language-aware copy.
+- Operator runtime dashboard foundation exists on `/dashboard` with product selector, API/demo product loading, persisted batch-size save, ROI preview, and OK/NG/batch counters.
 - Product profile backend/frontend foundation is implemented.
 - Product profiles store product code, model path, per-batch quantity, camera settings, and ROI regions per product.
 - Product profile template apply flow can copy camera/ROI from one product to all products or selected product codes.
 - Product profile form allows creating a profile without ROI, then filling ROI later or applying a template profile.
 - Product profile ROI editor currently supports draw/move/resize/rotate, multi-select with `Shift`, copy/paste, undo/redo, alignment/equal-spacing/straight-angle assists, overlap validation, and simulated camera preview background.
+- Backend inspection foundation now includes a Device Tool client plus `/api/inspections/start`, `/api/inspections/current`, and `/api/inspections/:jobId/stop` with per-ROI inspection logs.
 
 ### In Progress
 
-- AppShell has fixed application chrome so sidebar/header/navbar do not scroll with page content.
 - `dev/admin` use sidebar and `engineer/operator` use navbar.
 - Frontend responsive behavior is being standardized around the 1280x1080 factory-machine viewport while still supporting smaller and larger screens.
 - Existing dashboard, roles, users, and products screens need a final responsive verification pass at 1280x1080.
+- Operator runtime still mixes real product-profile data with demo fallback; backend Device Tool integration has started, but the frontend runtime is not wired to the new inspection endpoints yet.
 
 ### Not Started
 
-- Camera config module.
-- ROI config module.
-- Inspection runtime module.
-- Reports/history module.
+- Dedicated camera config screen/module.
+- Dedicated ROI config screen/module.
+- Dedicated history/reports screens and query flows.
+- Full end-to-end inspection runtime orchestration beyond the initial backend Device Tool integration.
 - Electron shell.
 - Dongle integration.
 - Python/FastAPI AI service.
@@ -111,6 +113,8 @@ Important files:
 - `backend/src/roles/roles.controller.ts`
 - `backend/src/roles/roles.service.ts`
 - `backend/src/permissions/permissions.controller.ts`
+- `backend/src/products/products.controller.ts`
+- `backend/src/products/products.service.ts`
 
 Important APIs:
 
@@ -128,6 +132,12 @@ GET  /api/users/assignable-roles
 GET  /api/roles
 PUT  /api/roles/:code/permissions
 GET  /api/permissions
+GET  /api/products
+POST /api/products
+PATCH /api/products/:id
+PATCH /api/products/:id/batch-size
+DELETE /api/products/:id
+POST /api/products/apply-profile
 ```
 
 Default seeded accounts:
@@ -148,6 +158,7 @@ Important files:
 - `frontend/app/dashboard/users/page.tsx`
 - `frontend/app/dashboard/products/page.tsx`
 - `frontend/components/app-shell.tsx`
+- `frontend/components/operator/operator-runtime-panel.tsx`
 - `frontend/components/products/product-profiles-panel.tsx`
 - `frontend/lib/api.ts`
 - `frontend/lib/session.ts`
@@ -166,6 +177,8 @@ Current UI behavior:
 - Header, sidebar, and navbar are fixed app chrome; only the active content pane should scroll.
 - User-facing pages, modals, empty/error states, validation messages, and notifications must use the current selected language.
 - Normal admin must only see/manage `engineer/operator` on role permission screens; `admin/dev` are protected for `dev`.
+- `/dashboard` currently hosts the operator runtime foundation instead of a separate dedicated runtime module route.
+- `camera`, `roi`, `history`, and `reports` are present in menu permissions but do not have their own pages yet.
 - Product preview uses `frontend/public/preview-background.png` to simulate camera output until camera API integration exists.
 - Product profile save must reject overlapping ROI regions.
 
@@ -263,4 +276,4 @@ Continue frontend hardening:
 2. Verify 1280x1080 does not produce page-level horizontal overflow.
 3. Restart backend/frontend dev servers when validating role/user permission changes, to avoid stale dev-server state.
 4. Finish Product module hardening and persisted product profile verification.
-5. Continue Camera/ROI operational screens on top of the selected product profile.
+5. Create dedicated Camera/ROI/History/Reports pages and move the dashboard runtime foundation toward a real inspection flow.

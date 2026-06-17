@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import { Toaster } from "@/components/ui/sonner";
+import { VirtualKeyboardProvider } from "@/components/ui/virtual-keyboard";
 import { I18nProvider } from "@/lib/i18n";
 import "./globals.css";
 
@@ -31,8 +32,10 @@ export default function RootLayout({
     >
       <body className="min-h-full flex flex-col">
         <I18nProvider>
-          {children}
-          <Toaster />
+          <VirtualKeyboardProvider>
+            {children}
+            <Toaster />
+          </VirtualKeyboardProvider>
         </I18nProvider>
       </body>
     </html>

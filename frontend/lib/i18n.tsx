@@ -20,6 +20,8 @@ const translations = {
     "app.loading": "Loading...",
     "common.clear": "Clear",
     "common.cancel": "Cancel",
+    "common.yes": "Yes",
+    "common.no": "No",
     "error.notFoundTitle": "Page not found",
     "error.notFoundDescription":
       "The screen you opened does not exist or is not available in this local station.",
@@ -70,6 +72,8 @@ const translations = {
     "apiError.ROI indexes must be unique": "ROI indexes must be unique.",
     "apiError.Target products are required": "Target products are required.",
     "apiError.No target products found": "No target products found.",
+    "apiError.No camera device is available":
+      "No camera device is currently available.",
     "apiError.Windows virtual keyboard is only available on Windows":
       "Windows virtual keyboard is only available on Windows.",
     "apiError.Windows virtual keyboard is not available on this machine":
@@ -90,6 +94,7 @@ const translations = {
     "login.security": "Security",
     "login.dongleGate": "Dongle Gate",
     "nav.dashboard": "Dashboard",
+    "nav.line": "Line",
     "nav.users": "Users",
     "nav.roles": "Roles",
     "nav.products": "Products",
@@ -107,7 +112,32 @@ const translations = {
     "dashboard.idle": "Idle",
     "dashboard.okNg": "OK / NG",
     "dashboard.license": "License",
+    "dashboard.licensed": "Licensed",
+    "dashboard.unlicensed": "Unlicensed",
+    "dashboard.donglePresent": "Dongle present",
+    "dashboard.dongleMissing": "Dongle missing",
+    "dashboard.lastChecked": "Last checked",
     "dashboard.pending": "Pending",
+    "dashboard.loadError": "Cannot load dashboard status.",
+    "dashboard.noData": "No data",
+    "dashboard.stationStatus": "Station status",
+    "dashboard.lineStatus": "Line status",
+    "dashboard.currentProduct": "Current product",
+    "dashboard.lastResult": "Last result",
+    "dashboard.lastScan": "Last scan",
+    "dashboard.quantity": "Quantity",
+    "dashboard.batchOverview": "Batch overview",
+    "dashboard.productProfiles": "Product profiles",
+    "dashboard.totalProfiles": "Total profiles",
+    "dashboard.latestSlots": "Latest slot results",
+    "dashboard.expectedText": "Expected text",
+    "dashboard.rawText": "Raw text",
+    "dashboard.noInspection": "No inspection is running right now.",
+    "dashboard.openLine": "Open line",
+    "dashboard.running": "Running",
+    "dashboard.completed": "Completed",
+    "dashboard.failed": "Failed",
+    "dashboard.stopped": "Stopped",
     "operator.title": "Line operation",
     "operator.description":
       "Choose today's product, preview the line, and run inspection.",
@@ -150,12 +180,98 @@ const translations = {
     "operator.livePreview": "Preview",
     "operator.currentProduct": "Product",
     "operator.referenceImage": "Reference image",
+    "operator.previewNoCamera":
+      "No live camera is connected. The preview is showing a black screen.",
+    "operator.previewCameraMismatch":
+      "The runtime is connected to a different camera than this product profile.",
+    "operator.previewRuntimeCamera": "Runtime camera",
     "operator.grab": "Grab",
     "operator.grabQueued": "Grab command queued for the next camera API.",
     "operator.triggerOk": "Trigger OK",
     "operator.triggerNg": "Trigger NG",
     "operator.resetCounter": "Reset counter",
     "operator.resetDone": "Counter reset.",
+    "camera.title": "Camera",
+    "camera.description": "Connect the configured line camera and verify live frames through the local backend.",
+    "camera.liveView": "Live view",
+    "camera.setup": "Camera setup",
+    "camera.productProfile": "Product profile",
+    "camera.connect": "Connect camera",
+    "camera.connecting": "Connecting...",
+    "camera.connected": "Connected",
+    "camera.disconnected": "Disconnected",
+    "camera.connectedWrongDevice": "Wrong camera connected",
+    "camera.devices": "Detected devices",
+    "camera.noDevices": "No devices detected.",
+    "camera.status": "Runtime status",
+    "camera.connectedState": "Connected",
+    "camera.grabbingState": "Grabbing",
+    "camera.grab": "Grab frame",
+    "camera.grabbing": "Grabbing...",
+    "camera.grabbed": "Frame grabbed.",
+    "camera.startLive": "Start live",
+    "camera.stopLive": "Stop live",
+    "camera.live": "Live",
+    "camera.streamStarted": "Camera live stream started.",
+    "camera.streamStopped": "Camera live stream stopped.",
+    "camera.streamError": "Camera live stream failed.",
+    "camera.settings": "Camera settings",
+    "camera.settingsHint": "Tune and save the selected product camera profile.",
+    "camera.saveSettings": "Save camera settings",
+    "camera.savingSettings": "Saving camera settings...",
+    "camera.settingsSaved": "Camera settings saved.",
+    "camera.settingsSaveError": "Cannot save camera settings.",
+    "camera.stopLiveBeforeEdit": "Stop live view before editing camera settings.",
+    "camera.zoomIn": "Zoom in",
+    "camera.zoomOut": "Zoom out",
+    "camera.rotateLeft": "Rotate left",
+    "camera.rotateRight": "Rotate right",
+    "camera.fitToFrame": "Fit to frame",
+    "camera.fitReady": "Image is fitted to the frame.",
+    "camera.dragToAdjust": "Drag the image to adjust position.",
+    "camera.edgeTouched": "Frame edge reached.",
+    "camera.moveUp": "Move up",
+    "camera.moveDown": "Move down",
+    "camera.moveLeft": "Move left",
+    "camera.moveRight": "Move right",
+    "camera.noFrame": "No frame captured yet.",
+    "camera.noFrameConnected":
+      "The camera is connected but no frame has been received yet. Press Grab frame or Start live.",
+    "camera.previewNoConnection":
+      "The selected product profile has not connected to a live camera yet.",
+    "camera.previewCameraMismatch":
+      "The runtime is connected to a different camera than the selected product profile.",
+    "camera.previewRuntimeCamera": "Runtime camera",
+    "camera.previewExpectedCamera": "Expected camera",
+    "camera.selectProductFirst": "Select a product profile first.",
+    "camera.loadError": "Cannot load camera context.",
+    "camera.connectError": "Cannot connect camera.",
+    "camera.grabError": "Cannot grab camera frame.",
+    "camera.genericError": "Camera action failed.",
+    "camera.errorDeviceNotFound":
+      'Camera "{{name}}" was not found in the detected device list.',
+    "camera.errorNoDeviceAvailable":
+      "No camera device is currently available.",
+    "camera.errorUnsupportedSource":
+      "Only USB / Basler camera profiles are currently supported.",
+    "camera.errorConnectUnavailable":
+      "Cannot reach the local camera service while connecting camera. Detail: {{detail}}",
+    "camera.errorGrabUnavailable":
+      "Cannot reach the local camera service while grabbing frame. Detail: {{detail}}",
+    "camera.errorStreamUnavailable":
+      "Cannot reach the local camera service while starting live view. Detail: {{detail}}",
+    "camera.errorStatusUnavailable":
+      "Cannot reach the local camera service while checking camera status. Detail: {{detail}}",
+    "camera.errorDeviceToolUnavailable":
+      "The local camera service is unavailable. Detail: {{detail}}",
+    "camera.errorConnectDetail": "Cannot connect camera. Detail: {{detail}}",
+    "camera.errorGrabDetail":
+      "Cannot grab a frame from camera. Detail: {{detail}}",
+    "camera.errorStreamDetail":
+      "Cannot start camera live view. Detail: {{detail}}",
+    "camera.errorStatusDetail":
+      "Cannot get camera status. Detail: {{detail}}",
+    "camera.errorActionDetail": "Camera action failed. Detail: {{detail}}",
     "products.title": "Products",
     "products.description":
       "Manage product profiles with product code, camera settings, ROI points, and profile template apply tools.",
@@ -212,6 +328,8 @@ const translations = {
       "Create the first product profile to configure camera and ROI data.",
     "products.select": "Select",
     "products.code": "Product code",
+    "products.codeHint":
+      "This is the product code that the inspection flow needs to check.",
     "products.name": "Product name",
     "products.defaultNumber": "Default number",
     "products.batchSize": "Batch size",
@@ -219,6 +337,19 @@ const translations = {
     "products.thresholdAccept": "Accept threshold",
     "products.thresholdMns": "MNS threshold",
     "products.modelPath": "Model path",
+    "products.modelPathHint":
+      "Browse the model file used to process images for this product code. In a regular browser, you can still adjust the value manually after selecting a file.",
+    "products.browseModel": "Browse file",
+    "products.clearModelPath": "Clear",
+    "products.modelFileSelected": "Model file selected.",
+    "products.modelFileCleared": "Model path cleared.",
+    "products.modelPathBrowserFallback":
+      "This browser only returned the selected file name. If needed, you can still edit the model path manually.",
+    "products.previewNoCamera":
+      "No live camera is connected. The preview is showing a black screen.",
+    "products.previewCameraMismatch":
+      "The runtime is connected to a different camera than the device name in this form.",
+    "products.previewRuntimeCamera": "Runtime camera",
     "products.camera": "Camera",
     "products.roi": "ROI",
     "products.status": "Status",
@@ -227,6 +358,19 @@ const translations = {
     "products.inactive": "Inactive",
     "products.sourceType": "Source type",
     "products.deviceName": "Device name",
+    "products.manualDeviceName": "Manual device name",
+    "products.selectCameraDevice": "Select camera device",
+    "products.refreshCameraDevices": "Refresh cameras",
+    "products.cameraDevicesLoading": "Loading cameras...",
+    "products.cameraDevicesLoaded": "Camera list refreshed.",
+    "products.cameraDevicesLoadError": "Cannot load camera devices.",
+    "products.cameraManualFallback":
+      "Cannot load detected cameras. You can still enter the device name manually.",
+    "products.cameraSelectHint":
+      "Select a detected camera for this product profile. The backend will connect to the matching device when the line runs.",
+    "products.cameraSourceUsb": "USB / Basler",
+    "products.cameraSourceRtsp": "RTSP",
+    "products.rtspUrl": "RTSP URL",
     "products.cameraExposure": "Camera exposure",
     "products.zoomFactor": "Zoom factor",
     "products.imageWidth": "Image width",
@@ -364,6 +508,20 @@ const translations = {
     "users.virtualKeyboardOpening": "Opening keyboard...",
     "users.virtualKeyboardOpenSuccess": "Windows virtual keyboard opened.",
     "users.virtualKeyboardOpenError": "Cannot open Windows virtual keyboard.",
+    "vk.title": "On-screen keyboard",
+    "vk.target": "Target",
+    "vk.numeric": "123",
+    "vk.english": "EN",
+    "vk.vietnamese": "VI",
+    "vk.telex": "Telex",
+    "vk.vni": "VNI",
+    "vk.close": "Close",
+    "vk.empty": "No content yet",
+    "vk.space": "Space",
+    "vk.backspace": "Backspace",
+    "vk.enter": "Enter",
+    "vk.caps": "Caps",
+    "vk.lowercase": "abc",
     "role.dev": "Developer",
     "role.admin": "Admin",
     "role.engineer": "Engineer",
@@ -397,6 +555,8 @@ const translations = {
     "app.loading": "Đang tải...",
     "common.clear": "Xóa số",
     "common.cancel": "Hủy",
+    "common.yes": "Có",
+    "common.no": "Không",
     "error.notFoundTitle": "Không tìm thấy trang",
     "error.notFoundDescription":
       "Màn hình bạn mở không tồn tại hoặc chưa khả dụng trên trạm local này.",
@@ -449,6 +609,8 @@ const translations = {
     "apiError.Target products are required":
       "Vui lòng chọn sản phẩm đích.",
     "apiError.No target products found": "Không tìm thấy sản phẩm đích.",
+    "apiError.No camera device is available":
+      "Hiện không có camera nào sẵn sàng để kết nối.",
     "apiError.Windows virtual keyboard is only available on Windows":
       "Bàn phím ảo Windows chỉ khả dụng trên máy Windows.",
     "apiError.Windows virtual keyboard is not available on this machine":
@@ -469,6 +631,7 @@ const translations = {
     "login.security": "Bảo mật",
     "login.dongleGate": "Khóa dongle",
     "nav.dashboard": "Tổng quan",
+    "nav.line": "Line",
     "nav.users": "Người dùng",
     "nav.roles": "Vai trò",
     "nav.products": "Sản phẩm",
@@ -487,6 +650,26 @@ const translations = {
     "dashboard.okNg": "OK / NG",
     "dashboard.license": "Bản quyền",
     "dashboard.pending": "Chờ kiểm tra",
+    "dashboard.loadError": "Không thể tải trạng thái tổng quan.",
+    "dashboard.noData": "Chưa có dữ liệu",
+    "dashboard.stationStatus": "Trạng thái trạm",
+    "dashboard.lineStatus": "Trạng thái line",
+    "dashboard.currentProduct": "Sản phẩm hiện tại",
+    "dashboard.lastResult": "Kết quả gần nhất",
+    "dashboard.lastScan": "Lần quét gần nhất",
+    "dashboard.quantity": "Số lượng nhận diện",
+    "dashboard.batchOverview": "Tổng quan batch",
+    "dashboard.productProfiles": "Profile sản phẩm",
+    "dashboard.totalProfiles": "Tổng profile",
+    "dashboard.latestSlots": "Kết quả slot gần nhất",
+    "dashboard.expectedText": "Text kỳ vọng",
+    "dashboard.rawText": "Text OCR",
+    "dashboard.noInspection": "Hiện chưa có phiên kiểm tra nào đang chạy.",
+    "dashboard.openLine": "Mở line",
+    "dashboard.running": "Đang chạy",
+    "dashboard.completed": "Hoàn tất",
+    "dashboard.failed": "Lỗi",
+    "dashboard.stopped": "Đã dừng",
     "operator.title": "Vận hành line",
     "operator.description":
       "Chọn sản phẩm chạy trong ngày, xem preview line và bắt đầu kiểm tra.",
@@ -529,12 +712,100 @@ const translations = {
     "operator.livePreview": "Xem trước",
     "operator.currentProduct": "Sản phẩm",
     "operator.referenceImage": "Ảnh tham chiếu",
+    "operator.previewNoCamera":
+      "Chưa có camera live được kết nối. Khung preview đang hiển thị màn hình đen.",
+    "operator.previewCameraMismatch":
+      "Runtime đang kết nối sang một camera khác với camera của profile sản phẩm này.",
+    "operator.previewRuntimeCamera": "Camera runtime",
     "operator.grab": "Chụp ảnh",
     "operator.grabQueued": "Lệnh chụp ảnh đã sẵn sàng cho API camera sau này.",
     "operator.triggerOk": "Kích OK",
     "operator.triggerNg": "Kích NG",
     "operator.resetCounter": "Reset bộ đếm",
     "operator.resetDone": "Đã reset bộ đếm.",
+    "camera.title": "Camera",
+    "camera.description": "Kết nối camera line theo cấu hình product và kiểm tra ảnh live qua backend local.",
+    "camera.liveView": "Live view",
+    "camera.setup": "Thiết lập camera",
+    "camera.productProfile": "Profile sản phẩm",
+    "camera.connect": "Kết nối camera",
+    "camera.connecting": "Đang kết nối...",
+    "camera.connected": "Đã kết nối",
+    "camera.disconnected": "Chưa kết nối",
+    "camera.connectedWrongDevice": "Kết nối sai camera",
+    "camera.devices": "Thiết bị phát hiện",
+    "camera.noDevices": "Chưa phát hiện thiết bị.",
+    "camera.status": "Trạng thái runtime",
+    "camera.connectedState": "Kết nối",
+    "camera.grabbingState": "Đang lấy ảnh",
+    "camera.grab": "Chụp frame",
+    "camera.grabbing": "Đang chụp...",
+    "camera.grabbed": "Đã chụp frame.",
+    "camera.startLive": "Bật live",
+    "camera.stopLive": "Tắt live",
+    "camera.live": "Live",
+    "camera.streamStarted": "Đã bật live camera.",
+    "camera.streamStopped": "Đã tắt live camera.",
+    "camera.streamError": "Live camera thất bại.",
+    "camera.settings": "Thông số camera",
+    "camera.settingsHint": "Chỉnh và lưu cấu hình camera cho product đang chọn.",
+    "camera.saveSettings": "Lưu thông số camera",
+    "camera.savingSettings": "Đang lưu thông số camera...",
+    "camera.settingsSaved": "Đã lưu thông số camera.",
+    "camera.settingsSaveError": "Không thể lưu thông số camera.",
+    "camera.stopLiveBeforeEdit": "Tắt live view trước khi chỉnh thông số camera.",
+    "camera.zoomIn": "Phóng to",
+    "camera.zoomOut": "Thu nhỏ",
+    "camera.rotateLeft": "Xoay trái",
+    "camera.rotateRight": "Xoay phải",
+    "camera.fitToFrame": "Vừa khung",
+    "camera.fitReady": "Ảnh đã vừa với khung.",
+    "camera.dragToAdjust": "Kéo ảnh để chỉnh vị trí.",
+    "camera.edgeTouched": "Đã chạm khung.",
+    "camera.moveUp": "Dịch lên",
+    "camera.moveDown": "Dịch xuống",
+    "camera.moveLeft": "Dịch trái",
+    "camera.moveRight": "Dịch phải",
+    "camera.noFrame": "Chưa có frame.",
+    "camera.noFrameConnected":
+      "Camera đã kết nối nhưng chưa nhận được frame. Hãy bấm Chụp frame hoặc Bật live.",
+    "camera.previewNoConnection":
+      "Profile sản phẩm đang chọn vẫn chưa kết nối tới camera live.",
+    "camera.previewCameraMismatch":
+      "Runtime đang kết nối sang một camera khác với camera của profile đang chọn.",
+    "camera.previewRuntimeCamera": "Camera runtime",
+    "camera.previewExpectedCamera": "Camera cần dùng",
+    "camera.selectProductFirst": "Vui lòng chọn profile sản phẩm trước.",
+    "camera.loadError": "Không thể tải ngữ cảnh camera.",
+    "camera.connectError": "Không thể kết nối camera.",
+    "camera.grabError": "Không thể chụp frame camera.",
+    "camera.genericError": "Thao tác camera thất bại.",
+    "camera.errorDeviceNotFound":
+      'Không tìm thấy camera "{{name}}" trong danh sách thiết bị đã phát hiện.',
+    "camera.errorNoDeviceAvailable":
+      "Hiện không có camera nào sẵn sàng để kết nối.",
+    "camera.errorUnsupportedSource":
+      "Hiện tại chỉ hỗ trợ cấu hình camera USB / Basler.",
+    "camera.errorConnectUnavailable":
+      "Không thể kết nối tới dịch vụ camera nội bộ khi đang kết nối camera. Chi tiết: {{detail}}",
+    "camera.errorGrabUnavailable":
+      "Không thể kết nối tới dịch vụ camera nội bộ khi đang chụp frame. Chi tiết: {{detail}}",
+    "camera.errorStreamUnavailable":
+      "Không thể kết nối tới dịch vụ camera nội bộ khi đang bật live. Chi tiết: {{detail}}",
+    "camera.errorStatusUnavailable":
+      "Không thể kết nối tới dịch vụ camera nội bộ khi đang kiểm tra trạng thái camera. Chi tiết: {{detail}}",
+    "camera.errorDeviceToolUnavailable":
+      "Dịch vụ camera nội bộ hiện không khả dụng. Chi tiết: {{detail}}",
+    "camera.errorConnectDetail":
+      "Không thể kết nối camera. Chi tiết: {{detail}}",
+    "camera.errorGrabDetail":
+      "Không thể chụp frame từ camera. Chi tiết: {{detail}}",
+    "camera.errorStreamDetail":
+      "Không thể bật live camera. Chi tiết: {{detail}}",
+    "camera.errorStatusDetail":
+      "Không thể lấy trạng thái camera. Chi tiết: {{detail}}",
+    "camera.errorActionDetail":
+      "Thao tác camera thất bại. Chi tiết: {{detail}}",
     "products.title": "Sản phẩm",
     "products.description":
       "Quản lý profile sản phẩm gồm mã product, thông số camera, điểm ROI và công cụ áp profile mẫu.",
@@ -591,6 +862,7 @@ const translations = {
       "Tạo profile sản phẩm đầu tiên để cấu hình camera và ROI.",
     "products.select": "Chọn",
     "products.code": "Mã product",
+    "products.codeHint": "Đây là mã sản phẩm cần được kiểm tra trong quá trình inspect.",
     "products.name": "Tên sản phẩm",
     "products.defaultNumber": "Số mặc định",
     "products.batchSize": "Số lượng một batch",
@@ -598,6 +870,19 @@ const translations = {
     "products.thresholdAccept": "Ngưỡng Accept",
     "products.thresholdMns": "Ngưỡng MNS",
     "products.modelPath": "Đường dẫn model",
+    "products.modelPathHint":
+      "Chọn file model dùng để xử lý ảnh cho mã sản phẩm này. Nếu đang chạy trên trình duyệt thường, bạn vẫn có thể chỉnh tay giá trị sau khi browse file.",
+    "products.browseModel": "Browse file",
+    "products.clearModelPath": "Xóa",
+    "products.modelFileSelected": "Đã chọn file model.",
+    "products.modelFileCleared": "Đã xóa đường dẫn model.",
+    "products.modelPathBrowserFallback":
+      "Trình duyệt hiện chỉ trả về tên file đã chọn. Nếu cần, bạn vẫn có thể chỉnh tay đường dẫn model.",
+    "products.previewNoCamera":
+      "Chưa có camera live được kết nối. Khung preview đang hiển thị màn hình đen.",
+    "products.previewCameraMismatch":
+      "Runtime đang kết nối sang một camera khác với tên thiết bị đang chọn trong form này.",
+    "products.previewRuntimeCamera": "Camera runtime",
     "products.camera": "Camera",
     "products.roi": "ROI",
     "products.status": "Trạng thái",
@@ -772,6 +1057,44 @@ const translations = {
   },
 } as const;
 
+const translationOverrides: Record<Language, Record<string, string>> = {
+  en: {},
+  vi: {
+    "dashboard.licensed": "\u0110\u00e3 c\u00f3 b\u1ea3n quy\u1ec1n",
+    "dashboard.unlicensed": "Ch\u01b0a c\u00f3 b\u1ea3n quy\u1ec1n",
+    "dashboard.donglePresent": "\u0110\u00e3 c\u1eafm dongle",
+    "dashboard.dongleMissing": "Thi\u1ebfu dongle",
+    "dashboard.lastChecked": "L\u1ea7n ki\u1ec3m tra cu\u1ed1i",
+    "products.manualDeviceName": "T\u00ean thi\u1ebft b\u1ecb nh\u1eadp tay",
+    "products.selectCameraDevice": "Ch\u1ecdn camera",
+    "products.refreshCameraDevices": "L\u00e0m m\u1edbi camera",
+    "products.cameraDevicesLoading": "\u0110ang t\u1ea3i camera...",
+    "products.cameraDevicesLoaded": "\u0110\u00e3 l\u00e0m m\u1edbi danh s\u00e1ch camera.",
+    "products.cameraDevicesLoadError": "Kh\u00f4ng th\u1ec3 t\u1ea3i danh s\u00e1ch camera.",
+    "products.cameraManualFallback":
+      "Kh\u00f4ng th\u1ec3 t\u1ea3i camera ph\u00e1t hi\u1ec7n. V\u1eabn c\u00f3 th\u1ec3 nh\u1eadp t\u00ean thi\u1ebft b\u1ecb th\u1ee7 c\u00f4ng.",
+    "products.cameraSelectHint":
+      "Ch\u1ecdn camera \u0111\u00e3 ph\u00e1t hi\u1ec7n cho profile s\u1ea3n ph\u1ea9m. Backend s\u1ebd k\u1ebft n\u1ed1i \u0111\u00fang thi\u1ebft b\u1ecb khi ch\u1ea1y line.",
+    "products.cameraSourceUsb": "USB / Basler",
+    "products.cameraSourceRtsp": "RTSP",
+    "products.rtspUrl": "RTSP URL",
+    "vk.title": "Bàn phím ảo",
+    "vk.target": "Ô nhập",
+    "vk.numeric": "123",
+    "vk.english": "EN",
+    "vk.vietnamese": "VI",
+    "vk.telex": "Telex",
+    "vk.vni": "VNI",
+    "vk.close": "Đóng",
+    "vk.empty": "Chưa có nội dung",
+    "vk.space": "Dấu cách",
+    "vk.backspace": "Xóa lùi",
+    "vk.enter": "Xuống dòng",
+    "vk.caps": "Hoa",
+    "vk.lowercase": "abc",
+  },
+};
+
 export type TranslationKey = keyof typeof translations.en;
 
 type I18nContextValue = {
@@ -822,8 +1145,16 @@ export function I18nProvider({ children }: { children: ReactNode }) {
           string
         >;
         const englishTranslations = translations.en as Record<string, string>;
+        const currentOverrides = translationOverrides[language] ?? {};
+        const englishOverrides = translationOverrides.en ?? {};
 
-        return currentTranslations[key] ?? englishTranslations[key] ?? key;
+        return (
+          currentOverrides[key] ??
+          currentTranslations[key] ??
+          englishOverrides[key] ??
+          englishTranslations[key] ??
+          key
+        );
       },
       apiError: (message, fallbackKey) => {
         const currentTranslations = translations[language] as Record<

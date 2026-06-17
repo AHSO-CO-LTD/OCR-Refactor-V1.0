@@ -1,14 +1,21 @@
 "use client";
 
-import { PointerEvent, ReactNode, useMemo, useRef, useState } from "react";
+import {
+  PointerEvent,
+  ReactNode,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { RotateCw } from "lucide-react";
+import { CameraPreviewImage } from "@/components/camera/camera-preview-image";
 import { Button } from "@/components/ui/button";
 import type { ProductProfile, RoiRegion } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
 
 type Point = { x: number; y: number };
 type ResizeCorner = "nw" | "ne" | "sw" | "se";
-const ROI_SCAN_GRID_SIZE = 8;
 
 function clamp(value: number, min: number, max: number) {
   return Math.min(Math.max(value, min), max);
@@ -169,6 +176,8 @@ export type OperatorRoiEditorProps = {
   okCount: number;
   ngCount: number;
   interactive?: boolean;
+  previewImageSrc?: string;
+  showClock?: boolean;
   topRightControls?: ReactNode;
 };
 
@@ -179,10 +188,13 @@ export function OperatorRoiEditor({
   okCount,
   ngCount,
   interactive = true,
+  previewImageSrc = "",
+  showClock = false,
   topRightControls,
 }: OperatorRoiEditorProps) {
   const { t } = useI18n();
   const previewRef = useRef<HTMLDivElement | null>(null);
+  const [currentTime, setCurrentTime] = useState(() => new Date());
   const [selectedRegionIndex, setSelectedRegionIndex] = useState<number | null>(
     null,
   );
@@ -216,6 +228,27 @@ export function OperatorRoiEditor({
     () => getOverlappingRegionIndexes(roiRegions),
     [roiRegions],
   );
+  const clockLabel = useMemo(
+    () =>
+      currentTime.toLocaleTimeString([], {
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+      }),
+    [currentTime],
+  );
+
+  useEffect(() => {
+    if (!showClock) {
+      return;
+    }
+
+    const intervalId = window.setInterval(() => {
+      setCurrentTime(new Date());
+    }, 1000);
+
+    return () => window.clearInterval(intervalId);
+  }, [showClock]);
 
   function regionFromClientPoint(point: Point, element: HTMLDivElement | null) {
     const rect = element?.getBoundingClientRect();
@@ -483,15 +516,25 @@ export function OperatorRoiEditor({
       onPointerLeave={interactive ? finishPointerSession : undefined}
       onPointerDown={interactive ? () => setSelectedRegionIndex(null) : undefined}
     >
-      <div
-        className="absolute inset-0 bg-contain bg-center bg-no-repeat opacity-95 pointer-events-none"
-        style={{ backgroundImage: "url('/preview-background.png')" }}
-      />
+      <div className="pointer-events-none absolute inset-0 opacity-95">
+        <CameraPreviewImage
+          imageSource={previewImageSrc}
+          zoomFactor={product.camera.zoomFactor}
+          previewPanX={product.camera.previewPanX}
+          previewPanY={product.camera.previewPanY}
+          previewRotation={product.camera.previewRotation}
+        />
+      </div>
       <div className="absolute inset-0 bg-[linear-gradient(to_right,rgba(255,255,255,0.08)_1px,transparent_1px),linear-gradient(to_bottom,rgba(255,255,255,0.08)_1px,transparent_1px)] bg-[size:8.333%_20%] pointer-events-none" />
       
       <div className="absolute left-3 top-3 border border-white/15 bg-black/75 px-2 py-1 font-mono text-xs font-semibold text-white pointer-events-none">
         {cameraWidth} x {cameraHeight}
       </div>
+      {showClock ? (
+        <div className="absolute left-3 top-12 border border-cyan-300/30 bg-black/75 px-3 py-1.5 font-mono text-sm font-semibold text-cyan-100 pointer-events-none">
+          {t("operator.time")}: {clockLabel}
+        </div>
+      ) : null}
       <div className="absolute right-3 top-3 z-20 flex max-w-[min(420px,calc(100%-96px))] flex-col items-end gap-2">
         {topRightControls ? (
           <div className="pointer-events-auto flex flex-wrap justify-end gap-2">
@@ -553,24 +596,6 @@ export function OperatorRoiEditor({
               <span className="operator-roi-scan-corner corner-tr" />
               <span className="operator-roi-scan-corner corner-bl" />
               <span className="operator-roi-scan-corner corner-br" />
-            </div>
-            <div className="operator-roi-scan-grid-container">
-              {Array.from({ length: ROI_SCAN_GRID_SIZE * ROI_SCAN_GRID_SIZE }).map(
-                (_, cellIndex) => {
-                  const row = Math.floor(cellIndex / ROI_SCAN_GRID_SIZE);
-                  const column = cellIndex % ROI_SCAN_GRID_SIZE;
-
-                  return (
-                    <span
-                      key={`${region.index}-${cellIndex}`}
-                      className="operator-roi-scan-cell"
-                      style={{
-                        animationDelay: `${region.index * 180 + row * 220 + column * 24}ms`,
-                      }}
-                    />
-                  );
-                },
-              )}
             </div>
             <div
               className="operator-roi-scan-glow"

@@ -25,6 +25,9 @@ const defaultCamera: CameraProfileDto = {
   offsetX: 300,
   offsetY: 1400,
   zoomFactor: 0.4,
+  previewPanX: 0,
+  previewPanY: 0,
+  previewRotation: 0,
 };
 
 const productInclude = {
@@ -299,6 +302,9 @@ export class ProductsService {
       offsetX: camera.offsetX,
       offsetY: camera.offsetY,
       zoomFactor: camera.zoomFactor,
+      previewPanX: camera.previewPanX,
+      previewPanY: camera.previewPanY,
+      previewRotation: camera.previewRotation,
     };
   }
 
@@ -330,6 +336,9 @@ export class ProductsService {
       offsetX: camera.offsetX,
       offsetY: camera.offsetY,
       zoomFactor: Number(camera.zoomFactor),
+      previewPanX: Number(camera.previewPanX),
+      previewPanY: Number(camera.previewPanY),
+      previewRotation: Number(camera.previewRotation),
     };
   }
 

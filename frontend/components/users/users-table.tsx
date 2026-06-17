@@ -3,6 +3,7 @@
 import { Pencil, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { Select } from "@/components/ui/select";
 import type { UserSummary } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
 
@@ -126,7 +127,7 @@ export function UsersTable({
                       {t(`role.${user.role}`)}
                     </td>
                     <td className="border-b border-slate-100 px-4 py-3">
-                      <select
+                      <Select
                         value={user.active ? "active" : "inactive"}
                         onChange={(event) =>
                           onToggleStatus(user, event.target.value === "active")
@@ -142,7 +143,7 @@ export function UsersTable({
                       >
                         <option value="active">{t("users.active")}</option>
                         <option value="inactive">{t("users.inactive")}</option>
-                      </select>
+                      </Select>
                     </td>
                     <td className="border-b border-slate-100 px-4 py-3 text-slate-600">
                       {formatLastLogin(user.lastLoginAt, language)}

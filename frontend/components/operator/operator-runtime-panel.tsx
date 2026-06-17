@@ -4,7 +4,6 @@ import {
   Camera,
   CheckCircle2,
   CircleDot,
-  Delete,
   Minus,
   Package,
   Plus,
@@ -16,11 +15,13 @@ import {
 } from "lucide-react";
 import { KeyboardEvent, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
+import { useConnectedCameraPreview } from "@/components/camera/use-connected-camera-preview";
 import { OperatorRoiEditor } from "@/components/operator/operator-roi-editor";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { NumericKeypad } from "@/components/ui/numeric-keypad";
 import { Select } from "@/components/ui/select";
 import {
   ApiError,
@@ -55,6 +56,9 @@ const demoProducts: ProductProfile[] = [
       offsetX: 0,
       offsetY: 0,
       zoomFactor: 1,
+      previewPanX: 0,
+      previewPanY: 0,
+      previewRotation: 0,
     },
     roiRegions: [
       { index: 1, x: 566, y: 474, width: 210, height: 322, rotation: 0 },
@@ -122,6 +126,7 @@ export function OperatorRuntimePanel() {
   const [okCount, setOkCount] = useState(0);
   const [ngCount, setNgCount] = useState(0);
   const [batchCount, setBatchCount] = useState(0);
+  const [currentBatchCount, setCurrentBatchCount] = useState(0);
   const [quantityCount, setQuantityCount] = useState(0);
   const [batchSize, setBatchSize] = useState(demoProducts[0].defaultNumber);
   const [batchDraft, setBatchDraft] = useState(String(demoProducts[0].batchSize));
@@ -200,8 +205,10 @@ export function OperatorRuntimePanel() {
           },
         }
       : selectedProduct;
+  const {
+    imageSrc: livePreviewImageSrc,
+  } = useConnectedCameraPreview(selectedProduct.camera.deviceName);
 
-  const totalCount = okCount + ngCount;
   const roiCount = displayProduct.roiRegions.length;
   const safeBatchSize = Math.max(1, Number(batchSize) || 1);
 
@@ -219,6 +226,7 @@ export function OperatorRuntimePanel() {
     setOkCount(0);
     setNgCount(0);
     setBatchCount(0);
+    setCurrentBatchCount(0);
     setQuantityCount(0);
 
     if (showToast) {
@@ -301,7 +309,7 @@ export function OperatorRuntimePanel() {
             : product,
         ),
       );
-      setQuantityCount((current) => {
+      setCurrentBatchCount((current) => {
         if (current < response.data.batchSize) {
           return current;
         }
@@ -329,6 +337,7 @@ export function OperatorRuntimePanel() {
     const increment = roiCount;
 
     setOverlayResult(result);
+    setQuantityCount(increment);
 
     if (result === "OK") {
       setOkCount((current) => current + increment);
@@ -336,12 +345,12 @@ export function OperatorRuntimePanel() {
       setNgCount((current) => current + increment);
     }
 
-    setQuantityCount((current) => {
+    setCurrentBatchCount((current) => {
       const next = current + increment;
 
       if (next >= safeBatchSize) {
         setBatchCount((batchCurrent) => batchCurrent + Math.floor(next / safeBatchSize));
-        return 0;
+        return next % safeBatchSize;
       }
 
       return next;
@@ -423,6 +432,7 @@ export function OperatorRuntimePanel() {
                     <Input
                       type="text"
                       inputMode="numeric"
+                      data-virtual-keyboard="off"
                       value={batchDraft}
                       className="h-12 border-[#9db7d8] bg-white text-center text-lg font-semibold"
                       onFocus={() => setKeypadOpen(true)}
@@ -452,45 +462,11 @@ export function OperatorRuntimePanel() {
                   </Button>
                   {keypadOpen ? (
                     <div className="absolute left-0 right-0 top-full z-30 mt-2 grid gap-2 rounded-sm border border-[#9db7d8] bg-white p-3 shadow-[0_12px_30px_rgba(15,23,42,0.18)]">
-                      <div className="grid grid-cols-3 gap-2">
-                        {["1", "2", "3", "4", "5", "6", "7", "8", "9"].map(
-                          (digit) => (
-                            <Button
-                              key={digit}
-                              type="button"
-                              variant="outline"
-                              className="h-12 border-[#9db7d8] bg-white text-lg font-semibold text-slate-950 hover:bg-slate-50"
-                              onClick={() => appendBatchDigit(digit)}
-                            >
-                              {digit}
-                            </Button>
-                          ),
-                        )}
-                        <Button
-                          type="button"
-                          variant="outline"
-                          className="h-12 border-[#9db7d8] bg-white text-sm font-semibold text-slate-950 hover:bg-slate-50"
-                          onClick={() => setBatchDraft("0")}
-                        >
-                          {t("common.clear")}
-                        </Button>
-                        <Button
-                          type="button"
-                          variant="outline"
-                          className="h-12 border-[#9db7d8] bg-white text-lg font-semibold text-slate-950 hover:bg-slate-50"
-                          onClick={() => appendBatchDigit("0")}
-                        >
-                          0
-                        </Button>
-                        <Button
-                          type="button"
-                          variant="outline"
-                          className="h-12 border-[#dba5a5] bg-[#fff4f4] text-slate-950 hover:bg-[#ffe4e4]"
-                          onClick={removeBatchDigit}
-                        >
-                          <Delete className="h-5 w-5" />
-                        </Button>
-                      </div>
+                      <NumericKeypad
+                        onKeyPress={appendBatchDigit}
+                        onClear={() => setBatchDraft("0")}
+                        onBackspace={removeBatchDigit}
+                      />
                     </div>
                   ) : null}
                 </div>
@@ -507,7 +483,7 @@ export function OperatorRuntimePanel() {
               />
               <InfoTile
                 label={t("operator.count")}
-                value={totalCount}
+                value={currentBatchCount}
                 className="border-[#f0a53b] bg-white text-slate-950"
               />
               <InfoTile
@@ -552,6 +528,8 @@ export function OperatorRuntimePanel() {
             okCount={okCount}
             ngCount={ngCount}
             interactive={false}
+            previewImageSrc={livePreviewImageSrc}
+            showClock
             topRightControls={
               <>
                 <Button
