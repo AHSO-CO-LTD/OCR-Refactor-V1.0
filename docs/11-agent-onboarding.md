@@ -77,17 +77,20 @@ scripts/   future automation scripts
 - Product profile form allows creating a profile without ROI, then filling ROI later or applying a template profile.
 - Product profile ROI editor currently supports draw/move/resize/rotate, multi-select with `Shift`, copy/paste, undo/redo, alignment/equal-spacing/straight-angle assists, overlap validation, and simulated camera preview background.
 - Backend inspection foundation now includes a Device Tool client plus `/api/inspections/start`, `/api/inspections/current`, and `/api/inspections/:jobId/stop` with per-ROI inspection logs.
+- Backend camera foundation now proxies Device Tool status, device discovery, connect, grab, and live stream through `/api/camera/status`, `/api/camera/devices`, `/api/camera/connect`, `/api/camera/grab`, and `/api/camera/stream`.
+- Dedicated Camera page exists at `/dashboard/camera` with product-profile selection, Device Tool status/device discovery, connect/grab/live controls, view adjustment persistence, and manual refresh for camera status/devices.
+- AppShell warms up camera status/device discovery in the background for users with camera or inspection permissions.
 
 ### In Progress
 
 - `dev/admin` use sidebar and `engineer/operator` use navbar.
 - Frontend responsive behavior is being standardized around the 1280x1080 factory-machine viewport while still supporting smaller and larger screens.
 - Existing dashboard, roles, users, and products screens need a final responsive verification pass at 1280x1080.
+- Dedicated Camera page still needs verification with a real running Device Tool and connected hardware.
 - Operator runtime still mixes real product-profile data with demo fallback; backend Device Tool integration has started, but the frontend runtime is not wired to the new inspection endpoints yet.
 
 ### Not Started
 
-- Dedicated camera config screen/module.
 - Dedicated ROI config screen/module.
 - Dedicated history/reports screens and query flows.
 - Full end-to-end inspection runtime orchestration beyond the initial backend Device Tool integration.
@@ -178,8 +181,9 @@ Current UI behavior:
 - User-facing pages, modals, empty/error states, validation messages, and notifications must use the current selected language.
 - Normal admin must only see/manage `engineer/operator` on role permission screens; `admin/dev` are protected for `dev`.
 - `/dashboard` currently hosts the operator runtime foundation instead of a separate dedicated runtime module route.
-- `camera`, `roi`, `history`, and `reports` are present in menu permissions but do not have their own pages yet.
-- Product preview uses `frontend/public/preview-background.png` to simulate camera output until camera API integration exists.
+- `roi`, `history`, and `reports` are present in menu permissions but do not have their own pages yet.
+- Camera operations now have a dedicated page at `/dashboard/camera`; the page still depends on the Device Tool running locally, usually at `http://localhost:8000`.
+- Product preview uses `frontend/public/preview-background.png` to simulate camera output when no live camera preview is available.
 - Product profile save must reject overlapping ROI regions.
 
 ## Local Commands
@@ -275,5 +279,5 @@ Continue frontend hardening:
 1. Finish standard responsive pass across existing dashboard, roles, and users screens.
 2. Verify 1280x1080 does not produce page-level horizontal overflow.
 3. Restart backend/frontend dev servers when validating role/user permission changes, to avoid stale dev-server state.
-4. Finish Product module hardening and persisted product profile verification.
-5. Create dedicated Camera/ROI/History/Reports pages and move the dashboard runtime foundation toward a real inspection flow.
+4. Finish Product module hardening, Camera page verification, and persisted product profile verification.
+5. Create dedicated ROI/History/Reports pages and move the dashboard runtime foundation toward a real inspection flow.

@@ -105,6 +105,21 @@ export type CameraRuntimeStatus = {
   };
 };
 
+export type CameraFrameRate = {
+  success: boolean;
+  data: {
+    connected: boolean;
+    requested_stream_fps?: number | null;
+    configured_fps?: number | null;
+    camera_resulting_fps?: number | null;
+    camera_max_fps?: number | null;
+    effective_stream_fps: number;
+    writable: boolean;
+    error?: string | null;
+    source?: Record<string, string | null> | null;
+  };
+};
+
 export type CameraDevice = {
   index: number;
   friendly_name: string;
@@ -358,6 +373,37 @@ export async function listCameraDevices(accessToken: string) {
   return (await response.json()) as { data: CameraDevice[] };
 }
 
+export async function getCameraFrameRate(accessToken: string) {
+  const response = await fetch(`${API_BASE_URL}/camera/frame-rate`, {
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+    },
+  });
+
+  if (!response.ok) {
+    throw new ApiError(await parseError(response), response.status);
+  }
+
+  return (await response.json()) as CameraFrameRate;
+}
+
+export async function updateCameraFrameRate(accessToken: string, fps: number) {
+  const response = await fetch(`${API_BASE_URL}/camera/frame-rate`, {
+    method: "PATCH",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ fps }),
+  });
+
+  if (!response.ok) {
+    throw new ApiError(await parseError(response), response.status);
+  }
+
+  return (await response.json()) as CameraFrameRate;
+}
+
 export async function connectCamera(
   accessToken: string,
   camera: CameraProfile,
@@ -397,15 +443,26 @@ export async function grabCameraFrame(accessToken: string) {
 
 export function getCameraStreamUrl(
   accessToken: string,
-  options: { fps?: number; jpegQuality?: number } = {},
+  options: { fps?: number; jpegQuality?: number; maxWidth?: number } = {},
 ) {
   const url = new URL(`${API_BASE_URL}/camera/stream`);
   url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
   url.searchParams.set("token", accessToken);
-  url.searchParams.set("fps", String(options.fps ?? 8));
-  url.searchParams.set("jpegQuality", String(options.jpegQuality ?? 80));
+  url.searchParams.set("fps", String(options.fps ?? DEFAULT_CAMERA_STREAM_FPS));
+  url.searchParams.set(
+    "jpegQuality",
+    String(options.jpegQuality ?? DEFAULT_CAMERA_STREAM_JPEG_QUALITY),
+  );
+  url.searchParams.set(
+    "maxWidth",
+    String(options.maxWidth ?? DEFAULT_CAMERA_STREAM_MAX_WIDTH),
+  );
   return url.toString();
 }
+
+export const DEFAULT_CAMERA_STREAM_FPS = 10;
+export const DEFAULT_CAMERA_STREAM_JPEG_QUALITY = 70;
+export const DEFAULT_CAMERA_STREAM_MAX_WIDTH = 1600;
 
 export async function listRoles(accessToken: string) {
   const response = await fetch(`${API_BASE_URL}/roles`, {

@@ -69,6 +69,21 @@ type DeviceToolGrabFrameResponse = {
   encode_format: string;
 };
 
+type DeviceToolCameraFrameRateResponse = {
+  success: boolean;
+  data: {
+    connected: boolean;
+    requested_stream_fps?: number | null;
+    configured_fps?: number | null;
+    camera_resulting_fps?: number | null;
+    camera_max_fps?: number | null;
+    effective_stream_fps: number;
+    writable: boolean;
+    error?: string | null;
+    source?: Record<string, string | null> | null;
+  };
+};
+
 @Injectable()
 export class DeviceToolService {
   constructor(private readonly configService: ConfigService) {}
@@ -191,7 +206,7 @@ export class DeviceToolService {
       { method: 'GET' },
       'resolve camera device',
     );
-    const normalizedDeviceName = deviceName?.trim().toLowerCase();
+    const normalizedDeviceName = this.normalizeCameraName(deviceName);
 
     if (!normalizedDeviceName) {
       const defaultDevice = devices[0];
@@ -264,6 +279,29 @@ export class DeviceToolService {
     );
   }
 
+  async getCameraFrameRate() {
+    try {
+      return await this.requestJson<DeviceToolCameraFrameRateResponse>(
+        '/api/v1/camera/frame-rate',
+        { method: 'GET' },
+        'get camera frame rate',
+      );
+    } catch {
+      return this.defaultCameraFrameRateResponse();
+    }
+  }
+
+  async updateCameraFrameRate(fps: number) {
+    return this.requestJson<DeviceToolCameraFrameRateResponse>(
+      '/api/v1/camera/frame-rate',
+      {
+        method: 'PATCH',
+        body: JSON.stringify({ fps }),
+      },
+      'update camera frame rate',
+    );
+  }
+
   async inspectProduct(request: DeviceToolInspectionRequest) {
     await this.ensureCameraReady(request.camera);
 
@@ -304,7 +342,7 @@ export class DeviceToolService {
     status: DeviceToolCameraStatusResponse,
     device: DeviceToolCameraDevice,
   ) {
-    const runtimeName = String(status.data.device_name ?? '').trim().toLowerCase();
+    const runtimeName = this.normalizeCameraName(status.data.device_name);
 
     if (!runtimeName) {
       return false;
@@ -321,10 +359,42 @@ export class DeviceToolService {
       device.friendly_name,
       device.model_name,
       device.serial_number,
+      `${device.model_name ?? ''} (${device.serial_number ?? ''})`.trim(),
       `${device.model_name ?? ''} ${device.serial_number ?? ''}`.trim(),
     ]
       .filter(Boolean)
-      .map((value) => String(value).trim().toLowerCase());
+      .map((value) => this.normalizeCameraName(value))
+      .filter(Boolean);
+  }
+
+  private defaultCameraFrameRateResponse(): DeviceToolCameraFrameRateResponse {
+    return {
+      success: true,
+      data: {
+        connected: false,
+        requested_stream_fps: null,
+        configured_fps: null,
+        camera_resulting_fps: null,
+        camera_max_fps: null,
+        effective_stream_fps: 10,
+        writable: false,
+        error: null,
+        source: null,
+      },
+    };
+  }
+
+  private normalizeCameraName(value: unknown) {
+    if (typeof value !== 'string') {
+      return '';
+    }
+
+    return value
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
   }
 
   private async requestJson<T>(

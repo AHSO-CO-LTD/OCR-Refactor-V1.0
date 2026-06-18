@@ -70,9 +70,10 @@ export class CameraStreamGateway {
 
   private proxyCameraStream(client: WebSocket, request: IncomingMessage) {
     const clientUrl = new URL(request.url ?? '/', 'http://localhost');
-    const fps = clientUrl.searchParams.get('fps') ?? '8';
-    const jpegQuality = clientUrl.searchParams.get('jpegQuality') ?? '80';
-    const toolUrl = this.getToolStreamUrl(fps, jpegQuality);
+    const fps = clientUrl.searchParams.get('fps') ?? '10';
+    const jpegQuality = clientUrl.searchParams.get('jpegQuality') ?? '70';
+    const maxWidth = clientUrl.searchParams.get('maxWidth') ?? '1600';
+    const toolUrl = this.getToolStreamUrl(fps, jpegQuality, maxWidth);
     const toolSocket = new WebSocket(toolUrl);
 
     const closeBoth = () => {
@@ -111,7 +112,7 @@ export class CameraStreamGateway {
     client.on('error', closeBoth);
   }
 
-  private getToolStreamUrl(fps: string, jpegQuality: string) {
+  private getToolStreamUrl(fps: string, jpegQuality: string, maxWidth: string) {
     const baseUrl = (
       this.configService.get<string>('DEVICE_TOOL_BASE_URL') ??
       'http://localhost:8000'
@@ -120,6 +121,7 @@ export class CameraStreamGateway {
     url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
     url.searchParams.set('fps', fps);
     url.searchParams.set('jpeg_quality', jpegQuality);
+    url.searchParams.set('max_width', maxWidth);
     return url.toString();
   }
 

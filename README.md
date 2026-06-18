@@ -51,21 +51,24 @@ Before continuing implementation, read:
 Current active direction:
 
 ```text
-Finish responsive hardening for dashboard/roles/users/products -> Product profile verification -> dedicated Camera/ROI/History/Reports screens -> real runtime flow -> Electron + dongle
+Finish responsive hardening for dashboard/roles/users/products/camera -> Product profile verification -> dedicated ROI/History/Reports screens -> real runtime flow -> Electron + dongle
 ```
 
 Current implemented foundation:
 
 - Auth, JWT session, permissions, roles, and users APIs are implemented.
 - Backend Device Tool integration foundation exists with inspection start/current/stop endpoints and per-ROI inspection logging.
+- Backend camera APIs proxy Device Tool status, device discovery, connect, grab, and live stream through the local backend.
 - Frontend login, dashboard, role permissions, and user management screens exist.
 - User management supports create/edit/delete/status flows with shared confirmation UI.
 - Normal admin cannot manage protected `admin/dev` role permissions; only `dev` can.
 - i18n, Sonner notifications, and error/not-found screens are wired for English/Vietnamese.
 - App shell is being standardized around fixed chrome and the 1280x1080 factory-machine viewport.
+- App shell now warms up camera status/device discovery in the background for camera or inspection users.
 - Product profile management exists with model path, camera config, ROI editor, template apply flow, and simulated preview background.
 - `/dashboard` already hosts an operator runtime foundation with product selector, ROI preview, persisted batch-size save, and OK/NG counters.
-- Dedicated `camera`, `roi`, `history`, and `reports` pages are not created yet even though their menu permissions exist.
+- `/dashboard/camera` exists with product-profile selection, Device Tool status/device discovery, connect/grab/live controls, view adjustment persistence, and manual camera refresh.
+- Dedicated `roi`, `history`, and `reports` pages are not created yet even though their menu permissions exist.
 
 ## Port Safety Rule
 

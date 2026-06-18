@@ -57,6 +57,104 @@ class CameraService:
             )
         return data
 
+    def frame_rate_status(self, requested_fps: Optional[float] = None) -> dict:
+        if not self.connected:
+            return self._default_frame_rate_status(requested_fps)
+
+        try:
+            with self._lock:
+                node_map = self._camera.GetNodeMap()
+                configured = self._read_first_float_node(
+                    node_map,
+                    [
+                        "AcquisitionFrameRate",
+                        "AcquisitionFrameRateAbs",
+                        "AcquisitionFrameRateRaw",
+                    ],
+                )
+                resulting = self._read_first_float_node(
+                    node_map,
+                    [
+                        "ResultingFrameRate",
+                        "ResultingFrameRateAbs",
+                        "ResultingAcquisitionFrameRate",
+                        "BslResultingAcquisitionFrameRate",
+                    ],
+                )
+                if resulting["value"] is None:
+                    resulting = self._read_first_float_node_by_keywords(
+                        node_map,
+                        ["resulting", "frame", "rate"],
+                    )
+                if resulting["value"] is None:
+                    resulting = self._read_first_float_node_by_keywords(
+                        node_map,
+                        ["frame", "rate"],
+                    )
+                frame_rate_node = self._find_first_node(
+                    node_map,
+                    [
+                        "AcquisitionFrameRate",
+                        "AcquisitionFrameRateAbs",
+                        "AcquisitionFrameRateRaw",
+                    ],
+                )
+                max_fps = self._safe_node_max(frame_rate_node)
+                writable = self._is_node_writable(frame_rate_node)
+
+                return {
+                    "connected": True,
+                    "requested_stream_fps": requested_fps,
+                    "configured_fps": configured["value"],
+                    "camera_resulting_fps": resulting["value"],
+                    "camera_max_fps": max_fps,
+                    "effective_stream_fps": self._clamp_stream_fps(requested_fps, max_fps),
+                    "writable": writable,
+                    "error": None,
+                    "source": {
+                        "configured": configured["name"],
+                        "resulting": resulting["name"],
+                        "max": frame_rate_node.GetName() if frame_rate_node is not None else None,
+                    },
+                }
+        except Exception as exc:
+            return self._default_frame_rate_status(requested_fps, str(exc))
+
+    def configure_frame_rate(self, fps: float) -> dict:
+        with self._lock:
+            self._ensure_connected()
+            node_map = self._camera.GetNodeMap()
+            self._enable_frame_rate_control(node_map)
+            node = self._find_first_node(
+                node_map,
+                [
+                    "AcquisitionFrameRate",
+                    "AcquisitionFrameRateAbs",
+                    "AcquisitionFrameRateRaw",
+                ],
+            )
+
+            if node is None or not self._is_node_writable(node):
+                return self._default_frame_rate_status(
+                    fps,
+                    "Camera frame rate is not writable or not exposed by this camera",
+                )
+
+            max_fps = self._safe_node_max(node)
+            target_fps = self._clamp_stream_fps(fps, max_fps)
+            try:
+                node.SetValue(target_fps)
+            except Exception as exc:
+                return self._default_frame_rate_status(target_fps, str(exc))
+
+        return self.frame_rate_status(target_fps)
+
+    def resolve_stream_fps(self, requested_fps: Optional[float]) -> float:
+        try:
+            return float(self.frame_rate_status(requested_fps)["effective_stream_fps"])
+        except Exception:
+            return self._clamp_stream_fps(requested_fps, None)
+
     def list_devices(self) -> list:
         from pypylon import pylon
 
@@ -171,6 +269,34 @@ class CameraService:
             frame.capture_time_ms,
         )
 
+    def grab_stream_bytes(
+        self,
+        encode_format: str = ".jpg",
+        jpeg_quality: int = 70,
+        max_width: Optional[int] = None,
+    ) -> tuple:
+        total_started_at = time.time()
+        frame = self.grab_frame()
+        resize_started_at = time.time()
+        image = self._resize_for_stream(frame.image, max_width)
+        resize_time_ms = (time.time() - resize_started_at) * 1000
+        encode_started_at = time.time()
+        content = encode_image_bytes(image, encode_format, jpeg_quality)
+        encode_time_ms = (time.time() - encode_started_at) * 1000
+        height, width = image.shape[:2]
+        return (
+            content,
+            {
+                "capture_time_ms": frame.capture_time_ms,
+                "resize_time_ms": resize_time_ms,
+                "encode_time_ms": encode_time_ms,
+                "tool_total_time_ms": (time.time() - total_started_at) * 1000,
+                "frame_width": width,
+                "frame_height": height,
+                "encoded_bytes": len(content),
+            },
+        )
+
     def grab_frame(self) -> CameraFrame:
         import cv2
         from pypylon import pylon
@@ -196,6 +322,19 @@ class CameraService:
             frame = CameraFrame(image=image, capture_time_ms=(time.time() - start) * 1000)
             self._last_frame = frame
             return frame
+
+    def _resize_for_stream(self, image, max_width: Optional[int]):
+        if max_width is None or max_width <= 0:
+            return image
+
+        height, width = image.shape[:2]
+        if width <= max_width:
+            return image
+
+        import cv2
+
+        next_height = max(1, round(height * (max_width / width)))
+        return cv2.resize(image, (max_width, next_height), interpolation=cv2.INTER_AREA)
 
     def _ensure_connected(self):
         if not self.connected:
@@ -228,6 +367,122 @@ class CameraService:
             self._camera.OffsetX.SetValue(offset_x)
         if offset_y is not None:
             self._camera.OffsetY.SetValue(offset_y)
+
+    def _enable_frame_rate_control(self, node_map):
+        for name in ["AcquisitionFrameRateEnable", "AcquisitionFrameRateEnabled"]:
+            node = self._safe_get_node(node_map, name)
+            if node is not None and self._is_node_writable(node):
+                try:
+                    node.SetValue(True)
+                except Exception:
+                    return
+
+    def _default_frame_rate_status(
+        self,
+        requested_fps: Optional[float] = None,
+        error: Optional[str] = None,
+    ) -> dict:
+        return {
+            "connected": False,
+            "requested_stream_fps": requested_fps,
+            "configured_fps": None,
+            "camera_resulting_fps": None,
+            "camera_max_fps": None,
+            "effective_stream_fps": self._clamp_stream_fps(requested_fps, None),
+            "writable": False,
+            "error": error,
+            "source": None,
+        }
+
+    def _find_first_node(self, node_map, names: list):
+        from pypylon import genicam
+
+        for name in names:
+            node = self._safe_get_node(node_map, name)
+            try:
+                if node is not None and genicam.IsReadable(node):
+                    return node
+            except Exception:
+                continue
+        return None
+
+    def _safe_get_node(self, node_map, name: str):
+        try:
+            return node_map.GetNode(name)
+        except Exception:
+            return None
+
+    def _read_first_float_node(self, node_map, names: list) -> dict:
+        node = self._find_first_node(node_map, names)
+        if node is None:
+            return {"name": None, "value": None}
+
+        return self._read_float_node(node)
+
+    def _read_first_float_node_by_keywords(self, node_map, keywords: list) -> dict:
+        try:
+            nodes = node_map.GetNodes()
+        except Exception:
+            return {"name": None, "value": None}
+
+        normalized_keywords = [str(keyword).lower() for keyword in keywords]
+        for node in nodes:
+            try:
+                name = node.GetName()
+            except Exception:
+                continue
+
+            normalized_name = name.lower()
+            if not all(keyword in normalized_name for keyword in normalized_keywords):
+                continue
+
+            value = self._read_float_node(node)
+            if value["value"] is not None:
+                return value
+
+        return {"name": None, "value": None}
+
+    def _read_float_node(self, node) -> dict:
+        try:
+            return {"name": node.GetName(), "value": float(node.GetValue())}
+        except Exception:
+            try:
+                return {"name": node.GetName(), "value": float(node.ToString())}
+            except Exception:
+                return {"name": node.GetName(), "value": None}
+
+    def _safe_node_max(self, node) -> Optional[float]:
+        if node is None:
+            return None
+
+        try:
+            return float(node.GetMax())
+        except Exception:
+            return None
+
+    def _is_node_writable(self, node) -> bool:
+        if node is None:
+            return False
+
+        try:
+            from pypylon import genicam
+
+            return bool(genicam.IsWritable(node))
+        except Exception:
+            return False
+
+    def _clamp_stream_fps(
+        self,
+        requested_fps: Optional[float],
+        camera_max_fps: Optional[float],
+    ) -> float:
+        fps = 10.0 if requested_fps is None else float(requested_fps)
+        fps = max(1.0, min(20.0, fps))
+
+        if camera_max_fps is not None and camera_max_fps > 0:
+            fps = min(fps, camera_max_fps)
+
+        return max(1.0, fps)
 
     def _safe_device_value(self, device, method_name: str):
         try:

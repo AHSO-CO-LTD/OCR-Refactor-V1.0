@@ -1,7 +1,13 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { getCameraStatus, getCameraStreamUrl } from "@/lib/api";
+import {
+  DEFAULT_CAMERA_STREAM_FPS,
+  DEFAULT_CAMERA_STREAM_JPEG_QUALITY,
+  DEFAULT_CAMERA_STREAM_MAX_WIDTH,
+  getCameraStatus,
+  getCameraStreamUrl,
+} from "@/lib/api";
 import { getAccessToken } from "@/lib/session";
 
 type ConnectedCameraPreviewState = {
@@ -60,7 +66,11 @@ export function useConnectedCameraPreview(expectedDeviceName?: string) {
       }
 
       const socket = new WebSocket(
-        getCameraStreamUrl(accessTokenRef.current, { fps: 8, jpegQuality: 80 }),
+        getCameraStreamUrl(accessTokenRef.current, {
+          fps: DEFAULT_CAMERA_STREAM_FPS,
+          jpegQuality: DEFAULT_CAMERA_STREAM_JPEG_QUALITY,
+          maxWidth: DEFAULT_CAMERA_STREAM_MAX_WIDTH,
+        }),
       );
       socket.binaryType = "blob";
       socketRef.current = socket;

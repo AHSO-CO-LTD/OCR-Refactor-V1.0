@@ -6,7 +6,7 @@ import { ReactNode, useEffect, useState } from "react";
 import { LanguageToggle } from "@/components/language-toggle";
 import { Button } from "@/components/ui/button";
 import type { SessionUser } from "@/lib/api";
-import { getCurrentSession } from "@/lib/api";
+import { getCameraStatus, getCurrentSession, listCameraDevices } from "@/lib/api";
 import type { TranslationKey } from "@/lib/i18n";
 import { useI18n } from "@/lib/i18n";
 import {
@@ -32,6 +32,11 @@ const menuItems = [
     permission: "product.manage",
   },
   { labelKey: "nav.camera", href: "/dashboard/camera", permission: "camera.manage" },
+  {
+    labelKey: "nav.cameraDebug",
+    href: "/dashboard/camera-debug",
+    permission: "camera.manage",
+  },
   { labelKey: "nav.roi", href: "/dashboard/roi", permission: "roi.edit" },
   { labelKey: "nav.history", href: "/dashboard/history", permission: "history.view" },
   { labelKey: "nav.reports", href: "/dashboard/reports", permission: "report.view" },
@@ -58,8 +63,13 @@ export function AppShell({ children }: AppShellProps) {
 
     getCurrentSession(token)
       .then((response) => {
-        saveSession(token, response.data.user);
-        setUser(response.data.user);
+        const nextUser = response.data.user;
+        saveSession(token, nextUser);
+        setUser(nextUser);
+
+        if (shouldPrimeCameraRuntime(nextUser)) {
+          void primeCameraRuntime(token);
+        }
       })
       .catch(() => {
         clearSession();
@@ -203,4 +213,19 @@ export function AppShell({ children }: AppShellProps) {
       </div>
     </main>
   );
+}
+
+function shouldPrimeCameraRuntime(user: SessionUser) {
+  return (
+    user.isDev ||
+    user.permissions.includes("camera.manage") ||
+    user.permissions.includes("inspection.start")
+  );
+}
+
+async function primeCameraRuntime(accessToken: string) {
+  await Promise.allSettled([
+    getCameraStatus(accessToken),
+    listCameraDevices(accessToken),
+  ]);
 }

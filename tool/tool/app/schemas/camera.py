@@ -20,6 +20,10 @@ class CameraSettingsRequest(BaseModel):
     height: Optional[int] = Field(default=None, ge=1)
 
 
+class CameraFrameRateRequest(BaseModel):
+    fps: float = Field(ge=1, le=240)
+
+
 class GrabImageRequest(BaseModel):
     encode_format: str = Field(default=".jpg", pattern=r"^\.(jpg|jpeg|png|bmp)$")
     jpeg_quality: int = Field(default=95, ge=1, le=100)

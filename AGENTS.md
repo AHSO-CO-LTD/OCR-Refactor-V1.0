@@ -49,6 +49,7 @@ Backend:
 - Backend protects the system from deleting, deactivating, or demoting the last active admin account.
 - Swagger API documentation is implemented at `/api/docs`.
 - Backend inspection foundation now includes a Device Tool client plus `/api/inspections/start`, `/api/inspections/current`, and `/api/inspections/:jobId/stop` with per-ROI inspection logs.
+- Backend camera foundation now proxies Device Tool status, device discovery, connect, grab, and live stream through `/api/camera/status`, `/api/camera/devices`, `/api/camera/connect`, `/api/camera/grab`, and `/api/camera/stream`.
 
 Frontend:
 
@@ -79,8 +80,10 @@ Frontend:
 - Sonner notifications use current language and visual variants by notification type.
 - Error/not-found screens exist with retry/home/report actions and language-aware copy.
 - AppShell uses fixed application chrome: sidebar/header/navbar do not scroll with page content.
+- AppShell now warms up camera runtime context in the background by calling backend camera status/device discovery for users with camera or inspection permissions.
+- Dedicated Camera page exists at `/dashboard/camera` with product-profile selection, Device Tool status/device discovery, connect/grab/live controls, view adjustment persistence, and manual refresh for camera status/devices.
 - Responsive behavior is being standardized around the 1280x1080 factory-machine viewport, but still needs a final pass across existing screens.
-- Dedicated `camera`, `roi`, `history`, and `reports` pages are not created yet even though their menu permissions already exist.
+- Dedicated `roi`, `history`, and `reports` pages are not created yet even though their menu permissions already exist.
 
 Electron/packaging:
 
@@ -97,7 +100,7 @@ Finish frontend hardening for the first operational module:
 1. Complete final responsive verification for dashboard, roles, users, and products at 1280x1080.
 2. Re-check smaller/larger viewports and remove any remaining page-level horizontal overflow.
 3. Verify product profile ROI editor behavior with real backend restart and persisted save/load flow.
-4. Create the first dedicated Camera/ROI screens and remove the current menu-to-missing-route gap for future operational modules.
+4. Verify the dedicated Camera page against a running Device Tool and create the first dedicated ROI screen to reduce the remaining menu-to-missing-route gap.
 5. Move the dashboard runtime foundation from demo-assisted UI behavior toward the new inspection backend flow after product/setup behavior is stable.
 
 ## Non-Negotiable Rules

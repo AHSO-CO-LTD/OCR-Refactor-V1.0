@@ -42,6 +42,8 @@ Current frontend status:
 - AppShell keeps header/sidebar/navbar fixed while only the active content pane scrolls.
 - Product profile management exists with template apply flow, preview background simulation, and interactive ROI editing.
 - Product ROI editor supports draw/move/resize/rotate, undo/redo, copy/paste, multi-select, and overlap validation.
+- Dedicated Camera page exists at `/dashboard/camera` with product selection, backend-proxied Device Tool status/device discovery, connect/grab/live controls, view adjustment persistence, and manual refresh for camera status/devices.
+- AppShell warms up camera status/device discovery in the background for users with camera or inspection permissions.
 - Factory deployment assumptions now include a single touchscreen display, so setup/runtime screens must avoid hover-only interaction and support on-screen keyboard entry.
 - Responsive hardening is still being finalized, with 1280x1080 as the primary validation viewport.
 
@@ -68,7 +70,7 @@ Current frontend status:
 2. Fix any page-level horizontal overflow; keep table overflow inside table containers.
 3. Re-check mobile, tablet, 1024x768, 1366x768, 1536x864, and 1920x1080.
 4. Finish Product module UI hardening and persisted save/load verification.
-5. Start dedicated Camera/ROI operational screens after product profile behavior is stable.
+5. Verify the Camera page with a running Device Tool and start dedicated ROI/History/Reports operational screens after product profile behavior is stable.
 
 ## Responsive Viewport Priority
 

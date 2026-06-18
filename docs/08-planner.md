@@ -41,19 +41,22 @@ Completed:
 - Product profile `batchSize` is persisted and can be updated from the operator runtime dashboard.
 - Operator runtime dashboard foundation exists on `/dashboard` with product selector, ROI preview, API/demo product loading, and OK/NG/batch counters.
 - Backend inspection foundation now includes Device Tool client wiring plus `/api/inspections/start`, `/api/inspections/current`, and `/api/inspections/:jobId/stop` with per-ROI inspection logs.
+- Backend camera foundation proxies Device Tool status, device discovery, connect, grab, and live stream through `/api/camera/status`, `/api/camera/devices`, `/api/camera/connect`, `/api/camera/grab`, and `/api/camera/stream`.
+- Dedicated Camera page exists at `/dashboard/camera` with product-profile selection, Device Tool status/device discovery, connect/grab/live controls, view adjustment persistence, and manual refresh for camera status/devices.
+- AppShell warms up camera status/device discovery in the background for users with camera or inspection permissions.
 
 In progress:
 
 - Final responsive hardening for dashboard, roles, users, and products at the 1280x1080 factory-machine viewport.
 - Role-based layout verification: `dev/admin` sidebar, `engineer/operator` navbar.
-- Product module persisted save/load verification and later Camera/ROI integration with product profiles.
+- Product module persisted save/load verification and Camera/ROI integration with product profiles.
+- Dedicated Camera page verification with a real running Device Tool and connected hardware.
 - Touch-first hardening for the single-screen factory touchscreen, including virtual-keyboard-friendly setup forms.
 - Operator runtime foundation needs to be moved from demo-assisted UI behavior to the new inspection backend flow.
-- Dedicated `camera`, `roi`, `history`, and `reports` routes/screens are still missing behind existing menu permissions.
+- Dedicated `roi`, `history`, and `reports` routes/screens are still missing behind existing menu permissions.
 
 Not started:
 
-- Dedicated camera config screen/module.
 - Dedicated ROI config screen/module.
 - Dedicated history/reports screens and query flows.
 - Electron shell.
@@ -359,7 +362,7 @@ Reason:
 The next practical milestone is:
 
 ```text
-Responsive admin shell hardening -> Product verification -> Dedicated Camera/ROI/History/Reports screens -> Real runtime flow
+Responsive admin shell hardening -> Product + Camera verification -> Dedicated ROI/History/Reports screens -> Real runtime flow
 ```
 
 Reason:

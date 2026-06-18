@@ -20,6 +20,13 @@ export type CameraViewTransform = {
   previewRotation: number;
 };
 
+export type CameraLiveStats = {
+  fps: number;
+  targetFps: number | null;
+  delayMs: number | null;
+  captureTimeMs: number | null;
+};
+
 type CameraImageViewerProps = {
   imageSource: string;
   frame: CameraFrame | null;
@@ -30,6 +37,7 @@ type CameraImageViewerProps = {
   initialRotation?: number;
   onTransformChange?: (transform: CameraViewTransform) => void;
   footerAction?: ReactNode;
+  liveStats?: CameraLiveStats | null;
   title: string;
 };
 
@@ -58,6 +66,7 @@ export function CameraImageViewer({
   initialRotation = 0,
   onTransformChange,
   footerAction,
+  liveStats,
   title,
 }: CameraImageViewerProps) {
   const { t } = useI18n();
@@ -226,6 +235,26 @@ export function CameraImageViewer({
           <div className="text-sm">{t("camera.noFrame")}</div>
         </div>
       )}
+
+      {live && liveStats ? (
+        <div className="absolute left-3 top-14 border border-white/10 bg-black/75 px-3 py-2 text-xs text-white">
+          <div className="font-semibold">
+            {t("camera.liveFps")}: {liveStats.fps.toFixed(1)}
+            {liveStats.targetFps === null
+              ? ""
+              : ` / ${liveStats.targetFps.toFixed(1)}`}
+          </div>
+          <div className="mt-1 text-white/80">
+            {t("camera.liveDelay")}:{" "}
+            {liveStats.delayMs === null
+              ? "-"
+              : `${Math.max(0, liveStats.delayMs).toFixed(0)} ms`}
+            {liveStats.captureTimeMs === null
+              ? ""
+              : ` · ${t("camera.captureTime")}: ${liveStats.captureTimeMs.toFixed(1)} ms`}
+          </div>
+        </div>
+      ) : null}
 
       {frame && !live ? (
         <div className="absolute bottom-3 left-3 border border-white/10 bg-black/70 px-3 py-2 text-xs text-white">
