@@ -8,7 +8,7 @@ Read this first before changing code.
 
 ## Project In One Paragraph
 
-This is a local industrial OCR inspection desktop app refactor. The old project was a Python/PyQt monolith. The new system is a local-first app with Next.js frontend, NestJS backend, PostgreSQL, future Python/FastAPI AI service, Electron packaging, and USB dongle boot protection.
+This is a local industrial OCR inspection desktop app refactor. The old project was a Python/PyQt monolith. The new system is a local-first app with Next.js frontend, NestJS backend, PostgreSQL, the Python/FastAPI Device/OCR Tool in `tool/`, Electron packaging, and USB dongle boot protection.
 
 ## Read Order
 
@@ -28,7 +28,8 @@ This is a local industrial OCR inspection desktop app refactor. The old project 
 ```text
 frontend/  Next.js UI, future Electron shell
 backend/   NestJS REST API
-ai/        future Python/FastAPI service
+tool/      API-Tool-v1 Device/OCR API used by backend through /tool/v1
+tool-test/ Archived previous Device Tool implementation for reference only
 shared/    future shared contracts
 docs/      project source of truth
 infra/     future local env/deploy helpers
@@ -72,6 +73,10 @@ scripts/   future automation scripts
 - Sonner notifications are language-aware and visually vary by notification type.
 - 404/not-found/error screens exist with retry/home/report actions and language-aware copy.
 - Operator runtime dashboard foundation exists on `/dashboard` with product selector, API/demo product loading, persisted batch-size save, ROI preview, and OK/NG/batch counters.
+- Operator runtime counter semantics are:
+  `count` = the number of products/ROI recognized in the current scan,
+  `quantity` = the accumulated checked quantity inside the current batch,
+  `batch` = the completed package count; when `quantity` reaches `packSize`, it rolls over to the next batch and carries any remainder.
 - Product profile backend/frontend foundation is implemented.
 - Product profiles store product code, model path, per-batch quantity, camera settings, and ROI regions per product.
 - Product profile template apply flow can copy camera/ROI from one product to all products or selected product codes.
@@ -79,6 +84,7 @@ scripts/   future automation scripts
 - Product profile ROI editor currently supports draw/move/resize/rotate, multi-select with `Shift`, copy/paste, undo/redo, alignment/equal-spacing/straight-angle assists, overlap validation, and simulated camera preview background.
 - Backend inspection foundation now includes a Device Tool client plus `/api/inspections/start`, `/api/inspections/current`, and `/api/inspections/:jobId/stop` with per-ROI inspection logs.
 - Backend camera foundation now proxies Device Tool status, device discovery, connect, grab, and live stream through `/api/camera/status`, `/api/camera/devices`, `/api/camera/connect`, `/api/camera/grab`, and `/api/camera/stream`.
+- The active `tool/` directory now uses the API-Tool-v1 Device/OCR API. Backend access is routed through configurable `DEVICE_TOOL_API_PREFIX`, defaulting to `/tool/v1`; camera control and AI/yolo_ocr OCR runtime live there. The previous Device Tool was renamed to `tool-test/` for reference.
 - Backend license foundation now checks the USB dongle through the legacy `System8.dll` flow, records `license_logs`, exposes `/api/system/license/public` for login and `/api/system/license` for authenticated status, and blocks login when the dongle is missing unless `DONGLE_MOCK_MODE=true`.
 - Dedicated Camera page exists at `/dashboard/camera` with product-profile selection, Device Tool status/device discovery, connect/grab/live controls, view adjustment persistence, and manual refresh for camera status/devices.
 - AppShell warms up camera status/device discovery in the background for users with camera or inspection permissions.
@@ -97,7 +103,6 @@ scripts/   future automation scripts
 - Dedicated history/reports screens and query flows.
 - Full end-to-end inspection runtime orchestration beyond the initial backend Device Tool integration.
 - Full Electron boot-time dongle gate, periodic runtime recheck, and production packaging validation.
-- Python/FastAPI AI service.
 - User-level permission override UI.
 
 ### Electron MVP
@@ -189,6 +194,7 @@ Current UI behavior:
 - User-facing pages, modals, empty/error states, validation messages, and notifications must use the current selected language.
 - Normal admin must only see/manage `engineer/operator` on role permission screens; `admin/dev` are protected for `dev`.
 - `/dashboard` currently hosts the operator runtime foundation instead of a separate dedicated runtime module route.
+- On the operator runtime screen, `quantity` should be shown before `count` because `quantity` is the batch-progress number and `count` is only the current-scan recognized amount.
 - `roi`, `history`, and `reports` are present in menu permissions but do not have their own pages yet.
 - Camera operations now have a dedicated page at `/dashboard/camera`; the page still depends on the Device Tool running locally, usually at `http://localhost:8000`.
 - Product preview uses `frontend/public/preview-background.png` to simulate camera output when no live camera preview is available.
@@ -271,7 +277,7 @@ NEXT_PUBLIC_API_BASE_URL=http://localhost:4000/api
 - Vietnamese UI copy must always use proper Vietnamese diacritics.
 - The app must support English and Vietnamese.
 - Frontend must call backend only.
-- Backend calls AI service later.
+- Backend calls the Python/FastAPI Device/OCR Tool in `tool/` through `/tool/v1`.
 - `dev` is hidden from normal roles.
 - Normal admin must not manage `dev`.
 - Authorization must be enforced in backend, not only by hiding UI.

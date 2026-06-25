@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>AI / yolo_ocr (A) — UI test</title>
+  <style>
+    body { font-family: system-ui, sans-serif; background:#0f1115; color:#e6e6e6; margin:0; padding:24px; }
+    h1 { font-size:18px; margin:0 0 16px; }
+    a { color:#7cc4ff; }
+    .wrap { display:flex; gap:24px; flex-wrap:wrap; }
+    .panel { background:#1a1d24; border:1px solid #2a2f3a; border-radius:10px; padding:16px; width:380px; }
+    label { display:block; font-size:12px; color:#8a93a3; margin:10px 0 4px; }
+    input { width:100%; box-sizing:border-box; background:#0f1115; color:#e6e6e6;
+            border:1px solid #2a2f3a; border-radius:6px; padding:7px 9px; font-size:13px; }
+    .row { display:flex; gap:8px; } .row > div { flex:1; }
+    button { margin-top:12px; margin-right:8px; background:#2a3a52; color:#e6e6e6; border:1px solid #3a557d;
+             border-radius:6px; padding:8px 14px; font-size:13px; cursor:pointer; }
+    button:hover { background:#34507a; } button.stop { background:#522a2a; border-color:#7d3a3a; }
+    .status { font-size:12px; margin-top:10px; } .ok{color:#69db7c;} .err{color:#ff8787;}
+    pre { background:#0b0d11; border:1px solid #2a2f3a; border-radius:6px; padding:10px;
+          font-size:12px; max-height:240px; overflow:auto; margin-top:12px; white-space:pre-wrap; }
+    .rows { font-size:18px; font-weight:600; color:#7cc4ff; min-height:24px; }
+    .badge { font-size:12px; color:#8a93a3; }
+  </style>
+</head>
+<body>
+  <h1>AI / yolo_ocr (A) — predict độc lập &middot; <a href="index.html">← trang chính</a></h1>
+  <div class="wrap">
+    <div class="panel">
+      <div class="badge">Nạp model</div>
+      <label>Model path (trên máy server)</label>
+      <input id="modelPath" placeholder="E:\\...\\OCR5.pt" />
+      <div class="row">
+        <div><label>conf</label><input id="conf" type="number" step="0.05" value="0.5" /></div>
+        <div><label>iou</label><input id="iou" type="number" step="0.05" value="0.5" /></div>
+        <div><label>row_threshold</label><input id="rowTh" type="number" value="20" /></div>
+      </div>
+      <button onclick="loadModel()">Load model</button>
+      <button onclick="applyConfig()">Apply config</button>
+      <div class="status">Trạng thái: <span id="status" class="badge">chưa nạp</span></div>
+    </div>
+
+    <div class="panel">
+      <div class="badge">Predict 1 ảnh (REST, file)</div>
+      <input id="file" type="file" accept="image/*" />
+      <button onclick="predictFile()">Predict file</button>
+
+      <div class="badge" style="margin-top:16px">Predict liên tục (WebSocket)</div>
+      <input id="fileWs" type="file" accept="image/*" />
+      <div>
+        <button onclick="wsConnect()">Mở WS</button>
+        <button onclick="wsSend()">Gửi ảnh qua WS</button>
+        <button class="stop" onclick="wsClose()">Đóng WS</button>
+      </div>
+      <div class="status">Kết quả (rows):</div>
+      <div class="rows" id="rows">—</div>
+      <div class="status">Thời gian: <span id="time" class="badge">—</span> &middot; WS: <span id="wsState" class="badge">đóng</span></div>
+      <pre id="log"></pre>
+    </div>
+  </div>
+
+<script>
+const api = (p) => `/tool/v1${p}`;
+const BASE = "/AI/yolo_ocr";
+let ws = null;
+
+function log(m, c){const e=document.getElementById('log');e.innerHTML=`<span class="${c||''}">[${new Date().toLocaleTimeString()}] ${m}</span>\n`+e.innerHTML;}
+function setStatus(t,ok){const s=document.getElementById('status');s.textContent=t;s.className='badge '+(ok?'ok':'err');}
+function showRows(rows){document.getElementById('rows').textContent = (rows&&rows.length)? rows.join('  |  ') : '(không có)';}
+
+async function loadModel(){
+  const body={model_path:document.getElementById('modelPath').value.trim(),
+    conf:Number(document.getElementById('conf').value),
+    iou:Number(document.getElementById('iou').value),
+    row_threshold:Number(document.getElementById('rowTh').value)};
+  const t0=performance.now();
+  const j=await (await fetch(api(BASE+'/load_model'),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})).json();
+  if(j.success){setStatus('đã nạp ('+(performance.now()-t0).toFixed(0)+' ms)',true);log('Load model: '+JSON.stringify(j.status),'ok');}
+  else{setStatus('lỗi',false);log('Load lỗi: '+j.error,'err');}
+}
+async function applyConfig(){
+  const body={conf:Number(document.getElementById('conf').value),iou:Number(document.getElementById('iou').value),row_threshold:Number(document.getElementById('rowTh').value)};
+  const j=await (await fetch(api(BASE+'/config'),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})).json();
+  log('Config: '+JSON.stringify(j),j.success?'ok':'err');
+}
+async function predictFile(){
+  const f=document.getElementById('file').files[0];
+  if(!f)return log('Chưa chọn file','err');
+  const fd=new FormData();fd.append('file',f);
+  const t0=performance.now();
+  const j=await (await fetch(api(BASE+'/predict'),{method:'POST',body:fd})).json();
+  document.getElementById('time').textContent=(performance.now()-t0).toFixed(1)+' ms (REST)';
+  if(j.success){showRows(j.rows);log('Predict: '+JSON.stringify(j.rows),'ok');}
+  else{showRows([]);log('Predict lỗi: '+j.error,'err');}
+}
+function wsConnect(){
+  if(ws)return log('WS đang mở','err');
+  ws=new WebSocket(`ws://${location.host}/tool/v1${BASE}/predict`);
+  ws.binaryType='arraybuffer';
+  ws.onopen=()=>{document.getElementById('wsState').textContent='mở';log('WS mở','ok');};
+  ws.onmessage=(ev)=>{const j=JSON.parse(ev.data);
+    if(j.success){showRows(j.rows);}else{showRows([]);log('WS lỗi: '+j.error,'err');}
+    if(window._t0)document.getElementById('time').textContent=(performance.now()-window._t0).toFixed(1)+' ms (WS)';};
+  ws.onclose=()=>{document.getElementById('wsState').textContent='đóng';ws=null;};
+  ws.onerror=()=>log('WS error','err');
+}
+async function wsSend(){
+  if(!ws)return log('Chưa mở WS','err');
+  const f=document.getElementById('fileWs').files[0]||document.getElementById('file').files[0];
+  if(!f)return log('Chưa chọn ảnh','err');
+  const buf=await f.arrayBuffer();window._t0=performance.now();ws.send(buf);
+}
+function wsClose(){if(ws)ws.close();}
+</script>
+</body>
+</html>

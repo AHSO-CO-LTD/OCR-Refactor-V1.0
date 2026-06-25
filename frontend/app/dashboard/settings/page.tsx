@@ -1,7 +1,7 @@
 "use client";
 
 import { AppShell } from "@/components/app-shell";
-import { DesktopSettingsPanel } from "@/components/settings/desktop-settings-panel";
+import { SettingsTabsPanel } from "@/components/settings/settings-tabs-panel";
 
 export default function SettingsPage() {
   return (
@@ -9,7 +9,7 @@ export default function SettingsPage() {
       titleKey="settings.title"
       descriptionKey="settings.description"
     >
-      <DesktopSettingsPanel />
+      <SettingsTabsPanel />
     </AppShell>
   );
 }

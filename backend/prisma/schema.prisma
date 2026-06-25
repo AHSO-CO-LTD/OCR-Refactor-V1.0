@@ -28,6 +28,13 @@ enum InspectionResult {
   UNKNOWN
 }
 
+enum TestSessionImageResult {
+  OK
+  NG
+  UNKNOWN
+  ERROR
+}
+
 model User {
   id             String           @id @default(cuid())
   username       String           @unique
@@ -45,6 +52,7 @@ model User {
   permissions    UserPermission[]
   auditLogs      AuditLog[]
   inspectionJobs InspectionJob[]
+  testSessionReports TestSessionReport[]
 }
 
 model Role {
@@ -95,11 +103,13 @@ model Product {
   thresholdAccept Decimal  @default(0.5) @db.Decimal(4, 2)
   thresholdMns    Decimal  @default(0.5) @db.Decimal(4, 2)
   modelPath       String?
+  rotateTestImageClockwise Boolean @default(false)
   active          Boolean  @default(true)
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
   cameraConfig    CameraConfig?
   roiRegions      RoiRegion[]
+  testSessionReports TestSessionReport[]
 }
 
 model CameraConfig {
@@ -109,10 +119,10 @@ model CameraConfig {
   deviceName String?
   rtspUrl    String?
   exposure   Int      @default(3500)
-  imageWidth Int      @default(2500)
-  imageHeight Int     @default(1000)
-  offsetX    Int      @default(300)
-  offsetY    Int      @default(1400)
+  imageWidth Int      @default(1500)
+  imageHeight Int     @default(500)
+  offsetX    Int      @default(0)
+  offsetY    Int      @default(0)
   zoomFactor Decimal  @default(0.4) @db.Decimal(4, 2)
   previewPanX Decimal @default(0) @db.Decimal(6, 4)
   previewPanY Decimal @default(0) @db.Decimal(6, 4)
@@ -183,4 +193,56 @@ model LicenseLog {
   code      String?
   message   String?
   createdAt DateTime @default(now())
+}
+
+model TestSessionReport {
+  id            String                 @id @default(cuid())
+  productId     String
+  actorId       String
+  folderName    String?
+  totalImages   Int
+  okImages      Int
+  ngImages      Int
+  unknownImages Int                   @default(0)
+  errorImages   Int
+  createdAt     DateTime              @default(now())
+  updatedAt     DateTime              @updatedAt
+  actor         User                  @relation(fields: [actorId], references: [id])
+  product       Product               @relation(fields: [productId], references: [id])
+  failedImages  TestSessionFailedImage[]
+
+  @@index([productId, createdAt])
+  @@index([actorId, createdAt])
+}
+
+model TestSessionFailedImage {
+  id                String                 @id @default(cuid())
+  reportId          String
+  fileName          String
+  relativePath      String
+  result            TestSessionImageResult
+  cycleTimeMs       Int?
+  errorMessage      String?
+  originalImageBase64 String               @db.Text
+  createdAt         DateTime               @default(now())
+  report            TestSessionReport      @relation(fields: [reportId], references: [id], onDelete: Cascade)
+  roiResults        TestSessionFailedRoiResult[]
+
+  @@index([reportId, createdAt])
+}
+
+model TestSessionFailedRoiResult {
+  id                 String              @id @default(cuid())
+  failedImageId      String
+  slotIndex          Int?
+  slotLabel          String?
+  expectedText       String?
+  rawText            String?
+  result             InspectionResult    @default(UNKNOWN)
+  errorMessage       String?
+  toolDebugImageBase64 String?           @db.Text
+  createdAt          DateTime            @default(now())
+  failedImage        TestSessionFailedImage @relation(fields: [failedImageId], references: [id], onDelete: Cascade)
+
+  @@index([failedImageId, slotIndex])
 }

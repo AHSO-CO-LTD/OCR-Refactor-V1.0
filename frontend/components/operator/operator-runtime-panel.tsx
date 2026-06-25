@@ -31,6 +31,7 @@ import {
 } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
 import { getAccessToken } from "@/lib/session";
+import { getResultSoundLevel, getSoundSettings } from "@/lib/sound-settings";
 
 type ResultState = "OK" | "NG";
 type DataSource = "api" | "demo";
@@ -46,13 +47,14 @@ const demoProducts: ProductProfile[] = [
     thresholdAccept: 85,
     thresholdMns: 70,
     modelPath: "models/sl-37.onnx",
+    rotateTestImageClockwise: false,
     active: true,
     camera: {
       sourceType: "demo",
       deviceName: "demo-camera",
       exposure: 1200,
-      imageWidth: 3000,
-      imageHeight: 1000,
+      imageWidth: 1500,
+      imageHeight: 500,
       offsetX: 0,
       offsetY: 0,
       zoomFactor: 1,
@@ -61,11 +63,11 @@ const demoProducts: ProductProfile[] = [
       previewRotation: 0,
     },
     roiRegions: [
-      { index: 1, x: 566, y: 474, width: 210, height: 322, rotation: 0 },
-      { index: 2, x: 1049, y: 474, width: 210, height: 322, rotation: 0 },
-      { index: 3, x: 1517, y: 474, width: 210, height: 322, rotation: 0 },
-      { index: 4, x: 2001, y: 474, width: 210, height: 322, rotation: 0 },
-      { index: 5, x: 2457, y: 470, width: 210, height: 322, rotation: 0 },
+      { index: 1, x: 283, y: 237, width: 105, height: 161, rotation: 0 },
+      { index: 2, x: 525, y: 237, width: 105, height: 161, rotation: 0 },
+      { index: 3, x: 759, y: 237, width: 105, height: 161, rotation: 0 },
+      { index: 4, x: 1001, y: 237, width: 105, height: 161, rotation: 0 },
+      { index: 5, x: 1229, y: 235, width: 105, height: 161, rotation: 0 },
     ],
     createdAt: "2026-01-01T00:00:00.000Z",
     updatedAt: "2026-01-01T00:00:00.000Z",
@@ -79,6 +81,13 @@ function playInspectionSound(result: ResultState) {
       .webkitAudioContext;
 
   if (!AudioContextClass) {
+    return;
+  }
+
+  const soundSettings = getSoundSettings();
+  const level = getResultSoundLevel(soundSettings, result);
+
+  if (level <= 0) {
     return;
   }
 
@@ -106,19 +115,21 @@ function playInspectionSound(result: ResultState) {
   };
 
   if (result === "OK") {
-    playBurst(context.currentTime, 880, 0.18, "sine", 0.16);
+    playBurst(context.currentTime, 880, 0.18, "sine", 0.16 * level);
     window.setTimeout(() => void context.close(), 320);
     return;
   }
 
-  playBurst(context.currentTime, 150, 0.18, "sawtooth", 0.2);
-  playBurst(context.currentTime + 0.24, 120, 0.22, "sawtooth", 0.2);
+  playBurst(context.currentTime, 150, 0.18, "sawtooth", 0.2 * level);
+  playBurst(context.currentTime + 0.24, 120, 0.22, "sawtooth", 0.2 * level);
   window.setTimeout(() => void context.close(), 620);
 }
 
 export function OperatorRuntimePanel() {
   const { t } = useI18n();
   const overlayTimeoutRef = useRef<number | null>(null);
+  const batchCountRef = useRef(0);
+  const batchQuantityRef = useRef(0);
   const [products, setProducts] = useState<ProductProfile[]>(demoProducts);
   const [selectedProductId, setSelectedProductId] = useState(demoProducts[0].id);
   const [dataSource, setDataSource] = useState<DataSource>("demo");
@@ -126,8 +137,8 @@ export function OperatorRuntimePanel() {
   const [okCount, setOkCount] = useState(0);
   const [ngCount, setNgCount] = useState(0);
   const [batchCount, setBatchCount] = useState(0);
-  const [currentBatchCount, setCurrentBatchCount] = useState(0);
-  const [quantityCount, setQuantityCount] = useState(0);
+  const [batchQuantity, setBatchQuantity] = useState(0);
+  const [scanCount, setScanCount] = useState(0);
   const [batchSize, setBatchSize] = useState(demoProducts[0].defaultNumber);
   const [batchDraft, setBatchDraft] = useState(String(demoProducts[0].batchSize));
   const [keypadOpen, setKeypadOpen] = useState(false);
@@ -225,9 +236,11 @@ export function OperatorRuntimePanel() {
   function resetCounters(showToast = true) {
     setOkCount(0);
     setNgCount(0);
+    batchCountRef.current = 0;
+    batchQuantityRef.current = 0;
     setBatchCount(0);
-    setCurrentBatchCount(0);
-    setQuantityCount(0);
+    setBatchQuantity(0);
+    setScanCount(0);
 
     if (showToast) {
       toast.success(t("operator.resetDone"));
@@ -309,17 +322,19 @@ export function OperatorRuntimePanel() {
             : product,
         ),
       );
-      setCurrentBatchCount((current) => {
-        if (current < response.data.batchSize) {
-          return current;
-        }
+      const nextBatchQuantity = batchQuantityRef.current;
 
-        setBatchCount(
-          (batchCurrent) =>
-            batchCurrent + Math.floor(current / response.data.batchSize),
+      if (nextBatchQuantity >= response.data.batchSize) {
+        const batchIncrement = Math.floor(
+          nextBatchQuantity / response.data.batchSize,
         );
-        return current % response.data.batchSize;
-      });
+        const remainder = nextBatchQuantity % response.data.batchSize;
+
+        batchCountRef.current += batchIncrement;
+        batchQuantityRef.current = remainder;
+        setBatchCount(batchCountRef.current);
+        setBatchQuantity(remainder);
+      }
       setKeypadOpen(false);
       toast.success(t("operator.packSizeSaved"));
     } catch (cause) {
@@ -334,27 +349,24 @@ export function OperatorRuntimePanel() {
   }
 
   function triggerResult(result: ResultState) {
-    const increment = roiCount;
+    const countIncrement = roiCount;
+    const nextBatchQuantity = batchQuantityRef.current + countIncrement;
+    const batchIncrement = Math.floor(nextBatchQuantity / safeBatchSize);
+    const remainder = nextBatchQuantity % safeBatchSize;
 
     setOverlayResult(result);
-    setQuantityCount(increment);
+    setScanCount(countIncrement);
 
     if (result === "OK") {
-      setOkCount((current) => current + increment);
+      setOkCount((current) => current + countIncrement);
     } else {
-      setNgCount((current) => current + increment);
+      setNgCount((current) => current + countIncrement);
     }
 
-    setCurrentBatchCount((current) => {
-      const next = current + increment;
-
-      if (next >= safeBatchSize) {
-        setBatchCount((batchCurrent) => batchCurrent + Math.floor(next / safeBatchSize));
-        return next % safeBatchSize;
-      }
-
-      return next;
-    });
+    batchCountRef.current += batchIncrement;
+    batchQuantityRef.current = remainder;
+    setBatchCount(batchCountRef.current);
+    setBatchQuantity(remainder);
 
     try {
       playInspectionSound(result);
@@ -372,11 +384,70 @@ export function OperatorRuntimePanel() {
     );
   }
 
+  const actionButtons = (
+    <>
+      <Button
+        type="button"
+        variant="outline"
+        disabled
+        className="operator-line-action-button h-14 border-[#1e293b] bg-[#9fc3eb] text-base font-semibold text-slate-950 opacity-100"
+      >
+        <Camera className="h-5 w-5" />
+        {t("operator.grab")}
+      </Button>
+      <Button
+        type="button"
+        variant="outline"
+        disabled
+        className="operator-line-action-button h-14 border-[#1e293b] bg-[#9fc3eb] text-base font-semibold text-slate-950 opacity-100"
+      >
+        <Video className="h-5 w-5" />
+        {t("operator.liveCamera")}
+      </Button>
+      <Button
+        type="button"
+        variant="outline"
+        disabled
+        className="operator-line-action-button h-14 border-[#1e293b] bg-[#9fc3eb] text-base font-semibold text-slate-950 opacity-100"
+      >
+        <Zap className="h-5 w-5" />
+        {t("operator.realTimeAi")}
+      </Button>
+      <Button
+        type="button"
+        variant="outline"
+        disabled
+        className="operator-line-action-button h-14 border-[#1e293b] bg-[#9fc3eb] text-base font-semibold text-slate-950 opacity-100"
+      >
+        <Settings2 className="h-5 w-5" />
+        {t("operator.manual")}
+      </Button>
+      <Button
+        type="button"
+        variant="outline"
+        disabled
+        className="operator-line-action-button h-14 border-[#1e293b] bg-[#9fc3eb] text-base font-semibold text-slate-950 opacity-100"
+      >
+        <Settings2 className="h-5 w-5" />
+        {t("operator.auto")}
+      </Button>
+      <Button
+        type="button"
+        variant="outline"
+        className="operator-line-action-button h-14 border-[#1e293b] bg-[#9fc3eb] text-base font-semibold text-slate-950 hover:bg-[#8fb8e6]"
+        onClick={() => resetCounters(true)}
+      >
+        <RotateCcw className="h-5 w-5" />
+        {t("operator.resetCounter")}
+      </Button>
+    </>
+  );
+
   return (
-    <div className="grid min-w-0 gap-3">
-      <Card className="border-[#86a8cf] bg-[#cfdff2] shadow-none">
-        <CardContent className="grid gap-4 p-4 min-[980px]:grid-cols-[340px_minmax(0,1fr)]">
-          <div className="rounded-sm border border-[#9db7d8] bg-[#d9e6f5] p-4">
+    <div className="grid h-full min-w-0 min-h-0 grid-rows-[auto_minmax(0,1fr)_auto] gap-3">
+      <Card className="operator-line-top-card border-[#86a8cf] bg-[#cfdff2] shadow-none">
+        <CardContent className="operator-line-top-content grid gap-4 p-4 min-[980px]:grid-cols-[340px_minmax(0,1fr)]">
+          <div className="operator-line-product-box rounded-sm border border-[#9db7d8] bg-[#d9e6f5] p-4">
             <div className="mb-3 flex items-center justify-between gap-3">
               <CardTitle className="flex items-center gap-2 text-xl font-bold text-slate-950">
                 <Package className="h-5 w-5 text-[#274d7d]" />
@@ -474,141 +545,96 @@ export function OperatorRuntimePanel() {
             </div>
           </div>
 
-          <div className="grid gap-3 min-[860px]:grid-cols-[minmax(0,1fr)_280px]">
-            <div className="grid gap-3 min-[760px]:grid-cols-2">
+          <div className="operator-line-stats-shell grid gap-3 min-[860px]:grid-cols-[minmax(0,1fr)_280px]">
+            <div className="operator-line-stats-grid grid gap-3 min-[760px]:grid-cols-2">
               <InfoTile
                 label={t("operator.currentProduct")}
                 value={selectedProduct.code}
-                className="border-[#f0a53b] bg-white text-slate-950"
-              />
-              <InfoTile
-                label={t("operator.count")}
-                value={currentBatchCount}
-                className="border-[#f0a53b] bg-white text-slate-950"
+                className="operator-line-info-tile border-[#f0a53b] bg-white text-slate-950"
               />
               <InfoTile
                 label={t("operator.quantity")}
-                value={quantityCount}
-                className="border-[#f0a53b] bg-white text-slate-950"
+                value={batchQuantity}
+                className="operator-line-info-tile border-[#f0a53b] bg-white text-slate-950"
+              />
+              <InfoTile
+                label={t("operator.count")}
+                value={scanCount}
+                className="operator-line-info-tile border-[#f0a53b] bg-white text-slate-950"
               />
               <InfoTile
                 label={t("operator.batch")}
                 value={batchCount}
-                className="border-[#f0a53b] bg-white text-slate-950"
+                className="operator-line-info-tile border-[#f0a53b] bg-white text-slate-950"
               />
             </div>
 
-            <div className="grid gap-3 min-[520px]:grid-cols-2 min-[860px]:grid-cols-1">
+            <div className="operator-line-status-grid grid gap-3 min-[520px]:grid-cols-2 min-[860px]:grid-cols-1">
               <InfoTile
                 label={t("operator.ok")}
                 value={okCount}
-                className="border-[#0f9f47] bg-[#15b455] text-white"
-                valueClassName="text-6xl min-[860px]:text-7xl"
+                className="operator-line-info-tile border-[#0f9f47] bg-[#15b455] text-white"
+                valueClassName="operator-line-okng-value text-6xl min-[860px]:text-7xl"
               />
               <InfoTile
                 label={t("operator.ng")}
                 value={ngCount}
-                className="border-[#d92d20] bg-[#ef3e36] text-white"
-                valueClassName="text-6xl min-[860px]:text-7xl"
+                className="operator-line-info-tile border-[#d92d20] bg-[#ef3e36] text-white"
+                valueClassName="operator-line-okng-value text-6xl min-[860px]:text-7xl"
               />
+            </div>
+          </div>
+
+          <div className="operator-line-top-actions rounded-sm border border-[#9db7d8] bg-[#d9e6f5] p-4">
+            <div className="grid gap-2">
+              {actionButtons}
             </div>
           </div>
         </CardContent>
       </Card>
 
-      <Card className="overflow-hidden border-[#86a8cf] bg-[#9fc3eb] shadow-none">
-        <div className="border-b border-[#86a8cf] px-4 py-3 text-center text-3xl font-bold text-[#2270c6]">
-          {t("operator.referenceImage")}
-        </div>
-        <div className="p-4">
-          <OperatorRoiEditor
-            product={displayProduct}
-            onChange={handleRoiChange}
-            overlayResult={overlayResult}
-            okCount={okCount}
-            ngCount={ngCount}
-            interactive={false}
-            previewImageSrc={livePreviewImageSrc}
-            showClock
-            topRightControls={
-              <>
-                <Button
-                  type="button"
-                  className="border-[#23a24d] bg-[#17b74f] text-white hover:bg-[#11923f]"
-                  onClick={() => triggerResult("OK")}
-                >
-                  <CheckCircle2 className="h-4 w-4 text-white" />
-                  {t("operator.triggerOk")}
-                </Button>
-                <Button
-                  type="button"
-                  className="border-[#c43b30] bg-[#e53935] text-white hover:bg-[#c62828]"
-                  onClick={() => triggerResult("NG")}
-                >
-                  <CircleDot className="h-4 w-4 text-white" />
-                  {t("operator.triggerNg")}
-                </Button>
-              </>
-            }
-          />
+      <Card className="operator-line-preview-card flex min-h-0 overflow-hidden border-[#86a8cf] bg-[#9fc3eb] shadow-none">
+        <div className="flex min-h-0 flex-1 flex-col">
+          <div className="operator-line-preview-heading shrink-0 border-b border-[#86a8cf] px-4 py-3 text-center text-3xl font-bold text-[#2270c6]">
+            {t("operator.referenceImage")}
+          </div>
+          <div className="operator-line-preview-body min-h-0 flex-1 p-4">
+            <OperatorRoiEditor
+              product={displayProduct}
+              onChange={handleRoiChange}
+              overlayResult={overlayResult}
+              okCount={okCount}
+              ngCount={ngCount}
+              interactive={false}
+              previewImageSrc={livePreviewImageSrc}
+              showClock
+              topRightControls={
+                <>
+                  <Button
+                    type="button"
+                    className="border-[#23a24d] bg-[#17b74f] text-white hover:bg-[#11923f]"
+                    onClick={() => triggerResult("OK")}
+                  >
+                    <CheckCircle2 className="h-4 w-4 text-white" />
+                    {t("operator.triggerOk")}
+                  </Button>
+                  <Button
+                    type="button"
+                    className="border-[#c43b30] bg-[#e53935] text-white hover:bg-[#c62828]"
+                    onClick={() => triggerResult("NG")}
+                  >
+                    <CircleDot className="h-4 w-4 text-white" />
+                    {t("operator.triggerNg")}
+                  </Button>
+                </>
+              }
+            />
+          </div>
         </div>
       </Card>
 
-      <div className="grid gap-2 min-[980px]:grid-cols-6">
-        <Button
-          type="button"
-          variant="outline"
-          disabled
-          className="h-14 border-[#1e293b] bg-[#9fc3eb] text-base font-semibold text-slate-950 opacity-100"
-        >
-          <Camera className="h-5 w-5" />
-          {t("operator.grab")}
-        </Button>
-        <Button
-          type="button"
-          variant="outline"
-          disabled
-          className="h-14 border-[#1e293b] bg-[#9fc3eb] text-base font-semibold text-slate-950 opacity-100"
-        >
-          <Video className="h-5 w-5" />
-          {t("operator.liveCamera")}
-        </Button>
-        <Button
-          type="button"
-          variant="outline"
-          disabled
-          className="h-14 border-[#1e293b] bg-[#9fc3eb] text-base font-semibold text-slate-950 opacity-100"
-        >
-          <Zap className="h-5 w-5" />
-          {t("operator.realTimeAi")}
-        </Button>
-        <Button
-          type="button"
-          variant="outline"
-          disabled
-          className="h-14 border-[#1e293b] bg-[#9fc3eb] text-base font-semibold text-slate-950 opacity-100"
-        >
-          <Settings2 className="h-5 w-5" />
-          {t("operator.manual")}
-        </Button>
-        <Button
-          type="button"
-          variant="outline"
-          disabled
-          className="h-14 border-[#1e293b] bg-[#9fc3eb] text-base font-semibold text-slate-950 opacity-100"
-        >
-          <Settings2 className="h-5 w-5" />
-          {t("operator.auto")}
-        </Button>
-        <Button
-          type="button"
-          variant="outline"
-          className="h-14 border-[#1e293b] bg-[#9fc3eb] text-base font-semibold text-slate-950 hover:bg-[#8fb8e6]"
-          onClick={() => resetCounters(true)}
-        >
-          <RotateCcw className="h-5 w-5" />
-          {t("operator.resetCounter")}
-        </Button>
+      <div className="operator-line-footer-actions grid shrink-0 gap-2 min-[980px]:grid-cols-6">
+        {actionButtons}
       </div>
     </div>
   );

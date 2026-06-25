@@ -42,6 +42,7 @@ import {
   clientPointToCameraPoint,
 } from "@/components/camera/camera-preview-image";
 import { useConnectedCameraPreview } from "@/components/camera/use-connected-camera-preview";
+import { getDesktopBridge } from "@/lib/desktop";
 import { useI18n } from "@/lib/i18n";
 import { getAccessToken } from "@/lib/session";
 
@@ -53,8 +54,9 @@ type ProductProfileFormProps = {
   onSubmit: (payload: ProductProfilePayload) => Promise<void>;
 };
 
-const cameraWidth = 3000;
-const cameraHeight = 1000;
+const previewAspectRatio = 3;
+const defaultCameraWidth = 1500;
+const defaultCameraHeight = defaultCameraWidth / previewAspectRatio;
 const maxRoiRegions = 5;
 const pasteOffset = 40;
 const minRoiSize = 20;
@@ -77,6 +79,7 @@ type RoiAssist = {
   horizontalY?: number;
   spacingGuides?: SpacingGuide[];
 };
+type CameraFrame = { width: number; height: number };
 
 const defaultDraft: ProductProfilePayload = {
   code: "",
@@ -87,14 +90,15 @@ const defaultDraft: ProductProfilePayload = {
   thresholdAccept: 0.5,
   thresholdMns: 0.5,
   modelPath: "",
+  rotateTestImageClockwise: false,
   active: true,
   camera: {
     sourceType: "usb",
     deviceName: "Camera 1",
     rtspUrl: "",
     exposure: 3500,
-    imageWidth: cameraWidth,
-    imageHeight: cameraHeight,
+    imageWidth: defaultCameraWidth,
+    imageHeight: defaultCameraHeight,
     offsetX: 0,
     offsetY: 0,
     zoomFactor: 1,
@@ -130,6 +134,7 @@ function toDraft(product?: ProductProfile | null): ProductProfilePayload {
     thresholdAccept: product.thresholdAccept,
     thresholdMns: product.thresholdMns,
     modelPath: product.modelPath ?? "",
+    rotateTestImageClockwise: product.rotateTestImageClockwise,
     active: product.active,
     camera: {
       ...product.camera,
@@ -147,6 +152,21 @@ function clamp(value: number, min: number, max: number) {
   return Math.min(Math.max(value, min), max);
 }
 
+function getCameraFrame(camera: ProductProfilePayload["camera"]): CameraFrame {
+  const rawWidth = Number(camera.imageWidth);
+  const width = Math.max(
+    1,
+    Math.round(rawWidth || defaultCameraWidth),
+  );
+  const rawHeight = Number(camera.imageHeight);
+  const height = Math.max(
+    1,
+    Math.round(rawHeight || width / previewAspectRatio),
+  );
+
+  return { width, height };
+}
+
 function cameraDeviceValue(device: CameraDevice) {
   return device.friendly_name;
 }
@@ -159,10 +179,7 @@ function regionFromClientPoint(
   return clientPointToCameraPoint({
     clientPoint: point,
     container: element,
-    imageSize: {
-      width: camera.imageWidth || cameraWidth,
-      height: camera.imageHeight || cameraHeight,
-    },
+    imageSize: getCameraFrame(camera),
     previewPanX: camera.previewPanX,
     previewPanY: camera.previewPanY,
     previewRotation: camera.previewRotation,
@@ -186,13 +203,17 @@ function nextRegionIndex(regions: RoiRegion[]) {
   return regions.reduce((max, region) => Math.max(max, region.index), 0) + 1;
 }
 
-function clampRegionCenter(region: RoiRegion, position: { x: number; y: number }) {
-  const halfWidth = Math.min(region.width / 2, cameraWidth / 2);
-  const halfHeight = Math.min(region.height / 2, cameraHeight / 2);
+function clampRegionCenter(
+  region: RoiRegion,
+  position: { x: number; y: number },
+  frame: CameraFrame,
+) {
+  const halfWidth = Math.min(region.width / 2, frame.width / 2);
+  const halfHeight = Math.min(region.height / 2, frame.height / 2);
 
   return {
-    x: Math.round(clamp(position.x, halfWidth, cameraWidth - halfWidth)),
-    y: Math.round(clamp(position.y, halfHeight, cameraHeight - halfHeight)),
+    x: Math.round(clamp(position.x, halfWidth, frame.width - halfWidth)),
+    y: Math.round(clamp(position.y, halfHeight, frame.height - halfHeight)),
   };
 }
 
@@ -315,6 +336,7 @@ function getAlignedPosition(
   region: RoiRegion,
   position: Point,
   regions: RoiRegion[],
+  frame: CameraFrame,
 ) {
   let nextPosition = position;
   const assist: RoiAssist = { message: "" };
@@ -336,7 +358,7 @@ function getAlignedPosition(
     });
 
   return {
-    position: clampRegionCenter(region, nextPosition),
+    position: clampRegionCenter(region, nextPosition, frame),
     assist: assist.message ? assist : null,
   };
 }
@@ -543,6 +565,7 @@ export function ProductProfileForm({
     () => [...draft.roiRegions].sort((a, b) => a.index - b.index),
     [draft.roiRegions],
   );
+  const cameraFrame = getCameraFrame(draft.camera);
   const overlappingRegionIndexes = useMemo(
     () => getOverlappingRegionIndexes(roiRegions),
     [roiRegions],
@@ -828,7 +851,30 @@ export function ProductProfileForm({
     setDraft((current) => ({ ...current, [field]: Number(value) }));
   }
 
-  function handleBrowseModelFile() {
+  async function handleBrowseModelFile() {
+    const desktop = getDesktopBridge();
+
+    if (desktop) {
+      let result: Awaited<ReturnType<typeof desktop.selectModelFile>>;
+
+      try {
+        result = await desktop.selectModelFile();
+      } catch (error) {
+        toast.error(
+          error instanceof Error ? error.message : t("error.globalDescription"),
+        );
+        return;
+      }
+
+      if (result.canceled || !result.filePath) {
+        return;
+      }
+
+      setDraft((current) => ({ ...current, modelPath: result.filePath ?? "" }));
+      toast.success(t("products.modelFileSelected"));
+      return;
+    }
+
     modelFileInputRef.current?.click();
   }
 
@@ -865,10 +911,38 @@ export function ProductProfileForm({
     value: string,
   ) {
     saveRoiSnapshot();
-    setDraft((current) => ({
-      ...current,
-      camera: { ...current.camera, [field]: Number(value) },
-    }));
+    setDraft((current) => {
+      const numericValue = Number(value);
+      const nextValue =
+        field === "imageWidth" || field === "imageHeight"
+          ? Math.max(1, Math.round(numericValue || 1))
+          : numericValue;
+      const nextCamera = { ...current.camera, [field]: nextValue };
+      const nextFrame = getCameraFrame(nextCamera);
+      const shouldClampRois =
+        field === "imageWidth" || field === "imageHeight";
+
+      return {
+        ...current,
+        camera: nextCamera,
+        roiRegions: shouldClampRois
+          ? current.roiRegions.map((region) => ({
+              ...region,
+              width: Math.min(region.width, nextFrame.width),
+              height: Math.min(region.height, nextFrame.height),
+              ...clampRegionCenter(
+                {
+                  ...region,
+                  width: Math.min(region.width, nextFrame.width),
+                  height: Math.min(region.height, nextFrame.height),
+                },
+                region,
+                nextFrame,
+              ),
+            }))
+          : current.roiRegions,
+      };
+    });
   }
 
   async function refreshCameraDevices(showToast = true) {
@@ -937,6 +1011,21 @@ export function ProductProfileForm({
           : region,
       ),
     }));
+  }
+
+  function swapRegionShape(index: number) {
+    const region = draft.roiRegions.find((item) => item.index === index);
+
+    if (!region) {
+      return;
+    }
+
+    saveRoiSnapshot();
+    updateRegion(index, {
+      width: region.height,
+      height: region.width,
+    });
+    toast.success(t("products.roiShapeSwapped"));
   }
 
   function handleCopyProfile() {
@@ -1082,7 +1171,11 @@ export function ProductProfileForm({
       };
 
       if (resizingRegion.indexes.length > 1) {
-        const activeCenter = clampRegionCenter(nextRegion, nextCenter);
+        const activeCenter = clampRegionCenter(
+          nextRegion,
+          nextCenter,
+          cameraFrame,
+        );
         const widthScale = width / resizingRegion.initialActiveRegion.width;
         const heightScale = height / resizingRegion.initialActiveRegion.height;
 
@@ -1117,7 +1210,7 @@ export function ProductProfileForm({
       }
 
       updateRegion(resizingRegion.index, {
-        ...clampRegionCenter(nextRegion, nextCenter),
+        ...clampRegionCenter(nextRegion, nextCenter, cameraFrame),
         width,
         height,
       });
@@ -1153,10 +1246,14 @@ export function ProductProfileForm({
 
           return {
             ...item,
-            ...clampRegionCenter(initialRegion, {
-              x: initialRegion.x + dx,
-              y: initialRegion.y + dy,
-            }),
+            ...clampRegionCenter(
+              initialRegion,
+              {
+                x: initialRegion.x + dx,
+                y: initialRegion.y + dy,
+              },
+              cameraFrame,
+            ),
           };
         }),
       }));
@@ -1171,6 +1268,7 @@ export function ProductProfileForm({
         y: nextPosition.y + draggingRegion.offset.y,
       },
       draft.roiRegions,
+      cameraFrame,
     );
 
     updateRegion(draggingRegion.index, alignedRegion.position);
@@ -1190,10 +1288,6 @@ export function ProductProfileForm({
   }
 
   function handlePreviewPointerDown(event: PointerEvent<HTMLDivElement>) {
-    if (event.target !== event.currentTarget) {
-      return;
-    }
-
     if (event.button !== 0) {
       return;
     }
@@ -1371,10 +1465,14 @@ export function ProductProfileForm({
     }
 
     const newIndex = nextRegionIndex(draft.roiRegions);
-    const pastedRegion = clampRegionCenter(region, {
-      x: region.x + pasteOffset,
-      y: region.y + pasteOffset,
-    });
+    const pastedRegion = clampRegionCenter(
+      region,
+      {
+        x: region.x + pasteOffset,
+        y: region.y + pasteOffset,
+      },
+      cameraFrame,
+    );
 
     setCopiedRegion({ ...region });
     saveRoiSnapshot();
@@ -1412,10 +1510,14 @@ export function ProductProfileForm({
       x: copiedRegion.x + pasteOffset,
       y: copiedRegion.y + pasteOffset,
     };
-    const pastedRegion = clampRegionCenter(copiedRegion, {
-      x: pastePoint.x,
-      y: pastePoint.y,
-    });
+    const pastedRegion = clampRegionCenter(
+      copiedRegion,
+      {
+        x: pastePoint.x,
+        y: pastePoint.y,
+      },
+      cameraFrame,
+    );
 
     saveRoiSnapshot();
     setDraft((current) => ({
@@ -1945,18 +2047,8 @@ export function ProductProfileForm({
                 onPointerLeave={finishDrawingRegion}
                 onKeyDown={handlePreviewKeyDown}
               >
-                <div className="pointer-events-none absolute inset-0 opacity-95">
-                  <CameraPreviewImage
-                    imageSource={livePreviewImageSrc}
-                    zoomFactor={draft.camera.zoomFactor}
-                    previewPanX={draft.camera.previewPanX}
-                    previewPanY={draft.camera.previewPanY}
-                    previewRotation={draft.camera.previewRotation}
-                  />
-                </div>
-                <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(to_right,rgba(255,255,255,.08)_1px,transparent_1px),linear-gradient(to_bottom,rgba(255,255,255,.08)_1px,transparent_1px)] bg-[size:10%_20%]" />
                 <div className="pointer-events-none absolute left-3 top-3 border border-white/20 bg-black/70 px-2 py-1 text-xs text-white">
-                  3000 x 1000
+                  {cameraFrame.width} x {cameraFrame.height}
                 </div>
                 <div className="pointer-events-none absolute right-3 top-3 z-20 grid max-w-[min(360px,calc(100%-96px))] gap-2 text-xs">
                   {roiAssist ? (
@@ -1970,208 +2062,238 @@ export function ProductProfileForm({
                     </div>
                   ) : null}
                 </div>
-                {roiAssist?.verticalX !== undefined ? (
-                  <div
-                    className="pointer-events-none absolute top-0 h-full w-px bg-amber-300"
-                    style={{
-                      left: `${(roiAssist.verticalX / cameraWidth) * 100}%`,
-                    }}
-                  />
-                ) : null}
-                {roiAssist?.horizontalY !== undefined ? (
-                  <div
-                    className="pointer-events-none absolute left-0 h-px w-full bg-amber-300"
-                    style={{
-                      top: `${(roiAssist.horizontalY / cameraHeight) * 100}%`,
-                    }}
-                  />
-                ) : null}
-                {roiAssist?.spacingGuides?.map((guide, index) => {
-                  const from = Math.min(guide.from, guide.to);
-                  const to = Math.max(guide.from, guide.to);
-                  const midpoint = (from + to) / 2;
+                <CameraPreviewTransformLayer
+                  className="overflow-visible"
+                  imageSource={livePreviewImageSrc}
+                  imageHeight={cameraFrame.height}
+                  imageWidth={cameraFrame.width}
+                  zoomFactor={draft.camera.zoomFactor}
+                  previewPanX={draft.camera.previewPanX}
+                  previewPanY={draft.camera.previewPanY}
+                  previewRotation={draft.camera.previewRotation}
+                >
+                  {livePreviewImageSrc ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={livePreviewImageSrc}
+                      alt=""
+                      draggable={false}
+                      className="pointer-events-none absolute inset-0 h-full w-full select-none object-contain opacity-95"
+                    />
+                  ) : null}
+                  <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(to_right,rgba(255,255,255,.08)_1px,transparent_1px),linear-gradient(to_bottom,rgba(255,255,255,.08)_1px,transparent_1px)] bg-[size:10%_20%]" />
+                  {roiAssist?.verticalX !== undefined ? (
+                    <div
+                      className="pointer-events-none absolute top-0 h-full w-px bg-amber-300"
+                      style={{
+                        left: `${(roiAssist.verticalX / cameraFrame.width) * 100}%`,
+                      }}
+                    />
+                  ) : null}
+                  {roiAssist?.horizontalY !== undefined ? (
+                    <div
+                      className="pointer-events-none absolute left-0 h-px w-full bg-amber-300"
+                      style={{
+                        top: `${(roiAssist.horizontalY / cameraFrame.height) * 100}%`,
+                      }}
+                    />
+                  ) : null}
+                  {roiAssist?.spacingGuides?.map((guide, index) => {
+                    const from = Math.min(guide.from, guide.to);
+                    const to = Math.max(guide.from, guide.to);
+                    const midpoint = (from + to) / 2;
 
-                  if (guide.orientation === "horizontal") {
+                    if (guide.orientation === "horizontal") {
+                      return (
+                        <div
+                          key={`${guide.orientation}-${index}`}
+                          className="pointer-events-none absolute z-10 h-px bg-amber-300"
+                          style={{
+                            left: `${(from / cameraFrame.width) * 100}%`,
+                            top: `${(guide.cross / cameraFrame.height) * 100}%`,
+                            width: `${((to - from) / cameraFrame.width) * 100}%`,
+                          }}
+                        >
+                          <span
+                            className="absolute -top-3 border border-amber-300 bg-black/80 px-1 text-[10px] font-bold text-amber-200"
+                            style={{
+                              left: `${((midpoint - from) / (to - from || 1)) * 100}%`,
+                              transform: "translateX(-50%)",
+                            }}
+                          >
+                            =
+                          </span>
+                        </div>
+                      );
+                    }
+
                     return (
                       <div
                         key={`${guide.orientation}-${index}`}
-                        className="pointer-events-none absolute z-10 h-px bg-amber-300"
+                        className="pointer-events-none absolute z-10 w-px bg-amber-300"
                         style={{
-                          left: `${(from / cameraWidth) * 100}%`,
-                          top: `${(guide.cross / cameraHeight) * 100}%`,
-                          width: `${((to - from) / cameraWidth) * 100}%`,
+                          left: `${(guide.cross / cameraFrame.width) * 100}%`,
+                          top: `${(from / cameraFrame.height) * 100}%`,
+                          height: `${((to - from) / cameraFrame.height) * 100}%`,
                         }}
                       >
                         <span
-                          className="absolute -top-3 border border-amber-300 bg-black/80 px-1 text-[10px] font-bold text-amber-200"
+                          className="absolute -left-2 border border-amber-300 bg-black/80 px-1 text-[10px] font-bold text-amber-200"
                           style={{
-                            left: `${((midpoint - from) / (to - from || 1)) * 100}%`,
-                            transform: "translateX(-50%)",
+                            top: `${((midpoint - from) / (to - from || 1)) * 100}%`,
+                            transform: "translateY(-50%)",
                           }}
                         >
                           =
                         </span>
                       </div>
                     );
-                  }
-
-                  return (
+                  })}
+                  {roiRegions.map((region) => (
                     <div
-                      key={`${guide.orientation}-${index}`}
-                      className="pointer-events-none absolute z-10 w-px bg-amber-300"
+                      key={region.index}
+                      onPointerDown={(event) =>
+                        handleRegionPointerDown(event, region.index)
+                      }
+                      className={[
+                        "absolute flex cursor-move items-center justify-center border-2 bg-cyan-400/20 text-xs font-bold text-cyan-100 outline-none ring-4 hover:bg-cyan-400/30",
+                        overlappingRegionIndexes.has(region.index)
+                          ? "border-red-400 ring-red-400/30"
+                          : selectedRegionIndexes.includes(region.index)
+                          ? "border-amber-300 ring-amber-300/25"
+                          : "border-cyan-300 ring-cyan-500/10",
+                      ].join(" ")}
                       style={{
-                        left: `${(guide.cross / cameraWidth) * 100}%`,
-                        top: `${(from / cameraHeight) * 100}%`,
-                        height: `${((to - from) / cameraHeight) * 100}%`,
+                        left: `${((region.x - region.width / 2) / cameraFrame.width) * 100}%`,
+                        top: `${((region.y - region.height / 2) / cameraFrame.height) * 100}%`,
+                        width: `${(region.width / cameraFrame.width) * 100}%`,
+                        height: `${(region.height / cameraFrame.height) * 100}%`,
+                        transform: `rotate(${region.rotation}deg)`,
                       }}
+                      title={`ROI ${region.index}: ${region.x}, ${region.y}`}
                     >
-                      <span
-                        className="absolute -left-2 border border-amber-300 bg-black/80 px-1 text-[10px] font-bold text-amber-200"
-                        style={{
-                          top: `${((midpoint - from) / (to - from || 1)) * 100}%`,
-                          transform: "translateY(-50%)",
-                        }}
-                      >
-                        =
-                      </span>
-                    </div>
-                  );
-                })}
-                {roiRegions.map((region) => (
-                  <div
-                    key={region.index}
-                    onPointerDown={(event) =>
-                      handleRegionPointerDown(event, region.index)
-                    }
-                    className={[
-                      "absolute flex cursor-move items-center justify-center border-2 bg-cyan-400/20 text-xs font-bold text-cyan-100 outline-none ring-4 hover:bg-cyan-400/30",
-                      overlappingRegionIndexes.has(region.index)
-                        ? "border-red-400 ring-red-400/30"
-                        : selectedRegionIndexes.includes(region.index)
-                        ? "border-amber-300 ring-amber-300/25"
-                        : "border-cyan-300 ring-cyan-500/10",
-                    ].join(" ")}
-                    style={{
-                      left: `${((region.x - region.width / 2) / cameraWidth) * 100}%`,
-                      top: `${((region.y - region.height / 2) / cameraHeight) * 100}%`,
-                      width: `${(region.width / cameraWidth) * 100}%`,
-                      height: `${(region.height / cameraHeight) * 100}%`,
-                      transform: `rotate(${region.rotation}deg)`,
-                    }}
-                    title={`ROI ${region.index}: ${region.x}, ${region.y}`}
-                  >
-                    <div className="absolute -top-7 left-1/2 flex -translate-x-1/2 gap-1">
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="icon"
-                        className="h-6 w-6 cursor-grab border-cyan-200 bg-black/80 text-cyan-50 hover:bg-slate-900 active:cursor-grabbing"
-                        onPointerDown={(event) =>
-                          handleRotatePointerDown(event, region.index)
-                        }
-                        onClick={(event) => event.stopPropagation()}
-                        aria-label={`${t("products.rotateRoi")} ROI ${region.index}`}
-                      >
-                        <RotateCw className="h-3 w-3" aria-hidden="true" />
-                      </Button>
-                    </div>
-                    {(["nw", "ne", "sw", "se"] as ResizeCorner[]).map(
-                      (corner) => (
-                        <button
-                          key={corner}
+                      <div className="absolute -top-7 left-1/2 flex -translate-x-1/2 gap-1">
+                        <Button
                           type="button"
+                          variant="outline"
+                          size="icon"
+                          className="h-6 w-6 cursor-grab border-cyan-200 bg-black/80 text-cyan-50 hover:bg-slate-900 active:cursor-grabbing"
                           onPointerDown={(event) =>
-                            handleResizePointerDown(
-                              event,
-                              region.index,
-                              corner,
-                            )
+                            handleRotatePointerDown(event, region.index)
                           }
                           onClick={(event) => event.stopPropagation()}
-                          className={[
-                            "absolute h-3 w-3 border border-white bg-amber-300 outline-none ring-2 ring-black/30",
-                            corner === "nw"
-                              ? "-left-1.5 -top-1.5 cursor-nwse-resize"
-                              : "",
-                            corner === "ne"
-                              ? "-right-1.5 -top-1.5 cursor-nesw-resize"
-                              : "",
-                            corner === "sw"
-                              ? "-bottom-1.5 -left-1.5 cursor-nesw-resize"
-                              : "",
-                            corner === "se"
-                              ? "-bottom-1.5 -right-1.5 cursor-nwse-resize"
-                              : "",
-                          ].join(" ")}
-                          aria-label={`${t("products.resizeRoi")} ROI ${region.index}`}
-                        />
-                      ),
-                    )}
-                    {region.index}
-                  </div>
-                ))}
-                {drawingRegion ? (
-                  <div
-                    className="pointer-events-none absolute border-2 border-amber-300 bg-amber-300/20"
-                    style={{
-                      left: `${
-                        (Math.min(
-                          drawingRegion.start.x,
-                          drawingRegion.current.x,
-                        ) /
-                          cameraWidth) *
-                        100
-                      }%`,
-                      top: `${
-                        (Math.min(
-                          drawingRegion.start.y,
-                          drawingRegion.current.y,
-                        ) /
-                          cameraHeight) *
-                        100
-                      }%`,
-                      width: `${
-                        (Math.abs(
-                          drawingRegion.current.x - drawingRegion.start.x,
-                        ) /
-                          cameraWidth) *
-                        100
-                      }%`,
-                      height: `${
-                        (Math.abs(
-                          drawingRegion.current.y - drawingRegion.start.y,
-                        ) /
-                          cameraHeight) *
-                        100
-                      }%`,
-                    }}
-                  />
-                ) : null}
+                          aria-label={`${t("products.rotateRoi")} ROI ${region.index}`}
+                        >
+                          <RotateCw className="h-3 w-3" aria-hidden="true" />
+                        </Button>
+                      </div>
+                      {(["nw", "ne", "sw", "se"] as ResizeCorner[]).map(
+                        (corner) => (
+                          <button
+                            key={corner}
+                            type="button"
+                            onPointerDown={(event) =>
+                              handleResizePointerDown(
+                                event,
+                                region.index,
+                                corner,
+                              )
+                            }
+                            onClick={(event) => event.stopPropagation()}
+                            className={[
+                              "absolute h-3 w-3 border border-white bg-amber-300 outline-none ring-2 ring-black/30",
+                              corner === "nw"
+                                ? "-left-1.5 -top-1.5 cursor-nwse-resize"
+                                : "",
+                              corner === "ne"
+                                ? "-right-1.5 -top-1.5 cursor-nesw-resize"
+                                : "",
+                              corner === "sw"
+                                ? "-bottom-1.5 -left-1.5 cursor-nesw-resize"
+                                : "",
+                              corner === "se"
+                                ? "-bottom-1.5 -right-1.5 cursor-nwse-resize"
+                                : "",
+                            ].join(" ")}
+                            aria-label={`${t("products.resizeRoi")} ROI ${region.index}`}
+                          />
+                        ),
+                      )}
+                      <span className="pointer-events-none absolute left-1 top-1 border border-white/30 bg-black/70 px-1.5 py-0.5 text-[10px] font-semibold text-white">
+                        {t(
+                          region.width > region.height
+                            ? "products.roiLandscape"
+                            : region.width < region.height
+                              ? "products.roiPortrait"
+                              : "products.roiSquare",
+                        )}
+                      </span>
+                      {region.index}
+                    </div>
+                  ))}
+                  {drawingRegion ? (
+                    <div
+                      className="pointer-events-none absolute border-2 border-amber-300 bg-amber-300/20"
+                      style={{
+                        left: `${
+                          (Math.min(
+                            drawingRegion.start.x,
+                            drawingRegion.current.x,
+                          ) /
+                            cameraFrame.width) *
+                          100
+                        }%`,
+                        top: `${
+                          (Math.min(
+                            drawingRegion.start.y,
+                            drawingRegion.current.y,
+                          ) /
+                            cameraFrame.height) *
+                          100
+                        }%`,
+                        width: `${
+                          (Math.abs(
+                            drawingRegion.current.x - drawingRegion.start.x,
+                          ) /
+                            cameraFrame.width) *
+                          100
+                        }%`,
+                        height: `${
+                          (Math.abs(
+                            drawingRegion.current.y - drawingRegion.start.y,
+                          ) /
+                            cameraFrame.height) *
+                          100
+                        }%`,
+                      }}
+                    />
+                  ) : null}
+                </CameraPreviewTransformLayer>
               </div>
 
               <div className="mt-3 grid gap-2">
                 {roiRegions.map((region) => (
                   <div
                     key={region.index}
-                    className="grid grid-cols-[52px_repeat(5,minmax(0,1fr))_48px] gap-2"
+                    className="grid grid-cols-[52px_repeat(5,minmax(0,1fr))_86px_48px_48px] gap-2"
                   >
                     <div className="flex h-12 items-center border border-slate-200 px-3 text-base font-semibold">
                       {region.index}
                     </div>
                     <RegionNumber
                       value={region.x}
-                      max={cameraWidth}
+                      max={cameraFrame.width}
                       onChange={(value) => updateRegion(region.index, { x: value })}
                     />
                     <RegionNumber
                       value={region.y}
-                      max={cameraHeight}
+                      max={cameraFrame.height}
                       onChange={(value) => updateRegion(region.index, { y: value })}
                     />
                     <RegionNumber
                       value={region.width}
                       min={1}
-                      max={cameraWidth}
+                      max={cameraFrame.width}
                       onChange={(value) =>
                         updateRegion(region.index, { width: value })
                       }
@@ -2179,7 +2301,7 @@ export function ProductProfileForm({
                     <RegionNumber
                       value={region.height}
                       min={1}
-                      max={cameraHeight}
+                      max={cameraFrame.height}
                       onChange={(value) =>
                         updateRegion(region.index, { height: value })
                       }
@@ -2192,6 +2314,25 @@ export function ProductProfileForm({
                         updateRegion(region.index, { rotation: value })
                       }
                     />
+                    <div className="flex h-12 items-center justify-center border border-slate-200 bg-white px-2 text-xs font-semibold text-slate-700">
+                      {t(
+                        region.width > region.height
+                          ? "products.roiLandscape"
+                          : region.width < region.height
+                            ? "products.roiPortrait"
+                            : "products.roiSquare",
+                      )}
+                    </div>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="icon"
+                      onClick={() => swapRegionShape(region.index)}
+                      aria-label={`${t("products.swapRoiShape")} ${region.index}`}
+                      className="h-12 w-12"
+                    >
+                      <RotateCw className="h-4 w-4" aria-hidden="true" />
+                    </Button>
                     <Button
                       type="button"
                       variant="outline"

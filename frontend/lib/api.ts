@@ -1,26 +1,26 @@
 export type RoleCode = "dev" | "admin" | "engineer" | "operator";
 
-export type SessionUser = {
+export interface SessionUser {
   id: string;
   username: string;
   fullName: string;
   role: RoleCode;
   permissions: string[];
   isDev: boolean;
-};
+}
 
-export type LoginResponse = {
+export interface LoginResponse {
   data: {
     accessToken: string;
     user: SessionUser;
   };
-};
+}
 
-export type MeResponse = {
+export interface MeResponse {
   data: {
     user: SessionUser;
   };
-};
+}
 
 export type RoleWithPermissions = {
   code: RoleCode;
@@ -120,6 +120,25 @@ export type CameraFrameRate = {
   };
 };
 
+export type CameraHardwareRange = {
+  min?: number | null;
+  max?: number | null;
+  inc?: number | null;
+  value?: number | null;
+};
+
+export type CameraHardwareRanges = {
+  success: boolean;
+  ranges: Record<string, CameraHardwareRange | null>;
+  error?: string | null;
+};
+
+export type CameraDebugInfo = {
+  success: boolean;
+  diagnostics: Record<string, unknown>;
+  error?: string | null;
+};
+
 export type CameraDevice = {
   index: number;
   friendly_name: string;
@@ -157,6 +176,7 @@ export type ProductProfile = {
   thresholdAccept: number;
   thresholdMns: number;
   modelPath: string | null;
+  rotateTestImageClockwise: boolean;
   active: boolean;
   camera: CameraProfile;
   roiRegions: RoiRegion[];
@@ -188,6 +208,99 @@ export type InspectionSlotState = {
   rawText: string | null;
   result: "OK" | "NG" | "UNKNOWN";
   errorMessage: string | null;
+  toolDebugImageBase64?: string | null;
+};
+
+export type TestInspectionImageResult = {
+  productId: string;
+  productCode: string;
+  expectedText: string;
+  imageWidth: number;
+  imageHeight: number;
+  cycleTimeMs: number;
+  success: boolean;
+  error: string | null;
+  result: "OK" | "NG" | "UNKNOWN";
+  slots: InspectionSlotState[];
+};
+
+export type TestSessionImageResult = "OK" | "NG" | "UNKNOWN" | "ERROR";
+
+export type TestSessionReportPayload = {
+  productId: string;
+  saveFolderPath?: string;
+  folderName?: string;
+  totalImages: number;
+  okImages: number;
+  ngImages: number;
+  unknownImages: number;
+  errorImages: number;
+  failedImages: Array<{
+    fileName: string;
+    relativePath: string;
+    result: TestSessionImageResult;
+    cycleTimeMs?: number | null;
+    errorMessage?: string | null;
+    originalImageBase64: string;
+    roiResults: Array<{
+      slotIndex?: number | null;
+      slotLabel?: string | null;
+      expectedText?: string | null;
+      rawText?: string | null;
+      result: InspectionSlotState["result"];
+      errorMessage?: string | null;
+      toolDebugImageBase64?: string | null;
+    }>;
+  }>;
+};
+
+export type TestSessionReportResponse = {
+  data: {
+    id: string;
+    productId: string;
+    productCode: string;
+    actorId: string;
+    saveFolderPath: string | null;
+    savedFailedImageCount: number;
+    folderName: string | null;
+    totalImages: number;
+    okImages: number;
+    ngImages: number;
+    unknownImages: number;
+    errorImages: number;
+    createdAt: string;
+  };
+};
+
+export type TestSessionReportListItem = {
+  id: string;
+  productId: string;
+  productCode: string;
+  actorId: string;
+  actorUsername: string;
+  folderName: string | null;
+  totalImages: number;
+  okImages: number;
+  ngImages: number;
+  unknownImages: number;
+  errorImages: number;
+  failedImages: Array<{
+    id: string;
+    fileName: string;
+    relativePath: string;
+    result: TestSessionImageResult;
+    cycleTimeMs: number | null;
+    errorMessage: string | null;
+    roiResults: Array<{
+      slotIndex: number | null;
+      slotLabel: string | null;
+      expectedText: string | null;
+      rawText: string | null;
+      result: InspectionSlotState["result"];
+      errorMessage: string | null;
+    }>;
+  }>;
+  createdAt: string;
 };
 
 export type CurrentInspectionState = {
@@ -224,6 +337,7 @@ export type ProductProfilePayload = {
   thresholdAccept: number;
   thresholdMns: number;
   modelPath?: string;
+  rotateTestImageClockwise?: boolean;
   active: boolean;
   camera: CameraProfile;
   roiRegions: RoiRegion[];
@@ -233,6 +347,12 @@ export type ApplyProductProfilePayload = {
   sourceProductId: string;
   targetProductIds?: string[];
   applyToAll?: boolean;
+};
+
+export type BulkProductOcrTestSettingsPayload = {
+  rotateTestImageClockwise: boolean;
+  applyToAll: boolean;
+  productIds?: string[];
 };
 
 const API_BASE_URL =
@@ -331,6 +451,68 @@ export async function getCurrentInspection(accessToken: string) {
   return (await response.json()) as { data: CurrentInspectionState | null };
 }
 
+export async function testInspectionImage(
+  accessToken: string,
+  productId: string,
+  crops: Array<{ slotIndex: number; imageBase64: string }>,
+  roiRegions: RoiRegion[],
+) {
+  const response = await fetch(`${API_BASE_URL}/inspections/test-image`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ productId, crops, roiRegions }),
+  });
+
+  if (!response.ok) {
+    throw new ApiError(await parseError(response), response.status);
+  }
+
+  return (await response.json()) as { data: TestInspectionImageResult };
+}
+
+export async function createTestSessionReport(
+  accessToken: string,
+  payload: TestSessionReportPayload,
+) {
+  const response = await fetch(`${API_BASE_URL}/inspections/test-sessions`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(payload),
+  });
+
+  if (!response.ok) {
+    throw new ApiError(await parseError(response), response.status);
+  }
+
+  return (await response.json()) as TestSessionReportResponse;
+}
+
+export async function listTestSessionReports(
+  accessToken: string,
+  limit = 10,
+) {
+  const response = await fetch(
+    `${API_BASE_URL}/inspections/test-sessions?limit=${limit}`,
+    {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+      },
+    },
+  );
+
+  if (!response.ok) {
+    throw new ApiError(await parseError(response), response.status);
+  }
+
+  return (await response.json()) as { data: TestSessionReportListItem[] };
+}
+
 export async function getSystemLicense(accessToken: string) {
   const response = await fetch(`${API_BASE_URL}/system/license`, {
     headers: {
@@ -397,6 +579,34 @@ export async function getCameraFrameRate(accessToken: string) {
   return (await response.json()) as CameraFrameRate;
 }
 
+export async function getCameraRanges(accessToken: string) {
+  const response = await fetch(`${API_BASE_URL}/camera/ranges`, {
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+    },
+  });
+
+  if (!response.ok) {
+    throw new ApiError(await parseError(response), response.status);
+  }
+
+  return (await response.json()) as CameraHardwareRanges;
+}
+
+export async function getCameraDebugInfo(accessToken: string) {
+  const response = await fetch(`${API_BASE_URL}/camera/debug-info`, {
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+    },
+  });
+
+  if (!response.ok) {
+    throw new ApiError(await parseError(response), response.status);
+  }
+
+  return (await response.json()) as CameraDebugInfo;
+}
+
 export async function connectCamera(
   accessToken: string,
   camera: CameraProfile,
@@ -432,6 +642,45 @@ export async function grabCameraFrame(accessToken: string) {
   }
 
   return (await response.json()) as CameraFrame;
+}
+
+export async function startCameraAi(accessToken: string, productId: string) {
+  const response = await fetch(`${API_BASE_URL}/camera/ai/start`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ productId }),
+  });
+
+  if (!response.ok) {
+    throw new ApiError(await parseError(response), response.status);
+  }
+
+  return (await response.json()) as { success: boolean; error?: string };
+}
+
+export async function stopCameraAi(accessToken: string) {
+  const response = await fetch(`${API_BASE_URL}/camera/ai/stop`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+    },
+  });
+
+  if (!response.ok) {
+    throw new ApiError(await parseError(response), response.status);
+  }
+
+  return (await response.json()) as { success: boolean; error?: string };
+}
+
+export function getCameraAiResultsUrl(accessToken: string) {
+  const url = new URL(`${API_BASE_URL}/camera/ai/results`);
+  url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
+  url.searchParams.set("token", accessToken);
+  return url.toString();
 }
 
 export function getCameraStreamUrl(
@@ -688,6 +937,50 @@ export async function updateProductBatchSize(
   }
 
   return (await response.json()) as { data: ProductProfile };
+}
+
+export async function updateProductOcrTestSettings(
+  accessToken: string,
+  productId: string,
+  rotateTestImageClockwise: boolean,
+) {
+  const response = await fetch(
+    `${API_BASE_URL}/products/${productId}/ocr-test-settings`,
+    {
+      method: "PATCH",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ rotateTestImageClockwise }),
+    },
+  );
+
+  if (!response.ok) {
+    throw new ApiError(await parseError(response), response.status);
+  }
+
+  return (await response.json()) as { data: ProductProfile };
+}
+
+export async function bulkUpdateProductOcrTestSettings(
+  accessToken: string,
+  payload: BulkProductOcrTestSettingsPayload,
+) {
+  const response = await fetch(`${API_BASE_URL}/products/ocr-test-settings/apply`, {
+    method: "PATCH",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(payload),
+  });
+
+  if (!response.ok) {
+    throw new ApiError(await parseError(response), response.status);
+  }
+
+  return (await response.json()) as { data: { updatedCount: number } };
 }
 
 export async function deleteProductProfile(

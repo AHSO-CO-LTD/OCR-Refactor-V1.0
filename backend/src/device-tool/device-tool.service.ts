@@ -27,6 +27,20 @@ type DeviceToolOcrRoi = {
   label?: string | null;
   text: string;
   error?: string | null;
+  debugImageBase64?: string | null;
+};
+
+type DeviceToolPredictResponse = {
+  success: boolean;
+  rows?: string[];
+  error?: string | null;
+  debug_image_base64?: string | null;
+};
+
+type DeviceToolActionResponse = {
+  success: boolean;
+  error?: string | null;
+  [key: string]: unknown;
 };
 
 type DeviceToolOcrRoisResponse = {
@@ -44,6 +58,13 @@ type DeviceToolInspectionRequest = {
   roiRegions: RoiRegionDto[];
   thresholdAccept: number;
   thresholdMns: number;
+};
+
+type DeviceToolImageInspectionRequest = Omit<
+  DeviceToolInspectionRequest,
+  'camera'
+> & {
+  crops: { slotIndex: number; imageBase64: string }[];
 };
 
 type DeviceToolCameraDevice = {
@@ -84,13 +105,34 @@ type DeviceToolCameraFrameRateResponse = {
   };
 };
 
+type DeviceToolCameraRange = {
+  min?: number | null;
+  max?: number | null;
+  inc?: number | null;
+  value?: number | null;
+};
+
+type DeviceToolCameraRangesResponse = {
+  success: boolean;
+  ranges: Record<string, DeviceToolCameraRange | null>;
+  error?: string | null;
+};
+
+type DeviceToolCameraDebugInfoResponse = {
+  success: boolean;
+  diagnostics: Record<string, unknown>;
+  error?: string | null;
+};
+
 @Injectable()
 export class DeviceToolService {
+  private readonly activeCameraId = 'active-camera';
+
   constructor(private readonly configService: ConfigService) {}
 
   async getHealth() {
     return this.requestJson<DeviceToolHealthResponse>(
-      '/api/v1/health',
+      this.getToolPath('/health'),
       { method: 'GET' },
       'check device tool health',
     );
@@ -119,7 +161,7 @@ export class DeviceToolService {
       if (!this.isSameRuntimeCamera(status, selectedDevice)) {
         await this.disconnectCamera();
         await this.requestJson(
-          '/api/v1/camera/connect',
+          this.getToolPath('/camera/connect'),
           {
             method: 'POST',
             body: JSON.stringify(payload),
@@ -130,7 +172,7 @@ export class DeviceToolService {
       }
 
       await this.requestJson(
-        '/api/v1/camera/settings',
+        this.getToolPath('/camera/settings'),
         {
           method: 'POST',
           body: JSON.stringify(payload),
@@ -141,7 +183,7 @@ export class DeviceToolService {
     }
 
     await this.requestJson(
-      '/api/v1/camera/connect',
+      this.getToolPath('/camera/connect'),
       {
         method: 'POST',
         body: JSON.stringify(payload),
@@ -169,7 +211,7 @@ export class DeviceToolService {
       if (!this.isSameRuntimeCamera(status, selectedDevice)) {
         await this.disconnectCamera();
         await this.requestJson(
-          '/api/v1/camera/connect',
+          this.getToolPath('/camera/connect'),
           {
             method: 'POST',
             body: JSON.stringify(payload),
@@ -180,7 +222,7 @@ export class DeviceToolService {
       }
 
       await this.requestJson(
-        '/api/v1/camera/settings',
+        this.getToolPath('/camera/settings'),
         {
           method: 'POST',
           body: JSON.stringify({ exposure: camera.exposure }),
@@ -191,7 +233,7 @@ export class DeviceToolService {
     }
 
     await this.requestJson(
-      '/api/v1/camera/connect',
+      this.getToolPath('/camera/connect'),
       {
         method: 'POST',
         body: JSON.stringify(payload),
@@ -202,7 +244,7 @@ export class DeviceToolService {
 
   private async resolveCameraDevice(deviceName?: string) {
     const devices = await this.requestJson<DeviceToolCameraDevice[]>(
-      '/api/v1/camera/devices',
+      this.getToolPath('/camera/devices'),
       { method: 'GET' },
       'resolve camera device',
     );
@@ -238,7 +280,7 @@ export class DeviceToolService {
 
   async getCameraStatus() {
     return this.requestJson<DeviceToolCameraStatusResponse>(
-      '/api/v1/camera/status',
+      this.getToolPath('/camera/status'),
       { method: 'GET' },
       'get camera status',
     );
@@ -246,7 +288,7 @@ export class DeviceToolService {
 
   private async disconnectCamera() {
     await this.requestJson(
-      '/api/v1/camera/disconnect',
+      this.getToolPath('/camera/disconnect'),
       { method: 'POST' },
       'disconnect camera',
     );
@@ -255,7 +297,7 @@ export class DeviceToolService {
   async listCameraDevices() {
     return {
       data: await this.requestJson<DeviceToolCameraDevice[]>(
-        '/api/v1/camera/devices',
+        this.getToolPath('/camera/devices'),
         { method: 'GET' },
         'list camera devices',
       ),
@@ -267,7 +309,7 @@ export class DeviceToolService {
     jpegQuality?: number;
   }) {
     return this.requestJson<DeviceToolGrabFrameResponse>(
-      '/api/v1/camera/grab',
+      this.getToolPath('/camera/grab'),
       {
         method: 'POST',
         body: JSON.stringify({
@@ -282,7 +324,7 @@ export class DeviceToolService {
   async getCameraFrameRate() {
     try {
       return await this.requestJson<DeviceToolCameraFrameRateResponse>(
-        '/api/v1/camera/frame-rate',
+        this.getToolPath('/camera/frame-rate'),
         { method: 'GET' },
         'get camera frame rate',
       );
@@ -291,22 +333,173 @@ export class DeviceToolService {
     }
   }
 
+  async getCameraRanges() {
+    return this.requestJson<DeviceToolCameraRangesResponse>(
+      this.getToolPath('/camera/ranges'),
+      { method: 'GET' },
+      'get camera hardware ranges',
+    );
+  }
+
+  async getCameraDebugInfo() {
+    return this.requestJson<DeviceToolCameraDebugInfoResponse>(
+      this.getToolPath('/camera/debug-info'),
+      { method: 'GET' },
+      'get camera debug information',
+    );
+  }
+
   async inspectProduct(request: DeviceToolInspectionRequest) {
     await this.ensureCameraReady(request.camera);
 
-    return this.requestJson<DeviceToolOcrRoisResponse>(
-      '/api/v1/ocr/rois',
+    return this.inspectRoiImage({
+      modelPath: request.modelPath,
+      roiRegions: request.roiRegions,
+      thresholdAccept: request.thresholdAccept,
+      thresholdMns: request.thresholdMns,
+      grabFromCamera: true,
+    });
+  }
+
+  async inspectProductImage(request: DeviceToolImageInspectionRequest) {
+    await this.loadOcrModel({
+      modelPath: request.modelPath,
+      thresholdAccept: request.thresholdAccept,
+      thresholdMns: request.thresholdMns,
+    });
+
+    const startedAt = Date.now();
+    const results = await Promise.all(
+      request.crops.map(async (crop) => {
+        const roi = request.roiRegions.find(
+          (region) => region.index === crop.slotIndex,
+        );
+        const prediction = await this.predictOcrCrop(crop.imageBase64);
+        const rows = prediction.rows ?? [];
+
+        return {
+          label: `slot-${crop.slotIndex}`,
+          text: rows.map((row) => String(row)).join(' '),
+          x: roi?.x ?? 0,
+          y: roi?.y ?? 0,
+          width: roi?.width ?? 0,
+          height: roi?.height ?? 0,
+          error: prediction.success
+            ? null
+            : (prediction.error ?? 'OCR crop prediction failed'),
+          debugImageBase64: prediction.debug_image_base64 ?? null,
+        };
+      }),
+    );
+
+    return {
+      success: results.every((result) => !result.error),
+      image_width: 0,
+      image_height: 0,
+      cycle_time_ms: Date.now() - startedAt,
+      results,
+      error: results.find((result) => result.error)?.error ?? null,
+    };
+  }
+
+  async startCameraOcr(request: DeviceToolInspectionRequest) {
+    await this.ensureCameraReady(request.camera);
+    await this.loadOcrModel({
+      modelPath: request.modelPath,
+      thresholdAccept: request.thresholdAccept,
+      thresholdMns: request.thresholdMns,
+    });
+
+    const response = await this.requestJson<DeviceToolActionResponse>(
+      this.getToolPath(`/camera/${this.activeCameraId}/AI/yolo_ocr/start`),
+      {
+        method: 'POST',
+        body: JSON.stringify({
+          rois: request.roiRegions.map((region) => ({
+            x: Math.max(0, Math.round(region.x - region.width / 2)),
+            y: Math.max(0, Math.round(region.y - region.height / 2)),
+            w: region.width,
+            h: region.height,
+          })),
+        }),
+      },
+      'start camera OCR',
+    );
+
+    this.assertToolSuccess(response, 'start camera OCR');
+    return response;
+  }
+
+  async stopCameraOcr() {
+    const response = await this.requestJson<DeviceToolActionResponse>(
+      this.getToolPath(`/camera/${this.activeCameraId}/AI/yolo_ocr/stop`),
+      { method: 'POST' },
+      'stop camera OCR',
+    );
+
+    this.assertToolSuccess(response, 'stop camera OCR');
+    return response;
+  }
+
+  private async loadOcrModel(request: {
+    modelPath: string;
+    thresholdAccept: number;
+    thresholdMns: number;
+  }) {
+    const response = await this.requestJson<DeviceToolActionResponse>(
+      this.getToolPath('/AI/yolo_ocr/load_model'),
       {
         method: 'POST',
         body: JSON.stringify({
           model_path: request.modelPath,
-          grab_from_camera: true,
+          conf: request.thresholdAccept,
+          iou: request.thresholdMns,
+          row_threshold: 20,
+        }),
+      },
+      'load OCR model',
+    );
+
+    this.assertToolSuccess(response, 'load OCR model');
+  }
+
+  private predictOcrCrop(imageBase64: string) {
+    return this.requestJson<DeviceToolPredictResponse>(
+      this.getToolPath('/AI/yolo_ocr/predict?debug_image=1'),
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/octet-stream',
+        },
+        body: this.decodeBase64Image(imageBase64),
+      },
+      'predict OCR crop',
+    );
+  }
+
+  private inspectRoiImage(request: {
+    modelPath: string;
+    roiRegions: RoiRegionDto[];
+    thresholdAccept: number;
+    thresholdMns: number;
+    grabFromCamera: boolean;
+    imageBase64?: string;
+  }) {
+    return this.requestJson<DeviceToolOcrRoisResponse>(
+      this.getToolPath('/ocr/rois'),
+      {
+        method: 'POST',
+        body: JSON.stringify({
+          model_path: request.modelPath,
+          grab_from_camera: request.grabFromCamera,
+          image_base64: request.imageBase64,
           roi_list: request.roiRegions.map((region) => ({
             label: `slot-${region.index}`,
-            x: region.x,
-            y: region.y,
+            x: Math.max(0, Math.round(region.x - region.width / 2)),
+            y: Math.max(0, Math.round(region.y - region.height / 2)),
             width: region.width,
             height: region.height,
+            rotation: Number(region.rotation),
             rotate_clockwise: this.shouldRotateClockwise(region.rotation),
           })),
           acceptance_threshold_ocr: request.thresholdAccept,
@@ -386,6 +579,27 @@ export class DeviceToolService {
       .trim();
   }
 
+  private decodeBase64Image(value: string) {
+    const payload = value.startsWith('data:') ? value.split(',', 2)[1] : value;
+
+    if (!payload) {
+      throw new BadRequestException('Image crop payload is empty');
+    }
+
+    return Buffer.from(payload, 'base64');
+  }
+
+  private assertToolSuccess(
+    response: DeviceToolActionResponse,
+    action: string,
+  ) {
+    if (response.success === false) {
+      throw new BadGatewayException(
+        `Device tool failed to ${action}: ${response.error ?? 'Unknown error'}`,
+      );
+    }
+  }
+
   private async requestJson<T>(
     path: string,
     init: RequestInit,
@@ -449,5 +663,14 @@ export class DeviceToolService {
       'http://localhost:8000';
 
     return value.replace(/\/+$/, '');
+  }
+
+  private getToolPath(path: string) {
+    const prefix =
+      this.configService.get<string>('DEVICE_TOOL_API_PREFIX') ?? '/tool/v1';
+    const normalizedPrefix = `/${prefix.replace(/^\/+|\/+$/g, '')}`;
+    const normalizedPath = `/${path.replace(/^\/+/, '')}`;
+
+    return `${normalizedPrefix}${normalizedPath}`;
   }
 }

@@ -10,7 +10,7 @@ The original system is an industrial OCR and inspection application used on a pr
 
 - Replace the legacy PyQt desktop UI with Electron + Next.js.
 - Move application backend logic into NestJS.
-- Prepare a separate Python + FastAPI service for OCR/AI processing.
+- Use the Python + FastAPI Device/OCR Tool in `tool/` for camera control and OCR/AI processing.
 - Use PostgreSQL as the local database.
 - Keep the application fully usable offline/local on an industrial PC.
 - Support dongle-based software protection.
@@ -61,7 +61,7 @@ Useful reference assets in the source project:
 - Keep the app local-first.
 - Make FE depend only on REST APIs and permission data.
 - Keep business rules in the backend, not in the UI.
-- Treat AI service as a replaceable external module.
+- Treat the Device/OCR Tool as a replaceable local module behind backend APIs.
 - Prefer additive migration over big-bang rewrite.
 - Use the same UI shell for all roles, but change visible actions according to permission.
 - Keep user-facing text ready for English and Vietnamese translation.

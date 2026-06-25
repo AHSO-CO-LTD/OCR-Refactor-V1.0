@@ -1,6 +1,13 @@
 "use client";
 
-import { Camera, Gauge, PlugZap, RefreshCcw, ScanEye } from "lucide-react";
+import {
+  BrainCircuit,
+  Camera,
+  Gauge,
+  PlugZap,
+  RefreshCcw,
+  ScanEye,
+} from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
@@ -19,7 +26,10 @@ import {
 } from "@/components/camera/camera-error";
 import {
   connectCamera,
+  getCameraDebugInfo,
   getCameraFrameRate,
+  getCameraAiResultsUrl,
+  getCameraRanges,
   getCameraStatus,
   getCameraStreamUrl,
   DEFAULT_CAMERA_STREAM_JPEG_QUALITY,
@@ -27,10 +37,14 @@ import {
   grabCameraFrame,
   listCameraDevices,
   listProductProfiles,
+  startCameraAi,
+  stopCameraAi,
   updateProductProfile,
   type CameraDevice,
+  type CameraDebugInfo,
   type CameraFrame,
   type CameraFrameRate,
+  type CameraHardwareRanges,
   type CameraProfile,
   type CameraRuntimeStatus,
   type ProductProfile,
@@ -46,12 +60,18 @@ export function CameraLiveViewPanel() {
   const [selectedProductId, setSelectedProductId] = useState("");
   const [status, setStatus] = useState<CameraRuntimeStatus | null>(null);
   const [frameRate, setFrameRate] = useState<CameraFrameRate | null>(null);
+  const [hardwareRanges, setHardwareRanges] =
+    useState<CameraHardwareRanges | null>(null);
+  const [debugInfo, setDebugInfo] = useState<CameraDebugInfo | null>(null);
   const [frame, setFrame] = useState<CameraFrame | null>(null);
   const [loading, setLoading] = useState(true);
   const [connecting, setConnecting] = useState(false);
   const [grabbing, setGrabbing] = useState(false);
   const [refreshingDevices, setRefreshingDevices] = useState(false);
   const [live, setLive] = useState(false);
+  const [aiRunning, setAiRunning] = useState(false);
+  const [aiStarting, setAiStarting] = useState(false);
+  const [aiResult, setAiResult] = useState<CameraAiResult | null>(null);
   const [streamFrameUrl, setStreamFrameUrl] = useState("");
   const [liveStats, setLiveStats] = useState<CameraLiveStats | null>(null);
   const [savingView, setSavingView] = useState(false);
@@ -62,6 +82,7 @@ export function CameraLiveViewPanel() {
     previewRotation: 0,
   });
   const streamSocketRef = useRef<WebSocket | null>(null);
+  const aiSocketRef = useRef<WebSocket | null>(null);
   const streamFrameUrlRef = useRef("");
   const streamMetaRef = useRef<StreamFrameMeta | null>(null);
   const streamFrameTimesRef = useRef<number[]>([]);
@@ -102,6 +123,8 @@ export function CameraLiveViewPanel() {
         setStatus(cameraRuntime.statusResponse);
         setDevices(cameraRuntime.devices);
         setFrameRate(cameraRuntime.frameRateResponse);
+        setHardwareRanges(cameraRuntime.rangesResponse);
+        setDebugInfo(cameraRuntime.debugInfoResponse);
       } catch (cause) {
         if (!cancelled) {
           toast.error(formatCameraApiError(cause, apiError, t, "camera.loadError"));
@@ -136,6 +159,8 @@ export function CameraLiveViewPanel() {
       setStatus(cameraRuntime.statusResponse);
       setDevices(cameraRuntime.devices);
       setFrameRate(cameraRuntime.frameRateResponse);
+      setHardwareRanges(cameraRuntime.rangesResponse);
+      setDebugInfo(cameraRuntime.debugInfoResponse);
       toast.success(t("camera.devicesRefreshed"), { id: toastId });
     } catch (cause) {
       toast.error(
@@ -150,6 +175,7 @@ export function CameraLiveViewPanel() {
   useEffect(() => {
     return () => {
       streamSocketRef.current?.close();
+      aiSocketRef.current?.close();
 
       if (streamFrameUrlRef.current) {
         URL.revokeObjectURL(streamFrameUrlRef.current);
@@ -175,7 +201,12 @@ export function CameraLiveViewPanel() {
 
     try {
       const response = await connectCamera(accessToken, selectedProduct.camera);
+      const cameraRuntime = await loadCameraRuntime(accessToken);
       setStatus(response);
+      setDevices(cameraRuntime.devices);
+      setFrameRate(cameraRuntime.frameRateResponse);
+      setHardwareRanges(cameraRuntime.rangesResponse);
+      setDebugInfo(cameraRuntime.debugInfoResponse);
       toast.success(t("camera.connected"), { id: toastId });
     } catch (cause) {
       toast.error(formatCameraApiError(cause, apiError, t, "camera.connectError"), {
@@ -225,6 +256,78 @@ export function CameraLiveViewPanel() {
     await startLiveStream();
   }
 
+  async function handleToggleAi() {
+    if (aiRunning) {
+      await stopAi();
+      return;
+    }
+
+    await startAi();
+  }
+
+  async function startAi() {
+    const accessToken = getAccessToken();
+
+    if (!accessToken) {
+      toast.error(t("users.missingSession"));
+      return;
+    }
+
+    if (!selectedProduct) {
+      toast.warning(t("camera.selectProductFirst"));
+      return;
+    }
+
+    if (!selectedProduct.modelPath) {
+      toast.warning(t("camera.aiModelRequired"));
+      return;
+    }
+
+    if (selectedProduct.roiRegions.length === 0) {
+      toast.warning(t("camera.aiRoiRequired"));
+      return;
+    }
+
+    setAiStarting(true);
+    const toastId = toast.loading(t("camera.aiStarting"));
+
+    try {
+      await startCameraAi(accessToken, selectedProduct.id);
+      openAiResultsSocket(accessToken);
+      setAiRunning(true);
+      toast.success(t("camera.aiStarted"), { id: toastId });
+    } catch (cause) {
+      closeAiResults({ silent: true });
+      toast.error(formatCameraApiError(cause, apiError, t, "camera.aiStartError"), {
+        id: toastId,
+      });
+    } finally {
+      setAiStarting(false);
+    }
+  }
+
+  async function stopAi() {
+    const accessToken = getAccessToken();
+
+    closeAiResults();
+
+    if (!accessToken) {
+      toast.error(t("users.missingSession"));
+      return;
+    }
+
+    const toastId = toast.loading(t("camera.aiStopping"));
+
+    try {
+      await stopCameraAi(accessToken);
+      toast.success(t("camera.aiStopped"), { id: toastId });
+    } catch (cause) {
+      toast.error(formatCameraApiError(cause, apiError, t, "camera.aiStopError"), {
+        id: toastId,
+      });
+    }
+  }
+
   async function startLiveStream() {
     const accessToken = getAccessToken();
 
@@ -243,9 +346,12 @@ export function CameraLiveViewPanel() {
 
     try {
       const response = await connectCamera(accessToken, selectedProduct.camera);
-      const nextFrameRate = await getCameraFrameRate(accessToken);
+      const cameraRuntime = await loadCameraRuntime(accessToken);
       setStatus(response);
-      setFrameRate(nextFrameRate);
+      setDevices(cameraRuntime.devices);
+      setFrameRate(cameraRuntime.frameRateResponse);
+      setHardwareRanges(cameraRuntime.rangesResponse);
+      setDebugInfo(cameraRuntime.debugInfoResponse);
       openStreamSocket(accessToken, toastId);
     } catch (cause) {
       setLive(false);
@@ -298,6 +404,38 @@ export function CameraLiveViewPanel() {
       }
 
       setLive(false);
+    };
+  }
+
+  function openAiResultsSocket(accessToken: string) {
+    closeAiResults({ silent: true });
+
+    const socket = new WebSocket(getCameraAiResultsUrl(accessToken));
+    aiSocketRef.current = socket;
+
+    socket.onmessage = (event) => {
+      if (typeof event.data !== "string") {
+        return;
+      }
+
+      try {
+        const payload = JSON.parse(event.data) as CameraAiResult;
+        setAiResult(payload);
+      } catch {
+        toast.error(t("camera.aiResultError"));
+      }
+    };
+
+    socket.onerror = () => {
+      toast.error(t("camera.aiResultError"));
+    };
+
+    socket.onclose = () => {
+      if (aiSocketRef.current === socket) {
+        aiSocketRef.current = null;
+      }
+
+      setAiRunning(false);
     };
   }
 
@@ -367,6 +505,21 @@ export function CameraLiveViewPanel() {
             }
           : current,
       );
+    }
+  }
+
+  function closeAiResults(options: { silent?: boolean } = {}) {
+    const socket = aiSocketRef.current;
+
+    if (socket) {
+      aiSocketRef.current = null;
+      socket.close();
+    }
+
+    setAiRunning(false);
+
+    if (!options.silent) {
+      setAiResult(null);
     }
   }
 
@@ -481,6 +634,19 @@ export function CameraLiveViewPanel() {
               <Camera className="h-4 w-4" />
               {live ? t("camera.stopLive") : t("camera.startLive")}
             </Button>
+            <Button
+              type="button"
+              variant={aiRunning ? "outline" : "default"}
+              onClick={() => void handleToggleAi()}
+              disabled={loading || connecting || aiStarting || !selectedProduct}
+            >
+              <BrainCircuit className="h-4 w-4" />
+              {aiRunning
+                ? t("camera.stopAi")
+                : aiStarting
+                  ? t("camera.aiStarting")
+                  : t("camera.startAi")}
+            </Button>
           </div>
         </CardHeader>
         <CardContent className="p-0">
@@ -488,6 +654,8 @@ export function CameraLiveViewPanel() {
             key={buildViewerKey(selectedProduct)}
             imageSource={imageSource}
             frame={frame}
+            imageHeight={selectedProduct?.camera.imageHeight}
+            imageWidth={selectedProduct?.camera.imageWidth}
             live={live}
             liveStats={liveStats}
             baseZoom={selectedProduct?.camera.zoomFactor ?? 1}
@@ -545,6 +713,31 @@ export function CameraLiveViewPanel() {
                 <PlugZap className="h-4 w-4" />
                 {connecting ? t("camera.connecting") : t("camera.connect")}
               </Button>
+            </PanelSection>
+
+            <PanelSection title={t("camera.hardwareInfo")}>
+              <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-1 2xl:grid-cols-2">
+                {buildDiagnostics(debugInfo, status).map((item) => (
+                  <FrameRateMetric
+                    key={item.label}
+                    label={item.label}
+                    value={item.value}
+                  />
+                ))}
+              </div>
+              <div className="mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-1 2xl:grid-cols-2">
+                <FrameRateMetric
+                  label={t("camera.rangeExposure")}
+                  value={formatRange(hardwareRanges?.ranges.exposure)}
+                />
+                <FrameRateMetric
+                  label={t("camera.rangeGeometry")}
+                  value={[
+                    formatRange(hardwareRanges?.ranges.width),
+                    formatRange(hardwareRanges?.ranges.height),
+                  ].join(" / ")}
+                />
+              </div>
             </PanelSection>
 
             <PanelSection
@@ -637,6 +830,43 @@ export function CameraLiveViewPanel() {
                 )}
               </div>
             </PanelSection>
+
+            <PanelSection
+              title={t("camera.aiResults")}
+              headerAction={
+                <Badge
+                  className={
+                    aiRunning
+                      ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                      : "border-slate-200 bg-slate-50 text-slate-600"
+                  }
+                >
+                  {aiRunning ? t("camera.aiOn") : t("camera.aiOff")}
+                </Badge>
+              }
+            >
+              <div className="space-y-2 text-sm">
+                {formatAiRows(aiResult).length > 0 ? (
+                  formatAiRows(aiResult).map((row) => (
+                    <div
+                      key={row.key}
+                      className="border border-slate-200 bg-white px-3 py-2"
+                    >
+                      <div className="text-xs font-semibold text-slate-500">
+                        {row.label}
+                      </div>
+                      <div className="mt-1 font-mono text-base font-semibold text-slate-950">
+                        {row.text || "-"}
+                      </div>
+                    </div>
+                  ))
+                ) : (
+                  <div className="border border-dashed border-slate-300 bg-white px-3 py-4 text-center text-slate-500">
+                    {t("camera.aiResultsEmpty")}
+                  </div>
+                )}
+              </div>
+            </PanelSection>
           </CardContent>
         </Card>
 
@@ -644,6 +874,7 @@ export function CameraLiveViewPanel() {
           key={buildSettingsFormKey(selectedProduct)}
           product={selectedProduct}
           devices={devices}
+          hardwareRanges={hardwareRanges}
           disabled={loading || live}
           onSaved={handleSavedProduct}
         />
@@ -663,17 +894,45 @@ type StreamFrameMeta = {
 
 type StreamMessage = StreamFrameMeta | { error?: string };
 
+type CameraAiResult = {
+  seq?: number;
+  success?: boolean;
+  rows?: string[];
+  rois?: Array<{
+    success?: boolean;
+    rows?: string[];
+    error?: string | null;
+    roi?: {
+      x?: number;
+      y?: number;
+      w?: number;
+      h?: number;
+    };
+  }>;
+  error?: string | null;
+};
+
 async function loadCameraRuntime(accessToken: string) {
-  const [statusResponse, deviceResponse, frameRateResult] = await Promise.all([
+  const [
+    statusResponse,
+    deviceResponse,
+    frameRateResult,
+    rangesResult,
+    debugInfoResult,
+  ] = await Promise.all([
     getCameraStatus(accessToken),
     listCameraDevices(accessToken),
     getCameraFrameRate(accessToken).catch(() => defaultCameraFrameRate()),
+    getCameraRanges(accessToken).catch(() => defaultCameraRanges()),
+    getCameraDebugInfo(accessToken).catch(() => defaultCameraDebugInfo()),
   ]);
 
   return {
     statusResponse,
     devices: deviceResponse.data,
     frameRateResponse: frameRateResult,
+    rangesResponse: rangesResult,
+    debugInfoResponse: debugInfoResult,
   };
 }
 
@@ -741,12 +1000,153 @@ function defaultCameraFrameRate(): CameraFrameRate {
   };
 }
 
+function defaultCameraRanges(): CameraHardwareRanges {
+  return {
+    success: false,
+    ranges: {},
+    error: null,
+  };
+}
+
+function defaultCameraDebugInfo(): CameraDebugInfo {
+  return {
+    success: false,
+    diagnostics: {},
+    error: null,
+  };
+}
+
+function formatAiRows(result: CameraAiResult | null) {
+  if (!result) {
+    return [];
+  }
+
+  if (Array.isArray(result.rois)) {
+    return result.rois.map((roi, index) => ({
+      key: `roi-${index}`,
+      label: `ROI ${index + 1}`,
+      text: roi.error || (roi.rows ?? []).join(" | "),
+    }));
+  }
+
+  if (Array.isArray(result.rows)) {
+    return [
+      {
+        key: "frame",
+        label: "Frame",
+        text: result.error || result.rows.join(" | "),
+      },
+    ];
+  }
+
+  if (result.error) {
+    return [{ key: "error", label: "AI", text: result.error }];
+  }
+
+  return [];
+}
+
 function formatFps(value: number | null | undefined) {
   if (typeof value !== "number" || !Number.isFinite(value)) {
     return "-";
   }
 
   return `${value.toFixed(value % 1 === 0 ? 0 : 1)} FPS`;
+}
+
+function buildDiagnostics(
+  debugInfo: CameraDebugInfo | null,
+  status: CameraRuntimeStatus | null,
+) {
+  const diagnostics = debugInfo?.diagnostics ?? {};
+
+  return [
+    {
+      label: "Pixel",
+      value: formatDiagnosticValue(diagnostics.pixel_format),
+    },
+    {
+      label: "Payload",
+      value: formatBytes(diagnostics.payload_size),
+    },
+    {
+      label: "Packet",
+      value: formatDiagnosticValue(diagnostics.packet_size),
+    },
+    {
+      label: "Throughput",
+      value: formatDiagnosticValue(
+        diagnostics.current_throughput ?? diagnostics.throughput_limit,
+      ),
+    },
+    {
+      label: "Width",
+      value: formatDiagnosticValue(
+        status?.data?.image_width ?? status?.data?.geometry_width,
+      ),
+    },
+    {
+      label: "Height",
+      value: formatDiagnosticValue(
+        status?.data?.image_height ?? status?.data?.geometry_height,
+      ),
+    },
+  ];
+}
+
+function formatRange(range: CameraHardwareRanges["ranges"][string] | undefined) {
+  if (!range) {
+    return "-";
+  }
+
+  const min = formatDiagnosticValue(range.min);
+  const max = formatDiagnosticValue(range.max);
+  const inc = formatDiagnosticValue(range.inc);
+
+  return `${min} - ${max}${inc !== "-" ? ` / ${inc}` : ""}`;
+}
+
+function formatBytes(value: unknown) {
+  const numeric = toNumber(value);
+  if (numeric === null) {
+    return "-";
+  }
+
+  if (numeric >= 1_000_000) {
+    return `${(numeric / 1_000_000).toFixed(1)} MB`;
+  }
+
+  if (numeric >= 1_000) {
+    return `${(numeric / 1_000).toFixed(1)} KB`;
+  }
+
+  return `${numeric} B`;
+}
+
+function formatDiagnosticValue(value: unknown) {
+  if (value === null || typeof value === "undefined" || value === "") {
+    return "-";
+  }
+
+  const numeric = toNumber(value);
+  if (numeric !== null) {
+    return Number.isInteger(numeric) ? String(numeric) : numeric.toFixed(2);
+  }
+
+  return String(value);
+}
+
+function toNumber(value: unknown) {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value;
+  }
+
+  if (typeof value === "string" && value.trim()) {
+    const numeric = Number(value);
+    return Number.isFinite(numeric) ? numeric : null;
+  }
+
+  return null;
 }
 
 function mediaTypeForFrame(format: string) {
@@ -770,6 +1170,8 @@ function buildViewerKey(product: ProductProfile | null) {
     product.id,
     product.updatedAt,
     product.camera.zoomFactor,
+    product.camera.imageWidth,
+    product.camera.imageHeight,
     product.camera.previewPanX,
     product.camera.previewPanY,
     product.camera.previewRotation,

@@ -1,12 +1,12 @@
 import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
+import { NestExpressApplication } from '@nestjs/platform-express';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
-import type { Server } from 'node:http';
 import { AppModule } from './app.module';
 import { CameraStreamGateway } from './camera/camera-stream.gateway';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+  const app = await NestFactory.create<NestExpressApplication>(AppModule);
   const configuredCorsOrigins = (
     process.env.FRONTEND_ORIGIN ?? 'http://localhost:3000,http://127.0.0.1:3000'
   )
@@ -20,6 +20,8 @@ async function bootstrap() {
   const corsOrigins = Array.from(
     new Set([...configuredCorsOrigins, ...localRendererOrigins]),
   );
+  app.useBodyParser('json', { limit: '50mb' });
+  app.useBodyParser('urlencoded', { limit: '50mb', extended: true });
   app.setGlobalPrefix('api');
   app.useGlobalPipes(
     new ValidationPipe({
@@ -43,7 +45,7 @@ async function bootstrap() {
 
   const port = process.env.BACKEND_PORT ?? 4000;
   await app.listen(port);
-  app.get(CameraStreamGateway).attach(app.getHttpServer() as Server);
+  app.get(CameraStreamGateway).attach(app.getHttpServer());
 }
 bootstrap().catch((error) => {
   console.error('Failed to start API service', error);

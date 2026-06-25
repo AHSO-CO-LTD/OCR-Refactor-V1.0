@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, shell } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, shell, type OpenDialogOptions } from "electron";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { ServiceManager } from "./service-manager";
@@ -15,6 +15,10 @@ type DesktopWindowSettings = {
   height: number;
 };
 
+type DesktopTestStorageSettings = {
+  testImageSaveFolderPath: string | null;
+};
+
 const defaultWindowSettings: DesktopWindowSettings = {
   fullscreen: false,
   frameless: false,
@@ -25,6 +29,10 @@ const defaultWindowSettings: DesktopWindowSettings = {
   height: 1080,
 };
 
+const defaultTestStorageSettings: DesktopTestStorageSettings = {
+  testImageSaveFolderPath: null,
+};
+
 let rendererUrl =
   process.env.ELECTRON_RENDERER_URL ?? "http://127.0.0.1:3000/login";
 
@@ -33,6 +41,7 @@ let terminalWindow: BrowserWindow | null = null;
 let serviceManager: ServiceManager | null = null;
 let isQuitting = false;
 let windowSettings: DesktopWindowSettings = defaultWindowSettings;
+let testStorageSettings: DesktopTestStorageSettings = defaultTestStorageSettings;
 
 const hasSingleInstanceLock = app.requestSingleInstanceLock();
 
@@ -58,6 +67,7 @@ async function startDesktopApp() {
   const repoRoot = resolve(__dirname, "..", "..");
   serviceManager = new ServiceManager(repoRoot);
   windowSettings = loadWindowSettings();
+  testStorageSettings = loadTestStorageSettings();
   registerDesktopIpc();
 
   createMainWindow();
@@ -118,6 +128,7 @@ function createMainWindow() {
 }
 
 function registerDesktopIpc() {
+  ipcMain.handle("desktop:get-test-storage-settings", () => testStorageSettings);
   ipcMain.handle("desktop:get-window-settings", () => windowSettings);
   ipcMain.handle(
     "desktop:apply-window-settings",
@@ -125,6 +136,54 @@ function registerDesktopIpc() {
       return applyWindowSettings(nextSettings);
     },
   );
+  ipcMain.handle(
+    "desktop:save-test-storage-settings",
+    (_event, nextSettings: Partial<DesktopTestStorageSettings>) => {
+      testStorageSettings = normalizeTestStorageSettings({
+        ...testStorageSettings,
+        ...nextSettings,
+      });
+      saveTestStorageSettings(testStorageSettings);
+      return testStorageSettings;
+    },
+  );
+  ipcMain.handle("desktop:select-folder", async () => {
+    const dialogOptions: OpenDialogOptions = {
+      title: "Select test image folder",
+      properties: ["openDirectory", "createDirectory", "promptToCreate"],
+    };
+    const result =
+      mainWindow && !mainWindow.isDestroyed()
+        ? await dialog.showOpenDialog(mainWindow, dialogOptions)
+        : await dialog.showOpenDialog(dialogOptions);
+
+    return {
+      canceled: result.canceled,
+      folderPath: result.filePaths[0] ?? null,
+    };
+  });
+  ipcMain.handle("desktop:select-model-file", async () => {
+    const dialogOptions: OpenDialogOptions = {
+      title: "Select OCR model",
+      properties: ["openFile"],
+      filters: [
+        {
+          name: "Model files",
+          extensions: ["onnx", "pt", "pth", "engine", "xml", "bin", "trt", "tflite", "pb"],
+        },
+        { name: "All files", extensions: ["*"] },
+      ],
+    };
+    const result =
+      mainWindow && !mainWindow.isDestroyed()
+        ? await dialog.showOpenDialog(mainWindow, dialogOptions)
+        : await dialog.showOpenDialog(dialogOptions);
+
+    return {
+      canceled: result.canceled,
+      filePath: result.filePaths[0] ?? null,
+    };
+  });
   ipcMain.handle("desktop:exit-app", () => {
     isQuitting = false;
     app.quit();
@@ -177,6 +236,10 @@ function getWindowSettingsPath() {
   return join(app.getPath("userData"), "window-settings.json");
 }
 
+function getTestStorageSettingsPath() {
+  return join(app.getPath("userData"), "test-storage-settings.json");
+}
+
 function loadWindowSettings() {
   const settingsPath = getWindowSettingsPath();
 
@@ -195,8 +258,32 @@ function loadWindowSettings() {
   }
 }
 
+function loadTestStorageSettings() {
+  const settingsPath = getTestStorageSettingsPath();
+
+  if (!existsSync(settingsPath)) {
+    return defaultTestStorageSettings;
+  }
+
+  try {
+    const parsed = JSON.parse(
+      readFileSync(settingsPath, "utf8"),
+    ) as Partial<DesktopTestStorageSettings>;
+    return normalizeTestStorageSettings({
+      ...defaultTestStorageSettings,
+      ...parsed,
+    });
+  } catch {
+    return defaultTestStorageSettings;
+  }
+}
+
 function saveWindowSettings(settings: DesktopWindowSettings) {
   writeFileSync(getWindowSettingsPath(), JSON.stringify(settings, null, 2));
+}
+
+function saveTestStorageSettings(settings: DesktopTestStorageSettings) {
+  writeFileSync(getTestStorageSettingsPath(), JSON.stringify(settings, null, 2));
 }
 
 function normalizeWindowSettings(settings: DesktopWindowSettings) {
@@ -214,6 +301,18 @@ function normalizeWindowSettings(settings: DesktopWindowSettings) {
     windowPreset: settings.windowPreset,
     width,
     height,
+  };
+}
+
+function normalizeTestStorageSettings(
+  settings: Partial<DesktopTestStorageSettings>,
+): DesktopTestStorageSettings {
+  return {
+    testImageSaveFolderPath:
+      typeof settings.testImageSaveFolderPath === "string" &&
+      settings.testImageSaveFolderPath.trim().length > 0
+        ? settings.testImageSaveFolderPath.trim()
+        : null,
   };
 }
 

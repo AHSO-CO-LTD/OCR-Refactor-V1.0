@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  CSSProperties,
   PointerEvent,
   ReactNode,
   useEffect,
@@ -9,13 +10,19 @@ import {
   useState,
 } from "react";
 import { RotateCw } from "lucide-react";
-import { CameraPreviewImage } from "@/components/camera/camera-preview-image";
+import {
+  CameraPreviewTransformLayer,
+  clientPointToCameraPoint,
+} from "@/components/camera/camera-preview-image";
 import { Button } from "@/components/ui/button";
 import type { ProductProfile, RoiRegion } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
 
 type Point = { x: number; y: number };
 type ResizeCorner = "nw" | "ne" | "sw" | "se";
+
+const previewAspectRatio = 3;
+const fallbackCameraWidth = 1500;
 
 function clamp(value: number, min: number, max: number) {
   return Math.min(Math.max(value, min), max);
@@ -220,9 +227,19 @@ export function OperatorRoiEditor({
   } | null>(null);
   const rotateCleanupRef = useRef<(() => void) | null>(null);
 
-  const cameraWidth = product.camera.imageWidth || 3000;
-  const cameraHeight = product.camera.imageHeight || 1000;
+  const rawCameraWidth = Number(product.camera.imageWidth);
+  const cameraWidth = Math.max(
+    1,
+    Math.round(rawCameraWidth || fallbackCameraWidth),
+  );
+  const rawCameraHeight = Number(product.camera.imageHeight);
+  const cameraHeight = Math.max(
+    1,
+    Math.round(rawCameraHeight || cameraWidth / previewAspectRatio),
+  );
   const roiRegions = product.roiRegions;
+  const roiZoom = clamp(Number(product.camera.zoomFactor) || 1, 0.25, 6);
+  const roiZoomCompensation = 1 / roiZoom;
 
   const overlappingRegionIndexes = useMemo(
     () => getOverlappingRegionIndexes(roiRegions),
@@ -251,21 +268,15 @@ export function OperatorRoiEditor({
   }, [showClock]);
 
   function regionFromClientPoint(point: Point, element: HTMLDivElement | null) {
-    const rect = element?.getBoundingClientRect();
-    if (!rect) return null;
-
-    return {
-      x: clamp(
-        Math.round(((point.x - rect.left) / rect.width) * cameraWidth),
-        0,
-        cameraWidth,
-      ),
-      y: clamp(
-        Math.round(((point.y - rect.top) / rect.height) * cameraHeight),
-        0,
-        cameraHeight,
-      ),
-    };
+    return clientPointToCameraPoint({
+      clientPoint: point,
+      container: element,
+      imageSize: { width: cameraWidth, height: cameraHeight },
+      previewPanX: product.camera.previewPanX,
+      previewPanY: product.camera.previewPanY,
+      previewRotation: product.camera.previewRotation,
+      zoomFactor: product.camera.zoomFactor,
+    });
   }
 
   function handleRegionPointerDown(
@@ -516,16 +527,179 @@ export function OperatorRoiEditor({
       onPointerLeave={interactive ? finishPointerSession : undefined}
       onPointerDown={interactive ? () => setSelectedRegionIndex(null) : undefined}
     >
-      <div className="pointer-events-none absolute inset-0 opacity-95">
-        <CameraPreviewImage
-          imageSource={previewImageSrc}
-          zoomFactor={product.camera.zoomFactor}
-          previewPanX={product.camera.previewPanX}
-          previewPanY={product.camera.previewPanY}
-          previewRotation={product.camera.previewRotation}
-        />
-      </div>
-      <div className="absolute inset-0 bg-[linear-gradient(to_right,rgba(255,255,255,0.08)_1px,transparent_1px),linear-gradient(to_bottom,rgba(255,255,255,0.08)_1px,transparent_1px)] bg-[size:8.333%_20%] pointer-events-none" />
+      <CameraPreviewTransformLayer
+        className="overflow-visible"
+        imageSource={previewImageSrc}
+        imageHeight={cameraHeight}
+        imageWidth={cameraWidth}
+        zoomFactor={product.camera.zoomFactor}
+        previewPanX={product.camera.previewPanX}
+        previewPanY={product.camera.previewPanY}
+        previewRotation={product.camera.previewRotation}
+      >
+        {previewImageSrc ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={previewImageSrc}
+            alt=""
+            draggable={false}
+            className="pointer-events-none absolute inset-0 h-full w-full select-none object-contain opacity-95"
+          />
+        ) : null}
+        <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(to_right,rgba(255,255,255,0.08)_1px,transparent_1px),linear-gradient(to_bottom,rgba(255,255,255,0.08)_1px,transparent_1px)] bg-[size:8.333%_20%]" />
+        {roiRegions.map((region) => (
+          <div
+            key={region.index}
+            onPointerDown={
+              interactive
+                ? (event) => handleRegionPointerDown(event, region.index)
+                : undefined
+            }
+            className={[
+              "absolute flex items-center justify-center outline-none",
+              interactive ? "cursor-move" : "cursor-default",
+            ].join(" ")}
+            style={{
+              left: `${((region.x - region.width / 2) / cameraWidth) * 100}%`,
+              top: `${((region.y - region.height / 2) / cameraHeight) * 100}%`,
+              width: `${(region.width / cameraWidth) * 100}%`,
+              height: `${(region.height / cameraHeight) * 100}%`,
+              transform: `rotate(${region.rotation}deg)`,
+              ["--roi-ui-scale" as string]: roiZoomCompensation,
+              ["--roi-border-width" as string]: `${2 * roiZoomCompensation}px`,
+              ["--roi-ring-width" as string]: `${4 * roiZoomCompensation}px`,
+              ["--roi-corner-size" as string]: `${10 * roiZoomCompensation}px`,
+              ["--roi-corner-offset" as string]: `${1 * roiZoomCompensation}px`,
+              ["--roi-line-height" as string]: `${4 * roiZoomCompensation}px`,
+              ["--roi-glow-height" as string]: `${88 * roiZoomCompensation}px`,
+              ["--roi-handle-size" as string]: `${12 * roiZoomCompensation}px`,
+              ["--roi-handle-offset" as string]: `${6 * roiZoomCompensation}px`,
+              ["--roi-rotate-size" as string]: `${24 * roiZoomCompensation}px`,
+              ["--roi-rotate-offset" as string]: `${28 * roiZoomCompensation}px`,
+              ["--roi-icon-size" as string]: `${12 * roiZoomCompensation}px`,
+              ["--roi-label-size" as string]: `${12 * roiZoomCompensation}px`,
+            } as CSSProperties}
+            title={`${t("products.roiIndex")} ${region.index}: ${region.x}, ${region.y}`}
+          >
+            <div
+              className={[
+                "pointer-events-none absolute inset-0 overflow-hidden text-cyan-100 transition-shadow",
+                overlappingRegionIndexes.has(region.index)
+                  ? "bg-red-400/20"
+                  : selectedRegionIndex === region.index
+                    ? "bg-amber-400/20"
+                    : "bg-cyan-400/20",
+              ].join(" ")}
+              style={{
+                borderStyle: "solid",
+                borderWidth: "var(--roi-border-width)",
+                borderColor: overlappingRegionIndexes.has(region.index)
+                  ? "rgb(248 113 113 / 1)"
+                  : selectedRegionIndex === region.index
+                    ? "rgb(252 211 77 / 1)"
+                    : "rgb(103 232 249 / 1)",
+                boxShadow: overlappingRegionIndexes.has(region.index)
+                  ? "0 0 0 var(--roi-ring-width) rgb(248 113 113 / 0.3)"
+                  : selectedRegionIndex === region.index
+                    ? "0 0 0 var(--roi-ring-width) rgb(252 211 77 / 0.25)"
+                    : "0 0 0 var(--roi-ring-width) rgb(6 182 212 / 0.1)",
+              }}
+            >
+              <div className="operator-roi-scan-surface" />
+              <div className="operator-roi-scan-frame">
+                <span className="operator-roi-scan-corner corner-tl" />
+                <span className="operator-roi-scan-corner corner-tr" />
+                <span className="operator-roi-scan-corner corner-bl" />
+                <span className="operator-roi-scan-corner corner-br" />
+              </div>
+              <div
+                className="operator-roi-scan-glow"
+                style={{ animationDelay: `${region.index * 180}ms` }}
+              />
+              <div
+                className="operator-roi-scan-line"
+                style={{ animationDelay: `${region.index * 180}ms` }}
+              />
+            </div>
+            {interactive && selectedRegionIndex === region.index ? (
+              <div
+                className="absolute left-1/2 flex -translate-x-1/2 gap-1"
+                style={{ top: "calc(var(--roi-rotate-offset) * -1)" }}
+              >
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="icon"
+                  className="cursor-grab border-cyan-200 bg-black/80 text-cyan-50 hover:bg-slate-900 active:cursor-grabbing"
+                  style={{
+                    height: "var(--roi-rotate-size)",
+                    width: "var(--roi-rotate-size)",
+                  }}
+                  onPointerDown={(event) =>
+                    handleRotatePointerDown(event, region.index)
+                  }
+                  onClick={(event) => event.stopPropagation()}
+                >
+                  <RotateCw
+                    className="h-auto w-auto"
+                    style={{
+                      height: "var(--roi-icon-size)",
+                      width: "var(--roi-icon-size)",
+                    }}
+                    aria-hidden="true"
+                  />
+                </Button>
+              </div>
+            ) : null}
+
+            {interactive && selectedRegionIndex === region.index
+              ? (["nw", "ne", "sw", "se"] as ResizeCorner[]).map((corner) => (
+                  <button
+                    key={corner}
+                    type="button"
+                    onPointerDown={(event) =>
+                      handleResizePointerDown(event, region.index, corner)
+                    }
+                    onClick={(event) => event.stopPropagation()}
+                    className={[
+                      "absolute border border-white bg-amber-300 outline-none ring-2 ring-black/30",
+                      corner === "nw" ? "cursor-nwse-resize" : "",
+                      corner === "ne" ? "cursor-nesw-resize" : "",
+                      corner === "sw" ? "cursor-nesw-resize" : "",
+                      corner === "se" ? "cursor-nwse-resize" : "",
+                    ].join(" ")}
+                    style={{
+                      height: "var(--roi-handle-size)",
+                      width: "var(--roi-handle-size)",
+                      left:
+                        corner === "nw" || corner === "sw"
+                          ? "calc(var(--roi-handle-offset) * -1)"
+                          : undefined,
+                      right:
+                        corner === "ne" || corner === "se"
+                          ? "calc(var(--roi-handle-offset) * -1)"
+                          : undefined,
+                      top:
+                        corner === "nw" || corner === "ne"
+                          ? "calc(var(--roi-handle-offset) * -1)"
+                          : undefined,
+                      bottom:
+                        corner === "sw" || corner === "se"
+                          ? "calc(var(--roi-handle-offset) * -1)"
+                          : undefined,
+                    }}
+                  />
+                ))
+              : null}
+            <span
+              className="relative z-10 font-bold drop-shadow-[0_2px_6px_rgba(0,0,0,0.55)]"
+              style={{ fontSize: "var(--roi-label-size)" }}
+            >
+              {region.index}
+            </span>
+          </div>
+        ))}
+      </CameraPreviewTransformLayer>
       
       <div className="absolute left-3 top-3 border border-white/15 bg-black/75 px-2 py-1 font-mono text-xs font-semibold text-white pointer-events-none">
         {cameraWidth} x {cameraHeight}
@@ -562,89 +736,6 @@ export function OperatorRoiEditor({
           </div>
         ) : null}
       </div>
-
-      {roiRegions.map((region) => (
-        <div
-          key={region.index}
-          onPointerDown={
-            interactive
-              ? (event) => handleRegionPointerDown(event, region.index)
-              : undefined
-          }
-          className={[
-            "absolute flex items-center justify-center border-2 bg-cyan-400/20 text-xs font-bold text-cyan-100 outline-none ring-4 transition-shadow",
-            interactive ? "cursor-move hover:bg-cyan-400/30" : "cursor-default",
-            overlappingRegionIndexes.has(region.index)
-              ? "border-red-400 ring-red-400/30 bg-red-400/20 hover:bg-red-400/30"
-              : selectedRegionIndex === region.index
-              ? "border-amber-300 ring-amber-300/25 bg-amber-400/20 hover:bg-amber-400/30"
-              : "border-cyan-300 ring-cyan-500/10",
-          ].join(" ")}
-          style={{
-            left: `${((region.x - region.width / 2) / cameraWidth) * 100}%`,
-            top: `${((region.y - region.height / 2) / cameraHeight) * 100}%`,
-            width: `${(region.width / cameraWidth) * 100}%`,
-            height: `${(region.height / cameraHeight) * 100}%`,
-            transform: `rotate(${region.rotation}deg)`,
-          }}
-          title={`${t("products.roiIndex")} ${region.index}: ${region.x}, ${region.y}`}
-        >
-          <div className="pointer-events-none absolute inset-0 overflow-hidden">
-            <div className="operator-roi-scan-surface" />
-            <div className="operator-roi-scan-frame">
-              <span className="operator-roi-scan-corner corner-tl" />
-              <span className="operator-roi-scan-corner corner-tr" />
-              <span className="operator-roi-scan-corner corner-bl" />
-              <span className="operator-roi-scan-corner corner-br" />
-            </div>
-            <div
-              className="operator-roi-scan-glow"
-              style={{ animationDelay: `${region.index * 180}ms` }}
-            />
-            <div
-              className="operator-roi-scan-line"
-              style={{ animationDelay: `${region.index * 180}ms` }}
-            />
-          </div>
-          {interactive && selectedRegionIndex === region.index ? (
-            <div className="absolute -top-7 left-1/2 flex -translate-x-1/2 gap-1">
-              <Button
-                type="button"
-                variant="outline"
-                size="icon"
-                className="h-6 w-6 cursor-grab border-cyan-200 bg-black/80 text-cyan-50 hover:bg-slate-900 active:cursor-grabbing"
-                onPointerDown={(event) => handleRotatePointerDown(event, region.index)}
-                onClick={(event) => event.stopPropagation()}
-              >
-                <RotateCw className="h-3 w-3" aria-hidden="true" />
-              </Button>
-            </div>
-          ) : null}
-          
-          {interactive && selectedRegionIndex === region.index
-            ? (["nw", "ne", "sw", "se"] as ResizeCorner[]).map((corner) => (
-                <button
-                  key={corner}
-                  type="button"
-                  onPointerDown={(event) =>
-                    handleResizePointerDown(event, region.index, corner)
-                  }
-                  onClick={(event) => event.stopPropagation()}
-                  className={[
-                    "absolute h-3 w-3 border border-white bg-amber-300 outline-none ring-2 ring-black/30",
-                    corner === "nw" ? "-left-1.5 -top-1.5 cursor-nwse-resize" : "",
-                    corner === "ne" ? "-right-1.5 -top-1.5 cursor-nesw-resize" : "",
-                    corner === "sw" ? "-bottom-1.5 -left-1.5 cursor-nesw-resize" : "",
-                    corner === "se" ? "-bottom-1.5 -right-1.5 cursor-nwse-resize" : "",
-                  ].join(" ")}
-                />
-              ))
-            : null}
-          <span className="relative z-10 drop-shadow-[0_2px_6px_rgba(0,0,0,0.55)]">
-            {region.index}
-          </span>
-        </div>
-      ))}
 
       {overlayResult ? (
         <div

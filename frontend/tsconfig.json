@@ -40,7 +40,21 @@
     ".next-electron-3000/types/**/*.ts",
     ".next-electron-3000/dev/types/**/*.ts",
     ".next-electron-3001/types/**/*.ts",
-    ".next-electron-3001/dev/types/**/*.ts"
+    ".next-electron-3001/dev/types/**/*.ts",
+    ".next-electron-3002/types/**/*.ts",
+    ".next-electron-3002/dev/types/**/*.ts",
+    ".next-electron-3003/types/**/*.ts",
+    ".next-electron-3003/dev/types/**/*.ts",
+    ".next-electron-3004/types/**/*.ts",
+    ".next-electron-3004/dev/types/**/*.ts",
+    ".next-electron-3005/types/**/*.ts",
+    ".next-electron-3005/dev/types/**/*.ts",
+    ".next-electron-3006/types/**/*.ts",
+    ".next-electron-3006/dev/types/**/*.ts",
+    ".next-electron-3007/types/**/*.ts",
+    ".next-electron-3007/dev/types/**/*.ts",
+    ".next-electron-3008/types/**/*.ts",
+    ".next-electron-3008/dev/types/**/*.ts"
   ],
   "exclude": [
     "node_modules"

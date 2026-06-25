@@ -1,4 +1,12 @@
-import { Body, Controller, Get, Param, Post, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Param,
+  Post,
+  Query,
+  UseGuards,
+} from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { CurrentUser } from '../auth/current-user.decorator';
 import {
@@ -8,7 +16,9 @@ import {
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { PermissionsGuard } from '../auth/permissions.guard';
 import { PERMISSIONS } from '../common/constants/permissions';
+import { CreateTestSessionReportDto } from './dto/create-test-session-report.dto';
 import { StartInspectionDto } from './dto/start-inspection.dto';
+import { TestInspectionImageDto } from './dto/test-inspection-image.dto';
 import { InspectionsService } from './inspections.service';
 
 @ApiTags('inspections')
@@ -28,6 +38,40 @@ export class InspectionsController {
     @CurrentUser() user: { id: string; username: string; role: string },
   ) {
     return this.inspectionsService.startInspection(dto, user);
+  }
+
+  @ApiOperation({
+    summary:
+      'Run a test OCR scan against an uploaded image without saving logs',
+  })
+  @Post('test-image')
+  @RequireAnyPermission(PERMISSIONS.INSPECTION_START, PERMISSIONS.CAMERA_MANAGE)
+  testImage(@Body() dto: TestInspectionImageDto) {
+    return this.inspectionsService.testImage(dto);
+  }
+
+  @ApiOperation({
+    summary:
+      'Save a batch test session report with failed images and ROI details',
+  })
+  @Post('test-sessions')
+  @RequireAnyPermission(PERMISSIONS.INSPECTION_START, PERMISSIONS.CAMERA_MANAGE)
+  createTestSessionReport(
+    @Body() dto: CreateTestSessionReportDto,
+    @CurrentUser() user: { id: string; username: string; role: string },
+  ) {
+    return this.inspectionsService.createTestSessionReport(dto, user);
+  }
+
+  @ApiOperation({ summary: 'List recent batch test session reports' })
+  @Get('test-sessions')
+  @RequireAnyPermission(
+    PERMISSIONS.REPORT_VIEW,
+    PERMISSIONS.INSPECTION_START,
+    PERMISSIONS.CAMERA_MANAGE,
+  )
+  listTestSessionReports(@Query('limit') limit?: string) {
+    return this.inspectionsService.listTestSessionReports(Number(limit) || 10);
   }
 
   @ApiOperation({ summary: 'Get the current running inspection job' })

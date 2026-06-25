@@ -9,6 +9,8 @@ import { Select } from "@/components/ui/select";
 import {
   updateProductProfile,
   type CameraDevice,
+  type CameraHardwareRange,
+  type CameraHardwareRanges,
   type CameraProfile,
   type ProductProfile,
   type ProductProfilePayload,
@@ -19,6 +21,7 @@ import { getAccessToken } from "@/lib/session";
 type CameraSettingsFormProps = {
   product: ProductProfile | null;
   devices: CameraDevice[];
+  hardwareRanges: CameraHardwareRanges | null;
   disabled?: boolean;
   onSaved: (product: ProductProfile) => void;
 };
@@ -26,6 +29,7 @@ type CameraSettingsFormProps = {
 export function CameraSettingsForm({
   product,
   devices,
+  hardwareRanges,
   disabled = false,
   onSaved,
 }: CameraSettingsFormProps) {
@@ -193,44 +197,48 @@ export function CameraSettingsForm({
             <NumberInput
               label={t("products.cameraExposure")}
               value={draft.exposure}
-              min={0}
+              range={hardwareRanges?.ranges.exposure}
               disabled={formDisabled}
               onChange={(value) => updateNumber("exposure", value)}
             />
             <NumberInput
               label={t("products.zoomFactor")}
               value={draft.zoomFactor}
-              min={0}
-              max={10}
-              step={0.01}
+              fallbackMin={0}
+              fallbackMax={10}
+              fallbackStep={0.01}
               disabled={formDisabled}
               onChange={(value) => updateNumber("zoomFactor", value)}
             />
             <NumberInput
               label={t("products.imageWidth")}
               value={draft.imageWidth}
-              min={1}
+              range={hardwareRanges?.ranges.width}
+              fallbackMin={1}
               disabled={formDisabled}
               onChange={(value) => updateNumber("imageWidth", value)}
             />
             <NumberInput
               label={t("products.imageHeight")}
               value={draft.imageHeight}
-              min={1}
+              range={hardwareRanges?.ranges.height}
+              fallbackMin={1}
               disabled={formDisabled}
               onChange={(value) => updateNumber("imageHeight", value)}
             />
             <NumberInput
               label={t("products.offsetX")}
               value={draft.offsetX}
-              min={0}
+              range={hardwareRanges?.ranges.offset_x}
+              fallbackMin={0}
               disabled={formDisabled}
               onChange={(value) => updateNumber("offsetX", value)}
             />
             <NumberInput
               label={t("products.offsetY")}
               value={draft.offsetY}
-              min={0}
+              range={hardwareRanges?.ranges.offset_y}
+              fallbackMin={0}
               disabled={formDisabled}
               onChange={(value) => updateNumber("offsetY", value)}
             />
@@ -281,9 +289,10 @@ function TextInput({
 function NumberInput({
   label,
   value,
-  min,
-  max,
-  step,
+  range,
+  fallbackMin,
+  fallbackMax,
+  fallbackStep,
   disabled,
   className,
   onFocusField,
@@ -291,14 +300,20 @@ function NumberInput({
 }: {
   label: string;
   value: number;
-  min?: number;
-  max?: number;
-  step?: number;
+  range?: CameraHardwareRange | null;
+  fallbackMin?: number;
+  fallbackMax?: number;
+  fallbackStep?: number;
   disabled: boolean;
   className?: string;
   onFocusField?: (event: React.FocusEvent<HTMLInputElement>) => void;
   onChange: (value: string) => void;
 }) {
+  const min = toFiniteNumber(range?.min) ?? fallbackMin;
+  const max = toFiniteNumber(range?.max) ?? fallbackMax;
+  const step = toFiniteNumber(range?.inc) ?? fallbackStep;
+  const actualValue = toFiniteNumber(range?.value);
+
   return (
     <label className={`block space-y-1 ${className ?? ""}`}>
       <span className="text-xs font-medium uppercase tracking-[0.02em] text-slate-600">
@@ -315,8 +330,42 @@ function NumberInput({
         className="h-10 w-full border border-slate-300 bg-white px-3 text-sm outline-none focus:border-cyan-600"
         disabled={disabled}
       />
+      {range ? (
+        <span className="block text-[11px] leading-4 text-slate-500">
+          {formatRangeText(min, max, step, actualValue)}
+        </span>
+      ) : null}
     </label>
   );
+}
+
+function formatRangeText(
+  min: number | undefined,
+  max: number | undefined,
+  step: number | undefined,
+  actualValue: number | null,
+) {
+  const limits =
+    typeof min === "number" || typeof max === "number"
+      ? `${formatNumber(min)} - ${formatNumber(max)}`
+      : "-";
+  const increment = typeof step === "number" ? ` / ${formatNumber(step)}` : "";
+  const actual =
+    actualValue !== null ? ` / actual ${formatNumber(actualValue)}` : "";
+
+  return `${limits}${increment}${actual}`;
+}
+
+function formatNumber(value: number | undefined) {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return "-";
+  }
+
+  return Number.isInteger(value) ? String(value) : value.toFixed(2);
+}
+
+function toFiniteNumber(value: unknown) {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
 function normalizeCamera(camera: CameraProfile): CameraProfile {

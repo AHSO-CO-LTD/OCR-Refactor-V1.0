@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Device API — UI test</title>
+  <style>
+    body { font-family: system-ui, sans-serif; background:#0f1115; color:#e6e6e6; margin:0; padding:32px; }
+    h1 { font-size:20px; }
+    a.card { display:block; max-width:420px; margin:12px 0; padding:16px 20px; background:#1a1d24;
+             border:1px solid #2a2f3a; border-radius:10px; color:#e6e6e6; text-decoration:none; }
+    a.card:hover { border-color:#4a90d9; }
+    a.card b { color:#7cc4ff; }
+    .muted { color:#8a93a3; font-size:13px; }
+  </style>
+</head>
+<body>
+  <h1>Device API — trang test</h1>
+  <p class="muted">Mỗi phần là một trang riêng. Thêm phần mới chỉ cần thêm file .html vào thư mục static/.</p>
+  <a class="card" href="camera.html"><b>Camera</b><div class="muted">connect / grab / set param / live stream + Detect (B) ký sinh</div></a>
+  <a class="card" href="AI_yolo_ocr.html"><b>AI / yolo_ocr (A)</b><div class="muted">load model / predict ảnh (file, WebSocket) → rows</div></a>
+  <a class="card" href="plc.html"><b>PLC</b> <span class="muted">(sắp có)</span></a>
+</body>
+</html>

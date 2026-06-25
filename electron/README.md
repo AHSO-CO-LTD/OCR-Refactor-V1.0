@@ -27,6 +27,10 @@ Backend      http://127.0.0.1:4000
 Frontend     http://localhost:3000
 ```
 
+Electron checks the Device Tool at `/tool/v1/health` and passes
+`DEVICE_TOOL_API_PREFIX=/tool/v1` to the backend. Override the prefix only when
+the Device Tool routes intentionally change.
+
 Fallback ranges:
 
 ```text
@@ -42,7 +46,7 @@ Electron.
 The Device Tool interpreter defaults to:
 
 ```text
-tool/.venv/Scripts/python.exe
+tool/.venv/Scripts/python.exe, then py -3.9 on Windows when no tool venv exists
 ```
 
 Override it when needed:

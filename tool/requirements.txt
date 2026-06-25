@@ -1,37 +1,11 @@
---extra-index-url https://download.pytorch.org/whl/cu118
+fastapi
+uvicorn[standard]
+pydantic
+numpy
+opencv-contrib-python
+pypylon
+websockets
 
-fastapi==0.128.0
-uvicorn[standard]==0.39.0
-python-multipart==0.0.20
-
-PyQt5==5.15.11
-pywin32==311
-psutil==7.0.0
-
-numpy==1.26.4
-pandas==2.0.3
-openpyxl==3.1.5
-opencv-contrib-python==4.10.0.84
-Pillow==11.3.0
-cvzone==1.6.1
-
-torch==2.1.2+cu118
-torchvision==0.16.2+cu118
-torchinfo==1.8.0
-ultralytics==8.3.176
-scikit-learn==1.3.2
-tqdm==4.67.1
-PyYAML==6.0.2
-
-requests==2.32.4
-websocket-client==1.9.0
-
-PyMySQL==1.1.1
-pymodbus==3.8.6
-pymcprotocol==0.3.0
-pyserial==3.5
-pypylon==26.4.1
-
-Cython==3.1.6
-setuptools
-pyinstaller==6.16.0
+# AI / yolo_ocr (kéo theo torch). Để dùng GPU (CUDA), cài torch bản CUDA tương ứng
+# theo hướng dẫn pytorch.org trước; mặc định ultralytics cài torch CPU.
+ultralytics

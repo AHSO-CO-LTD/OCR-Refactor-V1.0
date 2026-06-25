@@ -4,7 +4,7 @@
 
 This planner turns the roadmap into an actionable implementation checklist.
 
-The project should start with frontend and backend. The AI service can be integrated later through the API contract defined in `docs/06-api-contracts.md`.
+The project should start with frontend and backend. The current Python/FastAPI Device/OCR runtime lives in `tool/` and is integrated through the backend with the `/tool/v1` contract defined in `docs/06-api-contracts.md`.
 
 ## Current Strategy
 
@@ -17,7 +17,7 @@ Build order:
 5. operational screens
 6. Electron packaging
 7. dongle integration
-8. AI integration
+8. Device/OCR runtime integration
 
 ## Current Status Snapshot
 
@@ -40,8 +40,13 @@ Completed:
 - Product profile ROI editor now supports direct drawing, move/resize/rotate, undo/redo, copy/paste, multi-select, assist overlays, and overlap validation.
 - Product profile `batchSize` is persisted and can be updated from the operator runtime dashboard.
 - Operator runtime dashboard foundation exists on `/dashboard` with product selector, ROI preview, API/demo product loading, and OK/NG/batch counters.
+- Operator runtime counter semantics are fixed as:
+  `count` = recognized amount from the current scan,
+  `quantity` = accumulated amount in the active batch,
+  `batch` = completed package count with remainder rollover when `quantity >= batchSize`.
 - Backend inspection foundation now includes Device Tool client wiring plus `/api/inspections/start`, `/api/inspections/current`, and `/api/inspections/:jobId/stop` with per-ROI inspection logs.
 - Backend camera foundation proxies Device Tool status, device discovery, connect, grab, and live stream through `/api/camera/status`, `/api/camera/devices`, `/api/camera/connect`, `/api/camera/grab`, and `/api/camera/stream`.
+- Device Tool integration now targets the API-Tool-v1 implementation in `tool/` with backend/Electron calls using configurable `DEVICE_TOOL_API_PREFIX=/tool/v1`. This active tool owns camera control and the current AI/yolo_ocr OCR runtime. The previous Device Tool source is kept as `tool-test/` for reference only.
 - Backend license foundation checks the legacy `System8.dll` dongle flow, records `license_logs`, exposes public/authenticated license status endpoints, and blocks login when the dongle is missing unless dongle mock mode is enabled.
 - Frontend login shows API/license/dongle startup status and disables sign-in until the backend reports a valid dongle.
 - Dedicated Camera page exists at `/dashboard/camera` with product-profile selection, Device Tool status/device discovery, connect/grab/live controls, view adjustment persistence, and manual refresh for camera status/devices.
@@ -63,7 +68,7 @@ Not started:
 - Dedicated history/reports screens and query flows.
 - Electron shell.
 - Full Electron boot-time dongle gate, periodic runtime recheck, and production hardware validation.
-- AI integration.
+- Full runtime dashboard integration with the `tool/` OCR result flow.
 
 For detailed handoff, read `docs/11-agent-onboarding.md`.
 
@@ -75,7 +80,7 @@ Tasks:
 
 - create `frontend/`
 - create `backend/`
-- create `ai/`
+- create `tool/`
 - create `shared/`
 - create `infra/`
 - create `scripts/`
@@ -311,25 +316,24 @@ Done when:
 - removal during runtime changes app state
 - license events are logged
 
-## Stage 11 - AI Integration
+## Stage 11 - Device/OCR Runtime Integration
 
-Goal: connect backend to Python/FastAPI.
+Goal: connect the runtime dashboard to the Python/FastAPI Device/OCR Tool in `tool/`.
 
 Tasks:
 
-- define FastAPI endpoints
-- implement backend AI client
-- support `AI_MOCK_MODE`
-- send image path and ROI to AI
-- receive OCR text and confidence
+- keep the `/tool/v1` FastAPI endpoints documented
+- keep the backend Device Tool client aligned with `/tool/v1/ocr/rois`
+- send camera/product ROI data to the Device/OCR Tool through backend only
+- receive OCR text and tool timing/error details
 - validate result against product rule
 - persist inspection result
 
 Done when:
 
-- backend can switch between mock and real AI mode
-- inspection result includes AI text/confidence
-- dashboard shows real inspection data when AI is available
+- backend can run real OCR through the active Device/OCR Tool
+- inspection result includes OCR text and per-ROI status
+- dashboard shows real inspection data when the Device/OCR Tool is available
 
 ## Stage 12 - Release Hardening
 
@@ -383,8 +387,8 @@ Reason:
 
 ## Notes
 
-- Do not wait for AI service before building FE/BE.
-- Keep AI mocked until the real FastAPI service is ready.
+- Do not create a separate external OCR service; use the active Python/FastAPI Device/OCR Tool in `tool/`.
+- Keep FE/BE usable when the Device/OCR Tool is unavailable, but route real OCR through `/tool/v1`.
 - Keep the permission list flexible per role and per user.
 - Keep all critical checks in backend.
 - Keep Electron packaging in mind, but do not block early backend/frontend work on packaging.

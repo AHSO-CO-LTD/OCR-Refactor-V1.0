@@ -2,7 +2,7 @@
 
 ## Goal
 
-This repository should be organized as a monorepo so that the desktop shell, frontend, backend, AI service, and shared types can evolve independently while still staying aligned.
+This repository should be organized as a monorepo so that the desktop shell, frontend, backend, Device/OCR Tool, and shared types can evolve independently while still staying aligned.
 
 The structure must support:
 
@@ -18,7 +18,8 @@ The structure must support:
 ocr-metal-core-washing-refactor/
   frontend/
   backend/
-  ai/
+  tool/
+  tool-test/
   shared/
   docs/
   infra/
@@ -56,21 +57,22 @@ Responsibilities:
 - inspection orchestration
 - report APIs
 - REST APIs for frontend
-- REST calls to AI service
+- REST calls to the Device/OCR Tool
 
-### `ai/`
+### `tool/`
 
-Contains the Python FastAPI service.
+Contains the active Python FastAPI Device/OCR Tool.
 
 Responsibilities:
 
+- camera device discovery and connection
+- camera grab and live stream
 - OCR and image processing
 - OpenCV preprocessing
 - YOLO / model inference
-- confidence scoring
-- structured result output
+- structured OCR result output
 
-This folder can be scaffolded later, but the repo should already reserve its place.
+The previous Device Tool implementation is archived in `tool-test/` for reference only.
 
 ### `shared/`
 
@@ -138,8 +140,8 @@ To keep the system maintainable, dependencies should flow in one direction:
 ```text
 frontend -> shared
 backend -> shared
-backend -> ai
-ai -> shared only for compatible contracts, if needed
+backend -> tool through HTTP/WebSocket only
+tool -> shared only for compatible contracts, if needed
 ```
 
 Rules:
@@ -161,7 +163,7 @@ This structure fits the project because:
 
 - it matches the way you already think about frontend and backend
 - it keeps the project easy to understand at the start
-- the AI service can be prepared later without affecting the rest
+- the Device/OCR Tool can evolve behind the backend contract without affecting the frontend
 - shared types prevent FE/BE drift
 - packaging into `.exe` is easier when the desktop shell stays inside `frontend`
 
@@ -172,7 +174,7 @@ If you want the simplest safe starting point, the first real scaffold should be:
 ```text
 frontend/
 backend/
-ai/
+tool/
 shared/
 docs/
 infra/

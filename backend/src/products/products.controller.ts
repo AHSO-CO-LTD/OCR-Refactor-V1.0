@@ -2,6 +2,7 @@ import {
   Body,
   Controller,
   Delete,
+  ForbiddenException,
   Get,
   Param,
   Patch,
@@ -15,10 +16,14 @@ import {
   RequirePermissions,
 } from '../auth/permissions.decorator';
 import { PermissionsGuard } from '../auth/permissions.guard';
+import { CurrentUser } from '../auth/current-user.decorator';
 import { PERMISSIONS } from '../common/constants/permissions';
+import type { AuthenticatedRequest } from '../common/types/authenticated-request';
 import { ApplyProductProfileDto } from './dto/apply-product-profile.dto';
+import { BulkUpdateProductOcrTestSettingsDto } from './dto/bulk-update-product-ocr-test-settings.dto';
 import { CreateProductProfileDto } from './dto/product-profile.dto';
 import { UpdateProductBatchSizeDto } from './dto/update-product-batch-size.dto';
+import { UpdateProductOcrTestSettingsDto } from './dto/update-product-ocr-test-settings.dto';
 import { UpdateProductProfileDto } from './dto/update-product-profile.dto';
 import { ProductsService } from './products.service';
 
@@ -64,6 +69,40 @@ export class ProductsController {
     @Body() dto: UpdateProductBatchSizeDto,
   ) {
     return this.productsService.updateProductBatchSize(id, dto);
+  }
+
+  @ApiOperation({
+    summary: 'Bulk update OCR test settings for product profiles',
+  })
+  @Patch('ocr-test-settings/apply')
+  @RequirePermissions(PERMISSIONS.SYSTEM_DEBUG)
+  bulkUpdateProductOcrTestSettings(
+    @Body() dto: BulkUpdateProductOcrTestSettingsDto,
+    @CurrentUser() user: AuthenticatedRequest['user'],
+  ) {
+    if (user.role !== 'dev') {
+      throw new ForbiddenException('Only dev can update OCR test settings');
+    }
+
+    return this.productsService.bulkUpdateProductOcrTestSettings(dto);
+  }
+
+  @ApiOperation({ summary: 'Update OCR test settings for a product profile' })
+  @Patch(':id/ocr-test-settings')
+  @RequirePermissions(PERMISSIONS.SYSTEM_DEBUG)
+  updateProductOcrTestSettings(
+    @Param('id') id: string,
+    @Body() dto: UpdateProductOcrTestSettingsDto,
+    @CurrentUser() user: AuthenticatedRequest['user'],
+  ) {
+    if (user.role !== 'dev') {
+      throw new ForbiddenException('Only dev can update OCR test settings');
+    }
+
+    return this.productsService.updateProductOcrTestSettings(
+      id,
+      dto.rotateTestImageClockwise,
+    );
   }
 
   @ApiOperation({ summary: 'Delete a product profile' })

@@ -1,13 +1,11 @@
 "use client";
 
 import Link from "next/link";
-import { Power, Settings } from "lucide-react";
 import { usePathname, useRouter } from "next/navigation";
-import { ReactNode, useCallback, useEffect, useState } from "react";
+import { ReactNode, useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
-import { LanguageToggle } from "@/components/language-toggle";
-import { Button } from "@/components/ui/button";
-import type { SessionUser, SystemLicenseState } from "@/lib/api";
+import { AccountMenu } from "@/components/account-menu";
+import type { RoleCode, SessionUser, SystemLicenseState } from "@/lib/api";
 import { getCameraStatus, getCurrentSession, listCameraDevices } from "@/lib/api";
 import type { TranslationKey } from "@/lib/i18n";
 import { useI18n } from "@/lib/i18n";
@@ -25,38 +23,72 @@ type AppShellProps = {
   descriptionKey?: TranslationKey;
 };
 
+type NavGroupKey =
+  | "navGroup.overview"
+  | "navGroup.management"
+  | "navGroup.configuration"
+  | "navGroup.inspection";
+
 const menuItems = [
-  { labelKey: "nav.dashboard", href: "/dashboard", permission: null },
-  { labelKey: "nav.line", href: "/dashboard/line", permission: null },
-  { labelKey: "nav.users", href: "/dashboard/users", permission: "user.manage" },
-  { labelKey: "nav.roles", href: "/dashboard/roles", permission: "role.manage" },
+  { labelKey: "nav.dashboard", href: "/dashboard", permission: null, groupKey: "navGroup.overview" },
+  { labelKey: "nav.line", href: "/dashboard/line", permission: null, groupKey: "navGroup.overview" },
+  {
+    labelKey: "nav.lineTest",
+    href: "/dashboard/line-test",
+    permission: null,
+    groupKey: "navGroup.overview",
+    allowedRoles: ["dev", "admin", "engineer"] as RoleCode[],
+  },
+  { labelKey: "nav.users", href: "/dashboard/users", permission: "user.manage", groupKey: "navGroup.management" },
+  { labelKey: "nav.roles", href: "/dashboard/roles", permission: "role.manage", groupKey: "navGroup.management" },
   {
     labelKey: "nav.products",
     href: "/dashboard/products",
     permission: "product.manage",
+    groupKey: "navGroup.configuration",
   },
-  { labelKey: "nav.camera", href: "/dashboard/camera", permission: "camera.manage" },
+  { labelKey: "nav.camera", href: "/dashboard/camera", permission: "camera.manage", groupKey: "navGroup.configuration" },
   {
     labelKey: "nav.cameraDebug",
     href: "/dashboard/camera-debug",
     permission: "camera.manage",
+    groupKey: "navGroup.configuration",
   },
-  { labelKey: "nav.roi", href: "/dashboard/roi", permission: "roi.edit" },
-  { labelKey: "nav.history", href: "/dashboard/history", permission: "history.view" },
-  { labelKey: "nav.reports", href: "/dashboard/reports", permission: "report.view" },
-  { labelKey: "nav.settings", href: "/dashboard/settings", permission: "system.shutdown" },
+  { labelKey: "nav.roi", href: "/dashboard/roi", permission: "roi.edit", groupKey: "navGroup.configuration" },
+  { labelKey: "nav.history", href: "/dashboard/history", permission: "history.view", groupKey: "navGroup.inspection" },
+  {
+    labelKey: "nav.reports",
+    href: "/dashboard/reports",
+    permission: "report.view",
+    groupKey: "navGroup.inspection",
+    allowedRoles: ["dev", "admin", "engineer"] as RoleCode[],
+  },
 ] satisfies Array<{
   labelKey: TranslationKey;
   href: string;
   permission: string | null;
+  groupKey: NavGroupKey;
+  allowedRoles?: RoleCode[];
+}>;
+
+const navGroups = [
+  { labelKey: "navGroup.overview", groupKey: "navGroup.overview" },
+  { labelKey: "navGroup.management", groupKey: "navGroup.management" },
+  { labelKey: "navGroup.configuration", groupKey: "navGroup.configuration" },
+  { labelKey: "navGroup.inspection", groupKey: "navGroup.inspection" },
+] satisfies Array<{
+  labelKey: TranslationKey;
+  groupKey: NavGroupKey;
 }>;
 
 export function AppShell({ children }: AppShellProps) {
   const router = useRouter();
   const pathname = usePathname();
   const { t } = useI18n();
+  const adminNavRef = useRef<HTMLDivElement | null>(null);
   const [user, setUser] = useState<SessionUser | null>(null);
   const [loading, setLoading] = useState(true);
+  const [selectedAdminGroup, setSelectedAdminGroup] = useState<NavGroupKey | null>(null);
   const handleLicenseLost = useCallback(
     (license: SystemLicenseState) => {
       clearSession();
@@ -69,6 +101,7 @@ export function AppShell({ children }: AppShellProps) {
     enabled: Boolean(user),
     onLicenseLost: handleLicenseLost,
   });
+  const isOperatorLinePage = pathname === "/dashboard/line";
 
   useEffect(() => {
     const token = getAccessToken();
@@ -112,6 +145,62 @@ export function AppShell({ children }: AppShellProps) {
     await bridge.exitApp();
   }
 
+  const visibleMenuItems = menuItems.filter(
+    (item) =>
+      (!item.allowedRoles || (user ? item.allowedRoles.includes(user.role) : false)) &&
+      (
+        item.permission === null ||
+        user?.isDev ||
+        user?.permissions.includes(item.permission)
+      ),
+  );
+  const canManageDesktopSettings = true;
+  const usesSidebar = user?.role === "dev" || user?.role === "admin";
+  const visibleAdminGroups = navGroups
+    .map((group) => ({
+      ...group,
+      items: visibleMenuItems.filter((item) => item.groupKey === group.groupKey),
+    }))
+    .filter((group) => group.items.length > 0);
+  const matchedAdminGroup =
+    visibleAdminGroups.find((group) =>
+      group.items.some((item) => isActivePath(pathname, item.href)),
+    ) ?? null;
+  const selectedAdminGroupKey =
+    selectedAdminGroup &&
+    visibleAdminGroups.some((group) => group.groupKey === selectedAdminGroup)
+      ? selectedAdminGroup
+      : null;
+  const openedAdminGroup =
+    visibleAdminGroups.find((group) => group.groupKey === selectedAdminGroupKey) ??
+    null;
+
+  useEffect(() => {
+    if (!usesSidebar || !selectedAdminGroup) {
+      return;
+    }
+
+    function handlePointerDown(event: PointerEvent) {
+      if (!adminNavRef.current?.contains(event.target as Node)) {
+        setSelectedAdminGroup(null);
+      }
+    }
+
+    function handleEscape(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        setSelectedAdminGroup(null);
+      }
+    }
+
+    window.addEventListener("pointerdown", handlePointerDown);
+    window.addEventListener("keydown", handleEscape);
+
+    return () => {
+      window.removeEventListener("pointerdown", handlePointerDown);
+      window.removeEventListener("keydown", handleEscape);
+    };
+  }, [selectedAdminGroup, usesSidebar]);
+
   if (loading && !user) {
     return (
       <main className="flex min-h-[100dvh] items-center justify-center bg-slate-100">
@@ -124,15 +213,6 @@ export function AppShell({ children }: AppShellProps) {
     return null;
   }
 
-  const visibleMenuItems = menuItems.filter(
-    (item) =>
-      item.permission === null ||
-      user.isDev ||
-      user.permissions.includes(item.permission),
-  );
-  const canManageDesktopSettings =
-    user.isDev || user.permissions.includes("system.shutdown");
-  const usesSidebar = user.role === "dev" || user.role === "admin";
   const navLinks = (
     <nav
       className={
@@ -142,14 +222,14 @@ export function AppShell({ children }: AppShellProps) {
       }
     >
       {visibleMenuItems.map((item) => {
-        const active = pathname === item.href;
+        const active = isActivePath(pathname, item.href);
 
         return (
           <Link
             key={item.href}
             href={item.href}
             className={[
-              "flex h-10 items-center border px-3 text-left text-sm font-medium transition",
+              "flex h-9 items-center border px-3 text-left text-sm font-medium transition",
               usesSidebar ? "w-full" : "w-auto",
               active
                 ? "border-cyan-200 bg-cyan-50 text-cyan-900"
@@ -166,117 +246,111 @@ export function AppShell({ children }: AppShellProps) {
   return (
     <main className="flex h-[100dvh] overflow-hidden bg-slate-100 text-slate-950">
       <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
-        <header className="flex min-h-16 shrink-0 flex-col gap-3 border-b border-slate-200 bg-white px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-5 lg:px-6">
-          <div className="min-w-0">
-            <div className="text-xs font-semibold uppercase tracking-[0.18em] text-cyan-700">
-              {t("app.brand")}
-            </div>
-            <div className="truncate text-lg font-semibold">{t("app.line")}</div>
-          </div>
-          {usesSidebar ? null : (
-            <div className="min-w-0 flex-1 overflow-x-auto">
-              <div className="flex min-w-max items-center gap-2 px-0 sm:justify-center">
-                {navLinks}
+        <header className="relative z-20 shrink-0 border-b border-slate-200 bg-white px-4 py-2 sm:px-5 lg:px-6">
+          <div className="flex min-h-12 flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <div className="min-w-0">
+              <div className="text-xs font-semibold uppercase tracking-[0.18em] text-cyan-700">
+                {t("app.brand")}
               </div>
+              <div className="truncate text-lg font-semibold">{t("app.line")}</div>
             </div>
-          )}
-          <div className="flex min-w-0 flex-wrap items-center gap-3 text-sm sm:justify-end lg:gap-4">
-            <LanguageToggle />
-            <div
-              className={[
-                "flex h-9 items-center gap-2 border px-3 text-xs font-semibold",
-                license?.licensed === true && license.donglePresent === true
-                  ? "border-emerald-200 bg-emerald-50 text-emerald-800"
-                  : "border-slate-200 bg-slate-50 text-slate-600",
-              ].join(" ")}
-            >
-              <span
-                className={[
-                  "h-2.5 w-2.5 rounded-full",
-                  license?.licensed === true && license.donglePresent === true
-                    ? "bg-emerald-500"
-                    : "bg-slate-300",
-                ].join(" ")}
+            {usesSidebar ? (
+              <div ref={adminNavRef} className="min-w-0 flex-1">
+                <div className="overflow-x-auto">
+                  <nav className="flex min-w-max items-center gap-2 sm:justify-center">
+                    {visibleAdminGroups.map((group) => {
+                      const active = group.groupKey === matchedAdminGroup?.groupKey;
+                      const opened = group.groupKey === selectedAdminGroup;
+
+                      return (
+                        <button
+                          key={group.groupKey}
+                          type="button"
+                          onClick={() =>
+                            setSelectedAdminGroup((current) =>
+                              current === group.groupKey ? null : group.groupKey,
+                            )
+                          }
+                          className={[
+                            "flex h-9 items-center border px-3 text-sm font-medium transition",
+                            opened || active
+                              ? "border-cyan-200 bg-cyan-50 text-cyan-900"
+                              : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50",
+                          ].join(" ")}
+                        >
+                          {t(group.labelKey)}
+                        </button>
+                      );
+                    })}
+                  </nav>
+                </div>
+
+                {openedAdminGroup ? (
+                  <div className="absolute inset-x-0 top-full border-t border-slate-200 bg-white px-4 py-2 shadow-sm sm:px-5 lg:px-6">
+                    <nav className="flex min-w-max items-center gap-2 overflow-x-auto sm:justify-center">
+                      {openedAdminGroup.items.map((item) => {
+                        const active = isActivePath(pathname, item.href);
+
+                        return (
+                          <Link
+                            key={item.href}
+                            href={item.href}
+                            onClick={() => setSelectedAdminGroup(null)}
+                            className={[
+                              "flex h-9 items-center border px-3 text-left text-sm font-medium transition",
+                              active
+                                ? "border-cyan-200 bg-cyan-50 text-cyan-900"
+                                : "border-transparent text-slate-700 hover:border-slate-200 hover:bg-slate-50",
+                            ].join(" ")}
+                          >
+                            {t(item.labelKey)}
+                          </Link>
+                        );
+                      })}
+                    </nav>
+                  </div>
+                ) : null}
+              </div>
+            ) : (
+              <div className="min-w-0 flex-1 overflow-x-auto">
+                <div className="flex min-w-max items-center gap-2 px-0 sm:justify-center">
+                  {navLinks}
+                </div>
+              </div>
+            )}
+            <div className="flex min-w-0 flex-wrap items-center gap-3 text-sm sm:justify-end lg:gap-4">
+              <AccountMenu
+                canManageDesktopSettings={canManageDesktopSettings}
+                donglePresent={license?.licensed === true && license.donglePresent === true}
+                onExitApp={handleExitApp}
+                onLogout={handleLogout}
+                user={user}
               />
-              {license?.licensed === true && license.donglePresent === true
-                ? t("dashboard.donglePresent")
-                : t("dashboard.pending")}
             </div>
-            <div className="min-w-0 text-left sm:text-right">
-              <div className="font-semibold">{user.fullName}</div>
-              <div className="text-slate-500">
-                {user.role}
-                {user.isDev ? ` / ${t("session.hiddenDev")}` : ""}
-              </div>
-            </div>
-            {canManageDesktopSettings ? (
-              <Button
-                asChild
-                variant="outline"
-                size="icon"
-                title={t("nav.settings")}
-              >
-                <Link href="/dashboard/settings">
-                  <Settings className="h-4 w-4" />
-                </Link>
-              </Button>
-            ) : null}
-            <Button
-              onClick={handleExitApp}
-              variant="outline"
-              size="icon"
-              title={t("settings.exitApp")}
-            >
-              <Power className="h-4 w-4" />
-            </Button>
-            <Button
-              onClick={handleLogout}
-              variant="outline"
-              size="sm"
-            >
-              {t("session.logout")}
-            </Button>
           </div>
         </header>
 
         {usesSidebar ? (
-          <div className="min-h-0 min-w-0 flex-1 overflow-hidden lg:grid lg:grid-cols-[220px_minmax(0,1fr)] xl:grid-cols-[240px_minmax(0,1fr)]">
-            <div className="shrink-0 overflow-x-auto border-b border-slate-200 bg-white px-4 py-3 lg:hidden">
-              <nav className="flex min-w-max items-center gap-2">
-                {visibleMenuItems.map((item) => {
-                  const active = pathname === item.href;
-
-                  return (
-                    <Link
-                      key={item.href}
-                      href={item.href}
-                      className={[
-                        "flex h-10 items-center border px-3 text-left text-sm font-medium transition",
-                        active
-                          ? "border-cyan-200 bg-cyan-50 text-cyan-900"
-                          : "border-transparent text-slate-700 hover:border-slate-200 hover:bg-slate-50",
-                      ].join(" ")}
-                    >
-                      {t(item.labelKey)}
-                    </Link>
-                  );
-                })}
-              </nav>
-            </div>
-
-            <aside className="hidden min-h-0 overflow-y-auto border-r border-slate-200 bg-white p-4 lg:block">
-              {navLinks}
-            </aside>
-
+          <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
             <div className="flex min-h-0 min-w-0 flex-col">
-              <section className="min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto p-4 sm:p-5 lg:p-5 xl:p-6">
+              <section
+                className={[
+                  "min-h-0 min-w-0 flex-1 overflow-x-hidden p-4 sm:p-5 lg:p-5 xl:p-6",
+                  isOperatorLinePage ? "overflow-y-hidden" : "overflow-y-auto",
+                ].join(" ")}
+              >
                 {children}
               </section>
             </div>
           </div>
         ) : (
           <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-            <section className="min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto p-4 sm:p-5 lg:p-6">
+            <section
+              className={[
+                "min-h-0 min-w-0 flex-1 overflow-x-hidden p-4 sm:p-5 lg:p-6",
+                isOperatorLinePage ? "overflow-y-hidden" : "overflow-y-auto",
+              ].join(" ")}
+            >
               {children}
             </section>
           </div>
@@ -284,6 +358,14 @@ export function AppShell({ children }: AppShellProps) {
       </div>
     </main>
   );
+}
+
+function isActivePath(pathname: string, href: string) {
+  if (href === "/dashboard") {
+    return pathname === href;
+  }
+
+  return pathname === href || pathname.startsWith(`${href}/`);
 }
 
 function shouldPrimeCameraRuntime(user: SessionUser) {

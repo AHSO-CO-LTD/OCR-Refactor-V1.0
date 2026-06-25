@@ -12,7 +12,7 @@ Target stack:
 - Backend: NestJS REST API
 - Database: PostgreSQL + Prisma
 - Future desktop shell: Electron
-- Future AI service: Python + FastAPI
+- Device/OCR Tool: Python + FastAPI in `tool/`
 - Future license protection: USB dongle checked at app startup
 
 Ultimate deployment goal:
@@ -50,6 +50,7 @@ Backend:
 - Swagger API documentation is implemented at `/api/docs`.
 - Backend inspection foundation now includes a Device Tool client plus `/api/inspections/start`, `/api/inspections/current`, and `/api/inspections/:jobId/stop` with per-ROI inspection logs.
 - Backend camera foundation now proxies Device Tool status, device discovery, connect, grab, and live stream through `/api/camera/status`, `/api/camera/devices`, `/api/camera/connect`, `/api/camera/grab`, and `/api/camera/stream`.
+- Active Device Tool source now lives in `tool/` from API-Tool-v1 and is called through `/tool/v1` by default. It owns camera control and the current AI/yolo_ocr OCR runtime. The previous Device Tool source was moved to `tool-test/` for reference only.
 - Backend license foundation checks the USB dongle through the legacy `System8.dll` flow, records license logs, exposes login/dashboard license status, and blocks login when the dongle is missing unless dongle mock mode is enabled.
 
 Frontend:
@@ -116,7 +117,7 @@ Finish frontend hardening for the first operational module:
 - Do not design only for web widescreen. Electron renderer layouts must work well on the 1280x1080 industrial PC screen first, then scale up/down for other desktop, laptop, tablet, and mobile sizes.
 - The factory machine uses a single touchscreen display. All operational and setup screens must be designed touch-first: large hit targets, no hover-only critical actions, visible controls, and form inputs that work well with on-screen virtual keyboards.
 - Frontend calls backend only.
-- Backend later calls Python/FastAPI AI service.
+- Backend calls the Python/FastAPI Device/OCR Tool in `tool/` through `/tool/v1`; frontend still calls backend only.
 - Backend must enforce authorization; frontend hiding is not enough.
 - `dev` role is hidden from normal roles.
 - Normal admin must not manage `dev`.
@@ -144,7 +145,7 @@ User opens .exe
   -> If valid, Electron starts or connects to local backend
   -> Electron opens Next.js UI
   -> UI calls NestJS REST API
-  -> NestJS calls Python/FastAPI AI service later
+  -> NestJS calls the local Python/FastAPI Device/OCR Tool in `tool/`
 ```
 
 Expected final local components:
@@ -154,7 +155,7 @@ Electron .exe
 Next.js renderer
 NestJS local API
 PostgreSQL local database
-Python/FastAPI AI service
+Python/FastAPI Device/OCR Tool in `tool/`
 USB dongle/license module
 ```
 

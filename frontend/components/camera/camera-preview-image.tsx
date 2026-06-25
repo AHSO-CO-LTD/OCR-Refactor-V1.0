@@ -45,7 +45,7 @@ export function CameraPreviewImage({
           src={imageSource}
           alt=""
           draggable={false}
-          className="absolute inset-0 h-full w-full select-none object-fill"
+          className="absolute inset-0 h-full w-full select-none object-contain"
         />
       ) : null}
     </CameraPreviewTransformLayer>
