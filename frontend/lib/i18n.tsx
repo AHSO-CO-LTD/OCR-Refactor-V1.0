@@ -1384,6 +1384,11 @@ const translationOverrides: Record<Language, Record<string, string>> = {
     "settings.runtimeTestIgnorePlcState": "PLC requirement",
     "settings.runtimeTestIgnored": "Ignored in development",
     "settings.runtimeTestRequired": "Required",
+    "settings.runtimeTestResultDelay": "Checking-to-result delay",
+    "settings.runtimeTestResultDelayHint":
+      "Used by the line animation test. Adjustable from 0.5s to 2.0s.",
+    "settings.runtimeTestResultDelayValue": "{seconds}s",
+    "settings.runtimeTestResultDelayState": "Result delay",
     "nav.lineAnimationTest": "Line animation test",
     "lineAnimationTest.title": "Line animation test",
     "lineAnimationTest.description":
@@ -1426,7 +1431,7 @@ const translationOverrides: Record<Language, Record<string, string>> = {
     "lineAnimationTest.chooseImage": "Choose image",
     "lineAnimationTest.checkingBand": "Checking",
     "lineAnimationTest.resultDelayed": "Result delayed 2s",
-    "lineAnimationTest.roiResultDelay": "ROI result after 2s",
+    "lineAnimationTest.roiResultDelay": "ROI result after {seconds}s",
     "lineAnimationTest.waitingPlcDone": "Waiting PLC done",
     "lineAnimationTest.currentSlots": "Detected ROI",
     "lineAnimationTest.noRoi": "Selected product has no ROI.",
@@ -1439,6 +1444,15 @@ const translationOverrides: Record<Language, Record<string, string>> = {
       "Random NG animation scenario started.",
     "lineAnimationTest.plcIgnored": "PLC ignored",
     "lineAnimationTest.plcRequired": "PLC required",
+    "lineAnimationTest.runFolder": "Run folder test",
+    "lineAnimationTest.batchTesting": "Running folder animation test...",
+    "lineAnimationTest.batchCompletedSaved":
+      "Completed folder animation test for {count} image(s). Report saved: {reportId}.",
+    "lineAnimationTest.batchCancelled": "Folder animation test stopped.",
+    "lineAnimationTest.batchSummary": "Current folder-test summary",
+    "lineAnimationTest.batchSummaryEmpty":
+      "Choose a folder and run the animation test to see the latest summary.",
+    "lineAnimationTest.unknown": "Unknown",
     "settings.aiTitle": "AI OCR thresholds",
     "settings.aiDescription":
       "Adjust OCR confidence, IoU, and row grouping tolerance for product profiles used by the Tool runtime.",
@@ -1636,6 +1650,11 @@ const translationOverrides: Record<Language, Record<string, string>> = {
     "settings.runtimeTestIgnorePlcState": "Yêu cầu PLC",
     "settings.runtimeTestIgnored": "Đang bỏ qua trong dev",
     "settings.runtimeTestRequired": "Bắt buộc",
+    "settings.runtimeTestResultDelay": "Thời gian từ checking đến kết quả",
+    "settings.runtimeTestResultDelayHint":
+      "Áp dụng cho trang test animation line. Có thể chỉnh từ 0.5s đến 2.0s.",
+    "settings.runtimeTestResultDelayValue": "{seconds}s",
+    "settings.runtimeTestResultDelayState": "Thời gian ra kết quả",
     "nav.lineAnimationTest": "Test animation line",
     "lineAnimationTest.title": "Test animation line",
     "lineAnimationTest.description":
@@ -1678,7 +1697,7 @@ const translationOverrides: Record<Language, Record<string, string>> = {
     "lineAnimationTest.chooseImage": "Chọn ảnh",
     "lineAnimationTest.checkingBand": "Đang kiểm tra",
     "lineAnimationTest.resultDelayed": "Trễ kết quả 2s",
-    "lineAnimationTest.roiResultDelay": "ROI ra kết quả sau 2s",
+    "lineAnimationTest.roiResultDelay": "ROI ra kết quả sau {seconds}s",
     "lineAnimationTest.waitingPlcDone": "Chờ PLC chốt",
     "lineAnimationTest.currentSlots": "ROI detect",
     "lineAnimationTest.noRoi": "Product đang chọn chưa có ROI.",
@@ -1690,6 +1709,15 @@ const translationOverrides: Record<Language, Record<string, string>> = {
     "lineAnimationTest.randomScenarioStarted": "Đã chạy kịch bản random NG.",
     "lineAnimationTest.plcIgnored": "Đang bỏ qua PLC",
     "lineAnimationTest.plcRequired": "Yêu cầu PLC",
+    "lineAnimationTest.runFolder": "Test theo folder",
+    "lineAnimationTest.batchTesting": "Đang test animation theo folder...",
+    "lineAnimationTest.batchCompletedSaved":
+      "Đã hoàn tất test animation folder với {count} ảnh. Report đã lưu: {reportId}.",
+    "lineAnimationTest.batchCancelled": "Đã dừng test animation theo folder.",
+    "lineAnimationTest.batchSummary": "Tổng kết đợt test folder hiện tại",
+    "lineAnimationTest.batchSummaryEmpty":
+      "Chọn folder và chạy test animation để xem tổng kết mới nhất.",
+    "lineAnimationTest.unknown": "Chưa rõ",
     "settings.aiTitle": "Ngưỡng AI OCR",
     "settings.aiDescription":
       "Điều chỉnh ngưỡng confidence, IoU và sai số gom hàng cho các profile sản phẩm đang được Tool runtime sử dụng.",

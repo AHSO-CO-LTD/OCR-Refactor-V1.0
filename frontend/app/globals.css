@@ -352,8 +352,8 @@ input[type="radio"]:not(:disabled) {
 .operator-roi-status-band-checking span {
   display: inline-block;
   opacity: 0;
-  animation: operator-roi-band-type 560ms ease-out forwards;
-  animation-delay: calc(var(--operator-type-index, 0) * 72ms);
+  animation: operator-roi-band-type var(--operator-type-duration, 560ms) ease-out forwards;
+  animation-delay: calc(var(--operator-type-index, 0) * var(--operator-type-step, 72ms));
 }
 
 .operator-roi-detected-text-tag {
@@ -410,8 +410,8 @@ input[type="radio"]:not(:disabled) {
 .operator-roi-detected-text-tag-checking span {
   display: inline-block;
   opacity: 0;
-  animation: operator-roi-band-type 520ms ease-out forwards;
-  animation-delay: calc(var(--operator-type-index, 0) * 64ms);
+  animation: operator-roi-band-type var(--operator-type-duration, 520ms) ease-out forwards;
+  animation-delay: calc(var(--operator-type-index, 0) * var(--operator-type-step, 64ms));
 }
 
 .operator-roi-detected-text-tag-ng {

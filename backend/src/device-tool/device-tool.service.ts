@@ -205,6 +205,10 @@ export class DeviceToolService {
     const payload = {
       device_index: selectedDevice.index,
       exposure: camera.exposure,
+      offset_x: camera.offsetX,
+      offset_y: camera.offsetY,
+      width: camera.imageWidth,
+      height: camera.imageHeight,
     };
 
     const status = await this.getCameraStatus();
@@ -227,9 +231,15 @@ export class DeviceToolService {
         this.getToolPath('/camera/settings'),
         {
           method: 'POST',
-          body: JSON.stringify({ exposure: camera.exposure }),
+          body: JSON.stringify({
+            exposure: camera.exposure,
+            offset_x: camera.offsetX,
+            offset_y: camera.offsetY,
+            width: camera.imageWidth,
+            height: camera.imageHeight,
+          }),
         },
-        'update preview camera exposure',
+        'update preview camera settings',
       );
       return;
     }

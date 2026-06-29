@@ -8,7 +8,9 @@ import {
   useState,
 } from "react";
 import {
+  FolderOpen,
   FileImage,
+  Pause,
   Play,
   RotateCcw,
   ScanLine,
@@ -25,12 +27,17 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select } from "@/components/ui/select";
 import {
   ApiError,
+  createTestSessionReport,
   grabCameraFrame,
   listProductProfiles,
   testInspectionImage,
+  type InspectionSlotState,
   type ProductProfile,
   type RoiRegion,
+  type TestInspectionImageResult,
+  type TestSessionImageResult,
 } from "@/lib/api";
+import { getDesktopBridge } from "@/lib/desktop";
 import { useI18n } from "@/lib/i18n";
 import {
   getRuntimeTestSettings,
@@ -39,7 +46,6 @@ import {
 import { getAccessToken } from "@/lib/session";
 
 type AnimationState = "UNKNOWN" | "CHECKING" | "WAITING_PLC" | "OK" | "NG";
-type DetectionLayout = "SINGLE" | "THREE" | "ALL" | "RANDOM";
 type DataSource = "api" | "sample";
 type RuntimeFrame = {
   atMs: number;
@@ -47,10 +53,28 @@ type RuntimeFrame = {
   statuses: Record<number, OperatorRoiStatus>;
   labels?: Record<number, string>;
 };
+type AnimationBatchReportRow = {
+  fileName: string;
+  relativePath: string;
+  result: TestSessionImageResult;
+  cycleTimeMs: number | null;
+  errorMessage: string | null;
+  originalImageBase64: string;
+  slots: InspectionSlotState[];
+};
+type AnimationBatchSummary = {
+  reportId: string;
+  folderName: string;
+  totalImages: number;
+  okImages: number;
+  ngImages: number;
+  unknownImages: number;
+  errorImages: number;
+};
 
 const detectDelayMs = 300;
-const inspectDelayMs = 2000;
 const plcDoneHoldMs = 750;
+const resultHoldMs = 1200;
 const runtimeFrameIntervalMs = 2800;
 
 const sampleProducts: ProductProfile[] = [
@@ -148,31 +172,6 @@ function countStatuses(statuses: Record<number, OperatorRoiStatus>) {
   );
 }
 
-function shuffleRegions(regions: RoiRegion[]) {
-  return [...regions].sort(() => Math.random() - 0.5);
-}
-
-function pickDetectedRegions(layout: DetectionLayout, regions: RoiRegion[]) {
-  if (regions.length === 0) {
-    return [];
-  }
-
-  if (layout === "ALL") {
-    return regions;
-  }
-
-  if (layout === "THREE") {
-    return shuffleRegions(regions).slice(0, Math.min(3, regions.length));
-  }
-
-  if (layout === "RANDOM") {
-    const count = Math.max(1, Math.ceil(Math.random() * regions.length));
-    return shuffleRegions(regions).slice(0, count);
-  }
-
-  return shuffleRegions(regions).slice(0, 1);
-}
-
 function isImageFile(file: File) {
   return file.type.startsWith("image/") || /\.(bmp|gif|jpe?g|png|tif?f|webp)$/i.test(file.name);
 }
@@ -180,18 +179,21 @@ function isImageFile(file: File) {
 export function LineAnimationTestPanel() {
   const { t, apiError } = useI18n();
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const folderInputRef = useRef<HTMLInputElement | null>(null);
+  const cancelBatchTestRef = useRef(false);
   const timersRef = useRef<number[]>([]);
   const lineIntervalRef = useRef<number | null>(null);
   const lineVisibleIndexesRef = useRef<Set<number>>(new Set());
   const lineStatusesRef = useRef<Record<number, OperatorRoiStatus>>({});
   const lineLabelsRef = useRef<Record<number, string>>({});
   const lineTickBusyRef = useRef(false);
+  const totalCountRef = useRef(0);
+  const batchCountRef = useRef(0);
+  const batchQuantityRef = useRef(0);
   const [products, setProducts] = useState<ProductProfile[]>(sampleProducts);
   const [selectedProductId, setSelectedProductId] = useState(sampleProducts[0].id);
   const [dataSource, setDataSource] = useState<DataSource>("sample");
   const [loadingProducts, setLoadingProducts] = useState(true);
-  const [detectionLayout, setDetectionLayout] =
-    useState<DetectionLayout>("ALL");
   const [animationState, setAnimationState] =
     useState<AnimationState>("UNKNOWN");
   const [roiStatuses, setRoiStatuses] = useState<
@@ -204,11 +206,25 @@ export function LineAnimationTestPanel() {
   const [okCount, setOkCount] = useState(0);
   const [ngCount, setNgCount] = useState(0);
   const [quantity, setQuantity] = useState(0);
+  const [count, setCount] = useState(0);
+  const [batch, setBatch] = useState(0);
   const [lineRunning, setLineRunning] = useState(false);
   const [testingRealImage, setTestingRealImage] = useState(false);
+  const [batchTesting, setBatchTesting] = useState(false);
+  const [savingBatchReport, setSavingBatchReport] = useState(false);
   const [selectedImageUrl, setSelectedImageUrl] = useState("");
   const [selectedImageBase64, setSelectedImageBase64] = useState("");
   const [selectedImageName, setSelectedImageName] = useState("");
+  const [batchFiles, setBatchFiles] = useState<File[]>([]);
+  const [batchFolderName, setBatchFolderName] = useState("");
+  const [batchSummary, setBatchSummary] = useState<AnimationBatchSummary | null>(
+    null,
+  );
+  const [batchProgress, setBatchProgress] = useState<{
+    current: number;
+    total: number;
+    fileName: string;
+  } | null>(null);
   const [runtimeSettings, setRuntimeSettings] = useState(() =>
     getRuntimeTestSettings(),
   );
@@ -275,6 +291,17 @@ export function LineAnimationTestPanel() {
     };
   }, [selectedImageUrl]);
 
+  useEffect(() => {
+    const folderInput = folderInputRef.current;
+
+    if (!folderInput) {
+      return;
+    }
+
+    folderInput.setAttribute("webkitdirectory", "");
+    folderInput.setAttribute("directory", "");
+  }, []);
+
   const product = useMemo(
     () =>
       products.find((sample) => sample.id === selectedProductId) ??
@@ -308,6 +335,8 @@ export function LineAnimationTestPanel() {
           : animationState === "WAITING_PLC"
             ? "border-cyan-200 bg-cyan-50 text-cyan-700"
             : "border-slate-200 bg-slate-50 text-slate-600";
+  const isBusy = testingRealImage || batchTesting || lineRunning;
+  const inspectionResultDelayMs = runtimeSettings.inspectionResultDelayMs;
 
   function clearTimers() {
     timersRef.current.forEach((timerId) => window.clearTimeout(timerId));
@@ -328,6 +357,35 @@ export function LineAnimationTestPanel() {
     lineLabelsRef.current = {};
   }
 
+  function resetProductionCounters() {
+    totalCountRef.current = 0;
+    batchCountRef.current = 0;
+    batchQuantityRef.current = 0;
+    setQuantity(0);
+    setCount(0);
+    setBatch(0);
+  }
+
+  function addProductionCount(amount: number) {
+    const safeAmount = Math.max(0, Math.trunc(amount));
+
+    if (safeAmount <= 0) {
+      return;
+    }
+
+    const safeBatchSize = Math.max(1, product.batchSize || 1);
+    const nextQuantity = batchQuantityRef.current + safeAmount;
+    const batchIncrement = Math.floor(nextQuantity / safeBatchSize);
+    const remainder = nextQuantity % safeBatchSize;
+
+    totalCountRef.current += safeAmount;
+    batchCountRef.current += batchIncrement;
+    batchQuantityRef.current = remainder;
+    setCount(totalCountRef.current);
+    setBatch(batchCountRef.current);
+    setQuantity(remainder);
+  }
+
   function resetScenario(showToast = true) {
     stopLineInterval();
     clearTimers();
@@ -339,7 +397,8 @@ export function LineAnimationTestPanel() {
     setActiveRoiIndexes([]);
     setOkCount(0);
     setNgCount(0);
-    setQuantity(0);
+    resetProductionCounters();
+    setBatchProgress(null);
 
     if (showToast) {
       toast.info(t("lineAnimationTest.resetDone"));
@@ -377,6 +436,64 @@ export function LineAnimationTestPanel() {
     toast.success(t("lineTest.imageReady"));
   }
 
+  function handleFolderChange(event: ChangeEvent<HTMLInputElement>) {
+    const nextFiles = Array.from(event.target.files ?? []).filter((file) =>
+      isImageFile(file),
+    );
+
+    if (nextFiles.length === 0) {
+      setBatchFiles([]);
+      setBatchFolderName("");
+      setBatchSummary(null);
+      toast.warning(t("lineTest.selectFolderFirst"));
+      return;
+    }
+
+    const firstPath = nextFiles[0]?.webkitRelativePath ?? "";
+    const folderName = firstPath.split("/")[0] || t("lineTest.batchFolderUnknown");
+
+    setBatchFiles(nextFiles);
+    setBatchFolderName(folderName);
+    setBatchSummary(null);
+    setBatchProgress(null);
+    resetScenario(false);
+    event.target.value = "";
+    toast.success(
+      formatMessage(t("lineTest.folderReady"), {
+        count: nextFiles.length,
+      }),
+    );
+  }
+
+  function validateRealTestInputs() {
+    const accessToken = getAccessToken();
+
+    if (!accessToken) {
+      toast.error(t("users.missingSession"));
+      return null;
+    }
+
+    if (dataSource !== "api") {
+      toast.warning(t("lineAnimationTest.realProfileRequired"));
+      return null;
+    }
+
+    if (!product.modelPath) {
+      toast.warning(t("lineTest.modelRequired"));
+      return null;
+    }
+
+    if (product.roiRegions.length === 0) {
+      toast.warning(t("lineAnimationTest.noRoi"));
+      return null;
+    }
+
+    return {
+      accessToken,
+      product,
+    };
+  }
+
   function scheduleRuntimeFrames(frames: RuntimeFrame[]) {
     clearTimers();
 
@@ -402,7 +519,6 @@ export function LineAnimationTestPanel() {
     setActiveRoiIndexes([]);
     setOkCount(0);
     setNgCount(0);
-    setQuantity(0);
 
     frames.forEach((frame) => {
       const frameIndexes = new Set(frame.regions.map((region) => region.index));
@@ -419,7 +535,7 @@ export function LineAnimationTestPanel() {
 
         frame.regions.forEach((region) => {
           const detectAt = frame.atMs;
-          const resultAt = detectAt + inspectDelayMs;
+          const resultAt = detectAt + inspectionResultDelayMs;
           const finalStatus = frame.statuses[region.index] ?? "NG";
           const finalLabel = frame.labels?.[region.index];
           const currentStatus = sessionStatuses[region.index];
@@ -483,7 +599,7 @@ export function LineAnimationTestPanel() {
           (frame) =>
             frame.atMs,
         ),
-      ) + inspectDelayMs;
+      ) + inspectionResultDelayMs;
     const plcDoneAt = lastFrameEndAt + plcDoneHoldMs;
 
     const waitPlcTimer = window.setTimeout(() => {
@@ -497,26 +613,124 @@ export function LineAnimationTestPanel() {
       setAnimationState(finalState);
       setOkCount(finalCounts.ok);
       setNgCount(finalCounts.ng);
-      setQuantity(Object.keys(sessionStatuses).length);
+      addProductionCount(Object.keys(sessionStatuses).length);
     }, plcDoneAt);
 
     timersRef.current.push(waitPlcTimer, plcDoneTimer);
     return true;
   }
 
-  function scheduleSessionAnimation(
-    detectedRegions: RoiRegion[],
-    finalStatuses: Record<number, OperatorRoiStatus>,
-    finalLabels: Record<number, string> = {},
+  async function playRuntimeFrames(frames: RuntimeFrame[]) {
+    const scheduled = scheduleRuntimeFrames(frames);
+
+    if (!scheduled) {
+      return false;
+    }
+
+    const lastFrameAt = Math.max(...frames.map((frame) => frame.atMs));
+    await wait(
+      lastFrameAt + inspectionResultDelayMs + plcDoneHoldMs + resultHoldMs,
+    );
+    return true;
+  }
+
+  function buildAnimationResult(
+    inspection: TestInspectionImageResult,
+    regions: RoiRegion[],
   ) {
-    return scheduleRuntimeFrames([
+    const regionByIndex = new Map(regions.map((region) => [region.index, region]));
+    const animationRegions = inspection.slots
+      .filter((slot) => slot.result === "OK" || slot.result === "NG")
+      .map((slot) =>
+        typeof slot.slotIndex === "number"
+          ? regionByIndex.get(slot.slotIndex)
+          : null,
+      )
+      .filter((region): region is RoiRegion => Boolean(region));
+    const finalStatuses = Object.fromEntries(
+      animationRegions.map((region) => {
+        const slot = inspection.slots.find(
+          (item) => item.slotIndex === region.index,
+        );
+        return [region.index, slot?.result === "OK" ? "OK" : "NG"];
+      }),
+    ) as Record<number, OperatorRoiStatus>;
+    const finalLabels = Object.fromEntries(
+      animationRegions.map((region) => {
+        const slot = inspection.slots.find(
+          (item) => item.slotIndex === region.index,
+        );
+        const detectedText =
+          slot?.rawText?.trim() || slot?.expectedText?.trim() || slot?.result;
+        return [region.index, detectedText || finalStatuses[region.index]];
+      }),
+    ) as Record<number, string>;
+
+    return {
+      regions: animationRegions,
+      finalStatuses,
+      finalLabels,
+    };
+  }
+
+  async function runInspectionForImage(
+    accessToken: string,
+    imageToTestBase64: string,
+    testProduct: ProductProfile,
+  ) {
+    const crops = await cropProductRois(imageToTestBase64, testProduct);
+    const response = await testInspectionImage(
+      accessToken,
+      testProduct.id,
+      crops.map((crop) => ({
+        slotIndex: crop.slotIndex,
+        imageBase64: crop.imageBase64,
+      })),
+      testProduct.roiRegions,
+    );
+
+    return response.data;
+  }
+
+  async function playInspectionResult(
+    inspection: TestInspectionImageResult,
+    regions: RoiRegion[],
+  ) {
+    const animation = buildAnimationResult(inspection, regions);
+
+    if (inspection.result === "UNKNOWN" || animation.regions.length === 0) {
+      return playRejectedInspectionResult(inspection.result);
+    }
+
+    return playRuntimeFrames([
       {
         atMs: detectDelayMs,
-        regions: detectedRegions,
-        statuses: finalStatuses,
-        labels: finalLabels,
+        regions: animation.regions,
+        statuses: animation.finalStatuses,
+        labels: animation.finalLabels,
       },
     ]);
+  }
+
+  async function playRejectedInspectionResult(
+    result: TestInspectionImageResult["result"] | "ERROR",
+  ) {
+    clearTimers();
+    setAnimationState("CHECKING");
+    setActiveRoiIndexes([]);
+    setRoiStatuses({});
+    setRoiDetectedTextLabels({});
+    setOkCount(0);
+    setNgCount(result === "NG" || result === "ERROR" ? 1 : 0);
+
+    await wait(inspectionResultDelayMs);
+    setAnimationState(result === "UNKNOWN" ? "UNKNOWN" : "NG");
+    setActiveRoiIndexes([]);
+    setRoiStatuses({});
+    setRoiDetectedTextLabels({});
+
+    await wait(resultHoldMs);
+    return true;
   }
 
   function applyContinuousLineFrame(
@@ -556,7 +770,7 @@ export function LineAnimationTestPanel() {
           labels[region.index] = nextLabel;
           setRoiStatuses({ ...statuses });
           setRoiDetectedTextLabels({ ...labels });
-        }, inspectDelayMs);
+        }, inspectionResultDelayMs);
 
         timersRef.current.push(resultTimer);
         return;
@@ -568,7 +782,7 @@ export function LineAnimationTestPanel() {
           labels[region.index] = nextLabel;
           setRoiStatuses({ ...statuses });
           setRoiDetectedTextLabels({ ...labels });
-        }, inspectDelayMs);
+        }, inspectionResultDelayMs);
 
         timersRef.current.push(resultTimer);
       }
@@ -581,20 +795,9 @@ export function LineAnimationTestPanel() {
   }
 
   function runLineContinuously() {
-    const accessToken = getAccessToken();
+    const validated = validateRealTestInputs();
 
-    if (!accessToken) {
-      toast.error(t("users.missingSession"));
-      return;
-    }
-
-    if (dataSource !== "api") {
-      toast.warning(t("lineAnimationTest.realProfileRequired"));
-      return;
-    }
-
-    if (!product.modelPath) {
-      toast.warning(t("lineTest.modelRequired"));
+    if (!validated) {
       return;
     }
 
@@ -604,7 +807,7 @@ export function LineAnimationTestPanel() {
     setLineRunning(true);
     setOkCount(0);
     setNgCount(0);
-    setQuantity(0);
+    resetProductionCounters();
     setAnimationState("UNKNOWN");
     setRoiStatuses({});
     setRoiDetectedTextLabels({});
@@ -620,14 +823,14 @@ export function LineAnimationTestPanel() {
       try {
         const frameBase64 = selectedImageBase64
           ? selectedImageBase64
-          : await grabLineFrameBase64(accessToken);
+          : await grabLineFrameBase64(validated.accessToken);
         const testProduct = {
           ...product,
           roiRegions: product.roiRegions,
         };
         const crops = await cropProductRois(frameBase64, testProduct);
         const response = await testInspectionImage(
-          accessToken,
+          validated.accessToken,
           product.id,
           crops.map((crop) => ({
             slotIndex: crop.slotIndex,
@@ -635,6 +838,17 @@ export function LineAnimationTestPanel() {
           })),
           product.roiRegions,
         );
+        if (response.data.result === "UNKNOWN") {
+          clearLineSessionRefs();
+          setActiveRoiIndexes([]);
+          setRoiStatuses({});
+          setRoiDetectedTextLabels({});
+          setOkCount(0);
+          setNgCount(0);
+          setAnimationState("UNKNOWN");
+          return;
+        }
+
         const detectedRegions = product.roiRegions.filter((region) => {
           const slot = response.data.slots.find(
             (item) => item.slotIndex === region.index,
@@ -661,6 +875,7 @@ export function LineAnimationTestPanel() {
         ) as Record<number, string>;
 
         applyContinuousLineFrame(detectedRegions, frameStatuses, frameLabels);
+        addProductionCount(detectedRegions.length);
       } catch (cause) {
         const message =
           cause instanceof ApiError
@@ -703,26 +918,14 @@ export function LineAnimationTestPanel() {
     setRoiDetectedTextLabels({ ...lineLabelsRef.current });
     setOkCount(finalCounts.ok);
     setNgCount(finalCounts.ng);
-    setQuantity(finalIndexes.length);
     setAnimationState(finalIndexes.length > 0 ? finalState : "UNKNOWN");
     toast.success(t("lineAnimationTest.lineFinished"));
   }
 
   async function runRealImageTest() {
-    const accessToken = getAccessToken();
+    const validated = validateRealTestInputs();
 
-    if (!accessToken) {
-      toast.error(t("users.missingSession"));
-      return;
-    }
-
-    if (dataSource !== "api") {
-      toast.warning(t("lineAnimationTest.realProfileRequired"));
-      return;
-    }
-
-    if (!product.modelPath) {
-      toast.warning(t("lineTest.modelRequired"));
+    if (!validated) {
       return;
     }
 
@@ -731,7 +934,7 @@ export function LineAnimationTestPanel() {
       return;
     }
 
-    const detectedRegions = pickDetectedRegions(detectionLayout, product.roiRegions);
+    const detectedRegions = product.roiRegions;
 
     if (detectedRegions.length === 0) {
       toast.warning(t("lineAnimationTest.noRoi"));
@@ -748,7 +951,7 @@ export function LineAnimationTestPanel() {
       };
       const crops = await cropProductRois(selectedImageBase64, testProduct);
       const response = await testInspectionImage(
-        accessToken,
+        validated.accessToken,
         product.id,
         crops.map((crop) => ({
           slotIndex: crop.slotIndex,
@@ -756,35 +959,7 @@ export function LineAnimationTestPanel() {
         })),
         detectedRegions,
       );
-      const detectedResultRegions = detectedRegions.filter((region) => {
-        const slot = response.data.slots.find(
-          (item) => item.slotIndex === region.index,
-        );
-        return slot?.result === "OK" || slot?.result === "NG";
-      });
-      const finalStatuses = Object.fromEntries(
-        detectedResultRegions.map((region) => {
-          const slot = response.data.slots.find(
-            (item) => item.slotIndex === region.index,
-          );
-          return [
-            region.index,
-            slot?.result === "OK" ? "OK" : "NG",
-          ];
-        }),
-      ) as Record<number, OperatorRoiStatus>;
-      const finalLabels = Object.fromEntries(
-        detectedResultRegions.map((region) => {
-          const slot = response.data.slots.find(
-            (item) => item.slotIndex === region.index,
-          );
-          const detectedText =
-            slot?.rawText?.trim() || slot?.expectedText?.trim() || slot?.result;
-          return [region.index, detectedText || finalStatuses[region.index]];
-        }),
-      ) as Record<number, string>;
-
-      scheduleSessionAnimation(detectedResultRegions, finalStatuses, finalLabels);
+      await playInspectionResult(response.data, detectedRegions);
       toast.success(t("lineAnimationTest.realScenarioStarted"), { id: toastId });
     } catch (cause) {
       const message =
@@ -797,8 +972,177 @@ export function LineAnimationTestPanel() {
     }
   }
 
+  async function runBatchFolderTest() {
+    const validated = validateRealTestInputs();
+
+    if (!validated) {
+      return;
+    }
+
+    if (batchFiles.length === 0) {
+      toast.warning(t("lineTest.selectFolderFirst"));
+      return;
+    }
+
+    stopLineInterval();
+    clearTimers();
+    clearLineSessionRefs();
+    setLineRunning(false);
+    setBatchTesting(true);
+    setBatchSummary(null);
+    setBatchProgress(null);
+    resetProductionCounters();
+    cancelBatchTestRef.current = false;
+    const toastId = toast.loading(t("lineAnimationTest.batchTesting"));
+
+    try {
+      const rows: AnimationBatchReportRow[] = [];
+
+      for (const [index, file] of batchFiles.entries()) {
+        if (cancelBatchTestRef.current) {
+          break;
+        }
+
+        setBatchProgress({
+          current: index + 1,
+          total: batchFiles.length,
+          fileName: file.name,
+        });
+
+        const imageUrl = URL.createObjectURL(file);
+        let currentImageBase64 = "";
+
+        setSelectedImageUrl(imageUrl);
+        setSelectedImageName(file.name);
+
+        try {
+          currentImageBase64 = await readFileAsDataUrl(file);
+          setSelectedImageBase64(currentImageBase64);
+          const inspection = await runInspectionForImage(
+            validated.accessToken,
+            currentImageBase64,
+            validated.product,
+          );
+          const reportImageBase64 = await compressImageForReport(
+            currentImageBase64,
+          );
+
+          await playInspectionResult(inspection, validated.product.roiRegions);
+
+          rows.push({
+            fileName: file.name,
+            relativePath: file.webkitRelativePath || file.name,
+            result: inspection.result,
+            cycleTimeMs: inspection.cycleTimeMs,
+            errorMessage: inspection.error,
+            originalImageBase64: reportImageBase64,
+            slots: inspection.slots,
+          });
+        } catch (cause) {
+          const message =
+            cause instanceof ApiError
+              ? apiError(cause.message, "lineAnimationTest.realTestFailed")
+              : t("lineAnimationTest.realTestFailed");
+          const reportImageBase64 = currentImageBase64
+            ? await compressImageForReport(currentImageBase64).catch(() => "")
+            : "";
+
+          await playRejectedInspectionResult("ERROR");
+
+          rows.push({
+            fileName: file.name,
+            relativePath: file.webkitRelativePath || file.name,
+            result: "ERROR",
+            cycleTimeMs: null,
+            errorMessage: message,
+            originalImageBase64: reportImageBase64,
+            slots: [],
+          });
+        }
+      }
+
+      if (rows.length === 0) {
+        toast.warning(t("lineAnimationTest.batchCancelled"), { id: toastId });
+        return;
+      }
+
+      setSavingBatchReport(true);
+      const response = await saveAnimationBatchReport(rows, validated);
+      const summary = buildBatchSummary(rows, response.data.id);
+      setBatchSummary(summary);
+      toast.success(
+        formatMessage(t("lineAnimationTest.batchCompletedSaved"), {
+          count: rows.length,
+          reportId: response.data.id,
+        }),
+        { id: toastId },
+      );
+    } catch (cause) {
+      const message =
+        cause instanceof ApiError
+          ? apiError(cause.message, "lineTest.batchTestFailed")
+          : t("lineTest.batchTestFailed");
+      toast.error(message, { id: toastId });
+    } finally {
+      setBatchTesting(false);
+      setSavingBatchReport(false);
+      setBatchProgress(null);
+    }
+  }
+
+  async function saveAnimationBatchReport(
+    rows: AnimationBatchReportRow[],
+    validated: NonNullable<ReturnType<typeof validateRealTestInputs>>,
+  ) {
+    const desktop = getDesktopBridge();
+    const testStorageSettings = desktop
+      ? await desktop.getTestStorageSettings().catch(() => null)
+      : null;
+    const failedImages = rows.filter((row) => row.result !== "OK");
+
+    return createTestSessionReport(validated.accessToken, {
+      productId: validated.product.id,
+      saveFolderPath: testStorageSettings?.testImageSaveFolderPath ?? undefined,
+      folderName: batchFolderName || undefined,
+      totalImages: rows.length,
+      okImages: rows.filter((row) => row.result === "OK").length,
+      ngImages: rows.filter((row) => row.result === "NG").length,
+      unknownImages: rows.filter((row) => row.result === "UNKNOWN").length,
+      errorImages: rows.filter((row) => row.result === "ERROR").length,
+      failedImages: failedImages.map((row) => ({
+        fileName: row.fileName,
+        relativePath: row.relativePath,
+        result: row.result,
+        cycleTimeMs: row.cycleTimeMs,
+        errorMessage: row.errorMessage,
+        originalImageBase64: row.originalImageBase64,
+        roiResults: row.slots.map((slot) => ({
+          slotIndex: slot.slotIndex,
+          slotLabel: slot.slotLabel,
+          expectedText: slot.expectedText,
+          rawText: slot.rawText,
+          result: slot.result,
+          errorMessage: slot.errorMessage,
+          toolDebugImageBase64: slot.toolDebugImageBase64,
+        })),
+      })),
+    });
+  }
+
+  function buildBatchSummary(rows: AnimationBatchReportRow[], reportId: string) {
+    return {
+      reportId,
+      folderName: batchFolderName || t("lineTest.batchFolderUnknown"),
+      totalImages: rows.length,
+      okImages: rows.filter((row) => row.result === "OK").length,
+      ngImages: rows.filter((row) => row.result === "NG").length,
+      unknownImages: rows.filter((row) => row.result === "UNKNOWN").length,
+      errorImages: rows.filter((row) => row.result === "ERROR").length,
+    };
+  }
+
   return (
-    <div className="grid h-full min-h-0 gap-4">
+    <div className="grid min-w-0 gap-4 pb-4">
       <Card className="border-[#86a8cf] bg-white shadow-none">
         <CardHeader className="border-b border-slate-200">
           <CardTitle className="flex items-center gap-2 text-lg">
@@ -808,7 +1152,7 @@ export function LineAnimationTestPanel() {
         </CardHeader>
         <CardContent className="grid gap-4 p-4 min-[1080px]:grid-cols-[minmax(0,1fr)_360px]">
           <div className="grid gap-3">
-            <div className="grid gap-3 min-[720px]:grid-cols-3">
+            <div className="grid gap-3 min-[720px]:grid-cols-2">
               <div className="grid gap-2">
                 <label className="text-sm font-semibold text-slate-600">
                   {t("lineAnimationTest.sampleProduct")}
@@ -829,33 +1173,6 @@ export function LineAnimationTestPanel() {
               </div>
               <div className="grid gap-2">
                 <label className="text-sm font-semibold text-slate-600">
-                  {t("lineAnimationTest.detectLayout")}
-                </label>
-                <Select
-                  aria-label={t("lineAnimationTest.detectLayout")}
-                  value={detectionLayout}
-                  className="h-11 border-slate-300 bg-white text-base"
-                  onChange={(event) => {
-                    setDetectionLayout(event.target.value as DetectionLayout);
-                    resetScenario(false);
-                  }}
-                >
-                  <option value="SINGLE">
-                    {t("lineAnimationTest.detectLayoutSingle")}
-                  </option>
-                  <option value="THREE">
-                    {t("lineAnimationTest.detectLayoutThree")}
-                  </option>
-                  <option value="ALL">
-                    {t("lineAnimationTest.detectLayoutAll")}
-                  </option>
-                  <option value="RANDOM">
-                    {t("lineAnimationTest.detectLayoutRandom")}
-                  </option>
-                </Select>
-              </div>
-              <div className="grid gap-2">
-                <label className="text-sm font-semibold text-slate-600">
                   {t("lineAnimationTest.testImage")}
                 </label>
                 <input
@@ -865,10 +1182,19 @@ export function LineAnimationTestPanel() {
                   className="hidden"
                   onChange={handleImageChange}
                 />
+                <input
+                  ref={folderInputRef}
+                  type="file"
+                  accept="image/*"
+                  multiple
+                  className="hidden"
+                  onChange={handleFolderChange}
+                />
                 <Button
                   type="button"
                   variant="outline"
                   className="h-11 justify-start border-slate-300 bg-white text-slate-700 hover:bg-slate-50"
+                  disabled={batchTesting}
                   onClick={() => fileInputRef.current?.click()}
                 >
                   <FileImage className="h-4 w-4" />
@@ -903,7 +1229,9 @@ export function LineAnimationTestPanel() {
               </Badge>
               {animationState === "CHECKING" ? (
                 <Badge className="border-amber-200 bg-amber-50 text-amber-700">
-                  {t("lineAnimationTest.roiResultDelay")}
+                  {formatMessage(t("lineAnimationTest.roiResultDelay"), {
+                    seconds: (inspectionResultDelayMs / 1000).toFixed(1),
+                  })}
                 </Badge>
               ) : null}
               {animationState === "WAITING_PLC" ? (
@@ -917,10 +1245,21 @@ export function LineAnimationTestPanel() {
                   {activeRoiIndexes.join(", ")}
                 </Badge>
               ) : null}
+              {batchProgress ? (
+                <Badge className="border-[#9db7d8] bg-[#edf5ff] text-[#274d7d]">
+                  {formatMessage(t("lineTest.batchProgress"), {
+                    current: batchProgress.current,
+                    total: batchProgress.total,
+                    file: batchProgress.fileName,
+                  })}
+                </Badge>
+              ) : null}
             </div>
 
-            <div className="grid gap-3 sm:grid-cols-3">
+            <div className="grid gap-3 sm:grid-cols-2 min-[960px]:grid-cols-5">
               <MetricTile label={t("operator.quantity")} value={quantity} />
+              <MetricTile label={t("operator.count")} value={count} />
+              <MetricTile label={t("operator.batch")} value={batch} />
               <MetricTile label={t("operator.ok")} value={okCount} />
               <MetricTile label={t("operator.ng")} value={ngCount} />
             </div>
@@ -930,7 +1269,7 @@ export function LineAnimationTestPanel() {
             <Button
               type="button"
               onClick={runLineContinuously}
-              disabled={lineRunning}
+              disabled={isBusy}
               className="border-emerald-700 bg-emerald-700 text-white hover:bg-emerald-800"
             >
               <Play className="h-4 w-4" />
@@ -941,7 +1280,7 @@ export function LineAnimationTestPanel() {
             <Button
               type="button"
               variant="outline"
-              disabled={!lineRunning && activeRoiIndexes.length === 0}
+              disabled={batchTesting || (!lineRunning && activeRoiIndexes.length === 0)}
               className="border-slate-300 text-slate-800 hover:bg-slate-50"
               onClick={finishLineSession}
             >
@@ -951,7 +1290,7 @@ export function LineAnimationTestPanel() {
             <Button
               type="button"
               onClick={() => void runRealImageTest()}
-              disabled={testingRealImage}
+              disabled={isBusy}
               className="border-cyan-700 bg-cyan-700 text-white hover:bg-cyan-800"
             >
               <FileImage className="h-4 w-4" />
@@ -959,7 +1298,53 @@ export function LineAnimationTestPanel() {
                 ? t("lineAnimationTest.realTesting")
                 : t("lineAnimationTest.runReal")}
             </Button>
-            <Button type="button" variant="outline" onClick={() => resetScenario()}>
+            <Button
+              type="button"
+              variant="outline"
+              className="justify-start border-slate-300 text-slate-800 hover:bg-slate-50"
+              disabled={batchTesting}
+              onClick={() => folderInputRef.current?.click()}
+            >
+              <FolderOpen className="h-4 w-4" />
+              <span className="truncate">
+                {batchFolderName
+                  ? formatMessage(t("lineTest.folderSelected"), {
+                      folder: batchFolderName,
+                      count: batchFiles.length,
+                    })
+                  : t("lineTest.selectFolder")}
+              </span>
+            </Button>
+            {batchTesting ? (
+              <Button
+                type="button"
+                className="border-red-700 bg-red-700 text-white hover:bg-red-800"
+                onClick={() => {
+                  cancelBatchTestRef.current = true;
+                }}
+              >
+                <Pause className="h-4 w-4" />
+                {t("lineTest.stopBatchTest")}
+              </Button>
+            ) : (
+              <Button
+                type="button"
+                className="border-[#274d7d] bg-[#274d7d] text-white hover:bg-[#1f3d64]"
+                disabled={isBusy || batchFiles.length === 0}
+                onClick={() => void runBatchFolderTest()}
+              >
+                <FolderOpen className="h-4 w-4" />
+                {savingBatchReport
+                  ? t("lineTest.batchReportSaving")
+                  : t("lineAnimationTest.runFolder")}
+              </Button>
+            )}
+            <Button
+              type="button"
+              variant="outline"
+              disabled={batchTesting}
+              onClick={() => resetScenario()}
+            >
               <RotateCcw className="h-4 w-4" />
               {t("lineAnimationTest.reset")}
             </Button>
@@ -967,12 +1352,12 @@ export function LineAnimationTestPanel() {
         </CardContent>
       </Card>
 
-      <Card className="flex min-h-0 overflow-hidden border-[#86a8cf] bg-[#9fc3eb] shadow-none">
-        <div className="flex min-h-0 flex-1 flex-col">
+      <Card className="border-[#86a8cf] bg-[#9fc3eb] shadow-none">
+        <div className="flex flex-col">
           <div className="shrink-0 border-b border-[#86a8cf] px-4 py-3 text-center text-3xl font-bold text-[#2270c6]">
             {t("lineAnimationTest.previewTitle")}
           </div>
-          <div className="min-h-0 flex-1 p-4">
+          <div className="p-4">
             <OperatorRoiEditor
               product={displayProduct}
               onChange={() => undefined}
@@ -982,12 +1367,59 @@ export function LineAnimationTestPanel() {
               roiStatuses={roiStatuses}
               roiDetectedTextLabels={roiDetectedTextLabels}
               roiCheckingLabel={t("lineAnimationTest.checkingBand")}
+              roiTextAnimationMs={inspectionResultDelayMs}
               interactive={false}
               previewImageSrc={selectedImageUrl}
               showClock
             />
           </div>
         </div>
+      </Card>
+
+      <Card className="border-[#86a8cf] bg-white shadow-none">
+        <CardContent className="grid gap-3 p-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-center gap-2 text-lg font-bold text-slate-950">
+              <FolderOpen className="h-5 w-5 text-[#274d7d]" />
+              {t("lineAnimationTest.batchSummary")}
+            </div>
+            {batchSummary?.reportId ? (
+              <Badge className="border-[#9db7d8] bg-[#edf5ff] text-[#274d7d]">
+                {formatMessage(t("lineTest.batchReportId"), {
+                  reportId: batchSummary.reportId,
+                })}
+              </Badge>
+            ) : null}
+            {batchSummary?.folderName ? (
+              <Badge className="border-slate-200 bg-slate-50 text-slate-700">
+                {batchSummary.folderName}
+              </Badge>
+            ) : null}
+          </div>
+
+          {batchSummary ? (
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+              <MetricTile
+                label={t("lineTest.batchTotal")}
+                value={batchSummary.totalImages}
+              />
+              <MetricTile label={t("operator.ok")} value={batchSummary.okImages} />
+              <MetricTile label={t("operator.ng")} value={batchSummary.ngImages} />
+              <MetricTile
+                label={t("lineAnimationTest.unknown")}
+                value={batchSummary.unknownImages}
+              />
+              <MetricTile
+                label={t("lineTest.error")}
+                value={batchSummary.errorImages}
+              />
+            </div>
+          ) : (
+            <div className="border border-dashed border-slate-300 p-6 text-center text-sm font-medium text-slate-500">
+              {t("lineAnimationTest.batchSummaryEmpty")}
+            </div>
+          )}
+        </CardContent>
       </Card>
     </div>
   );
@@ -1009,6 +1441,47 @@ function readFileAsDataUrl(file: File) {
     reader.onerror = () => reject(reader.error);
     reader.readAsDataURL(file);
   });
+}
+
+function wait(ms: number) {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
+function formatMessage(
+  template: string,
+  values: Record<string, string | number>,
+) {
+  return Object.entries(values).reduce(
+    (message, [key, value]) => message.replace(`{${key}}`, String(value)),
+    template,
+  );
+}
+
+async function compressImageForReport(
+  imageBase64: string,
+  options: { maxWidth?: number; quality?: number } = {},
+) {
+  if (!imageBase64.startsWith("data:image/")) {
+    return imageBase64;
+  }
+
+  const image = await loadImage(imageBase64);
+  const maxWidth = options.maxWidth ?? 1600;
+  const quality = options.quality ?? 0.82;
+  const scale = Math.min(1, maxWidth / Math.max(1, image.naturalWidth));
+  const targetWidth = Math.max(1, Math.round(image.naturalWidth * scale));
+  const targetHeight = Math.max(1, Math.round(image.naturalHeight * scale));
+  const canvas = document.createElement("canvas");
+  const context = canvas.getContext("2d");
+
+  if (!context) {
+    return imageBase64;
+  }
+
+  canvas.width = targetWidth;
+  canvas.height = targetHeight;
+  context.drawImage(image, 0, 0, targetWidth, targetHeight);
+  return canvas.toDataURL("image/jpeg", quality);
 }
 
 async function grabLineFrameBase64(accessToken: string) {
