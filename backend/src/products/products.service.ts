@@ -7,6 +7,8 @@ import {
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../database/prisma.service';
 import { ApplyProductProfileDto } from './dto/apply-product-profile.dto';
+import { BulkUpdateProductAiSettingsDto } from './dto/bulk-update-product-ai-settings.dto';
+import { BulkUpdateProductOcrTestSettingsDto } from './dto/bulk-update-product-ocr-test-settings.dto';
 import {
   CameraProfileDto,
   CreateProductProfileDto,
@@ -20,10 +22,10 @@ const defaultCamera: CameraProfileDto = {
   deviceName: 'Camera 1',
   rtspUrl: undefined,
   exposure: 3500,
-  imageWidth: 2500,
-  imageHeight: 1000,
-  offsetX: 300,
-  offsetY: 1400,
+  imageWidth: 1500,
+  imageHeight: 500,
+  offsetX: 0,
+  offsetY: 0,
   zoomFactor: 0.4,
   previewPanX: 0,
   previewPanY: 0,
@@ -65,7 +67,9 @@ export class ProductsService {
         exposure: dto.exposure,
         thresholdAccept: dto.thresholdAccept,
         thresholdMns: dto.thresholdMns,
+        rowThreshold: dto.rowThreshold ?? 20,
         modelPath: dto.modelPath || null,
+        rotateTestImageClockwise: dto.rotateTestImageClockwise ?? false,
         active: dto.active,
         cameraConfig: { create: this.toCameraData(dto.camera) },
         roiRegions: {
@@ -107,8 +111,10 @@ export class ProductsService {
           exposure: dto.exposure,
           thresholdAccept: dto.thresholdAccept,
           thresholdMns: dto.thresholdMns,
+          rowThreshold: dto.rowThreshold,
           modelPath:
             dto.modelPath === undefined ? undefined : dto.modelPath || null,
+          rotateTestImageClockwise: dto.rotateTestImageClockwise,
           active: dto.active,
         },
       });
@@ -171,6 +177,80 @@ export class ProductsService {
     });
 
     return { data: this.toProductProfile(product) };
+  }
+
+  async updateProductOcrTestSettings(
+    id: string,
+    rotateTestImageClockwise: boolean,
+  ) {
+    const existingProduct = await this.prisma.product.findUnique({
+      where: { id },
+      select: { id: true },
+    });
+
+    if (!existingProduct) {
+      throw new NotFoundException('Product not found');
+    }
+
+    const product = await this.prisma.product.update({
+      where: { id },
+      data: { rotateTestImageClockwise },
+      include: productInclude,
+    });
+
+    return { data: this.toProductProfile(product) };
+  }
+
+  async bulkUpdateProductOcrTestSettings(
+    dto: BulkUpdateProductOcrTestSettingsDto,
+  ) {
+    if (!dto.applyToAll && (!dto.productIds || dto.productIds.length === 0)) {
+      throw new BadRequestException('Target products are required');
+    }
+
+    const productIds = dto.applyToAll
+      ? undefined
+      : Array.from(new Set(dto.productIds));
+    const where = productIds ? { id: { in: productIds } } : undefined;
+    const targetCount = await this.prisma.product.count({ where });
+
+    if (targetCount === 0) {
+      throw new BadRequestException('No target products found');
+    }
+
+    const result = await this.prisma.product.updateMany({
+      where,
+      data: { rotateTestImageClockwise: dto.rotateTestImageClockwise },
+    });
+
+    return { data: { updatedCount: result.count } };
+  }
+
+  async bulkUpdateProductAiSettings(dto: BulkUpdateProductAiSettingsDto) {
+    if (!dto.applyToAll && (!dto.productIds || dto.productIds.length === 0)) {
+      throw new BadRequestException('Target products are required');
+    }
+
+    const productIds = dto.applyToAll
+      ? undefined
+      : Array.from(new Set(dto.productIds));
+    const where = productIds ? { id: { in: productIds } } : undefined;
+    const targetCount = await this.prisma.product.count({ where });
+
+    if (targetCount === 0) {
+      throw new BadRequestException('No target products found');
+    }
+
+    const result = await this.prisma.product.updateMany({
+      where,
+      data: {
+        thresholdAccept: dto.thresholdAccept,
+        thresholdMns: dto.thresholdMns,
+        rowThreshold: dto.rowThreshold,
+      },
+    });
+
+    return { data: { updatedCount: result.count } };
   }
 
   async applyProductProfile(dto: ApplyProductProfileDto) {
@@ -430,7 +510,9 @@ export class ProductsService {
       exposure: product.exposure,
       thresholdAccept: Number(product.thresholdAccept),
       thresholdMns: Number(product.thresholdMns),
+      rowThreshold: product.rowThreshold,
       modelPath: product.modelPath,
+      rotateTestImageClockwise: product.rotateTestImageClockwise,
       active: product.active,
       camera: this.toCameraProfile(product.cameraConfig),
       roiRegions: this.toRoiProfiles(product.roiRegions),

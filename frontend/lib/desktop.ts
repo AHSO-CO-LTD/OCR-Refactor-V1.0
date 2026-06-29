@@ -17,12 +17,22 @@ export type DesktopWindowSettings = {
   height: number;
 };
 
+export type DesktopTestStorageSettings = {
+  testImageSaveFolderPath: string | null;
+};
+
 export type DesktopBridge = {
   applyWindowSettings(
     settings: Partial<DesktopWindowSettings>,
   ): Promise<DesktopWindowSettings>;
   exitApp(): Promise<{ success: boolean }>;
+  getTestStorageSettings(): Promise<DesktopTestStorageSettings>;
   getWindowSettings(): Promise<DesktopWindowSettings>;
+  saveTestStorageSettings(
+    settings: DesktopTestStorageSettings,
+  ): Promise<DesktopTestStorageSettings>;
+  selectFolder(): Promise<{ canceled: boolean; folderPath: string | null }>;
+  selectModelFile(): Promise<{ canceled: boolean; filePath: string | null }>;
   onTerminalLog(callback: (message: string) => void): () => void;
   platform: string;
   versions: {
@@ -46,6 +56,10 @@ export const defaultDesktopWindowSettings: DesktopWindowSettings = {
   windowPreset: "factory",
   width: 1280,
   height: 1080,
+};
+
+export const defaultDesktopTestStorageSettings: DesktopTestStorageSettings = {
+  testImageSaveFolderPath: null,
 };
 
 export function getDesktopBridge() {

@@ -1,4 +1,5 @@
 import { spawn, type ChildProcess } from "node:child_process";
+import { existsSync } from "node:fs";
 import { createConnection } from "node:net";
 import { join } from "node:path";
 
@@ -21,6 +22,7 @@ type ManagedService = LocalServiceDefinition & {
 const STARTUP_TIMEOUT_MS = 120_000;
 const EXISTING_SERVICE_TIMEOUT_MS = 10_000;
 const HEALTH_POLL_MS = 500;
+const DEVICE_TOOL_API_PREFIX = "/tool/v1";
 const DEFAULT_PORTS: Record<LocalServiceName, number> = {
   backend: 4000,
   "device-tool": 8000,
@@ -63,10 +65,10 @@ export class ServiceManager {
     this.services = [
       {
         name: "device-tool",
-        command: toolPython,
-        args: ["main.py"],
+        command: toolPython.command,
+        args: [...toolPython.args, "main.py"],
         cwd: join(repoRoot, "tool"),
-        healthUrl: "http://127.0.0.1:8000/api/v1/health",
+        healthUrl: `http://127.0.0.1:8000${DEVICE_TOOL_API_PREFIX}/health`,
         port: 8000,
         owned: false,
         process: null,
@@ -280,7 +282,7 @@ export class ServiceManager {
 
   private configureServiceForPort(service: ManagedService) {
     if (service.name === "device-tool") {
-      service.healthUrl = `http://127.0.0.1:${service.port}/api/v1/health`;
+      service.healthUrl = `http://127.0.0.1:${service.port}${DEVICE_TOOL_API_PREFIX}/health`;
       return;
     }
 
@@ -318,6 +320,7 @@ export class ServiceManager {
       return {
         BACKEND_PORT: String(service.port),
         DEVICE_TOOL_BASE_URL: `http://127.0.0.1:${deviceToolPort}`,
+        DEVICE_TOOL_API_PREFIX,
       };
     }
 
@@ -383,12 +386,21 @@ function resolveToolPython(repoRoot: string) {
   const configured = process.env.DEVICE_TOOL_PYTHON;
 
   if (configured) {
-    return configured;
+    return { command: configured, args: [] };
+  }
+
+  const venvPython =
+    process.platform === "win32"
+      ? join(repoRoot, "tool", ".venv", "Scripts", "python.exe")
+      : join(repoRoot, "tool", ".venv", "bin", "python");
+
+  if (existsSync(venvPython)) {
+    return { command: venvPython, args: [] };
   }
 
   return process.platform === "win32"
-    ? join(repoRoot, "tool", ".venv", "Scripts", "python.exe")
-    : join(repoRoot, "tool", ".venv", "bin", "python");
+    ? { command: "py", args: ["-3.9"] }
+    : { command: "python3", args: [] };
 }
 
 async function waitForHealth(

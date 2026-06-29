@@ -1,19 +1,29 @@
-*
-!.gitignore
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
 
-!/config.json
-!/main.py
-!/requirements.txt
-!/AGENTS.md
-!/README.md
+# Virtual env
+.venv/
+venv/
+env/
 
-!/docs/
-!/docs/**
+# Logs (sinh lúc chạy)
+logs/
+*.log
 
-!/tool/
-!/tool/**
+# Model weights (nằm ngoài repo, dung lượng lớn)
+*.pt
+*.pth
+*.onnx
+*.engine
 
-**/__pycache__/
-**/*.pyc
-/runtime/
-/tool/app/runtime/
+# Secrets / cấu hình cục bộ
+.env
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

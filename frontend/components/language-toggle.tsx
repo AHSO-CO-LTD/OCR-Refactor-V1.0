@@ -1,16 +1,31 @@
 "use client";
 
+import { cn } from "@/lib/utils";
 import { useI18n } from "@/lib/i18n";
 
-export function LanguageToggle() {
+type LanguageToggleProps = {
+  className?: string;
+  fullWidth?: boolean;
+};
+
+export function LanguageToggle({
+  className,
+  fullWidth = false,
+}: LanguageToggleProps) {
   const { language, setLanguage } = useI18n();
 
   return (
-    <div className="flex h-9 border border-slate-300 bg-white text-xs font-semibold">
+    <div
+      className={cn(
+        "flex h-9 border border-slate-300 bg-white text-xs font-semibold",
+        fullWidth ? "w-full" : "",
+        className,
+      )}
+    >
       <button
         onClick={() => setLanguage("vi")}
         className={[
-          "w-10 transition",
+          fullWidth ? "flex-1 transition" : "w-10 transition",
           language === "vi"
             ? "bg-slate-950 text-white"
             : "text-slate-600 hover:bg-slate-50",
@@ -22,7 +37,7 @@ export function LanguageToggle() {
       <button
         onClick={() => setLanguage("en")}
         className={[
-          "w-10 transition",
+          fullWidth ? "flex-1 transition" : "w-10 transition",
           language === "en"
             ? "bg-slate-950 text-white"
             : "text-slate-600 hover:bg-slate-50",
@@ -34,4 +49,3 @@ export function LanguageToggle() {
     </div>
   );
 }
-

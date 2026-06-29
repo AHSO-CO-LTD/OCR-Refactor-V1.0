@@ -7,7 +7,7 @@ Target stack:
 - Desktop shell: Electron
 - Frontend: Next.js + React + TypeScript
 - Backend: NestJS
-- AI/Tool service: Python + FastAPI, prepared later
+- Device/OCR Tool: Python + FastAPI in `tool/`
 - Database: PostgreSQL
 - Deployment target: local Windows `.exe`
 
@@ -18,7 +18,8 @@ This repo has moved past the initial documentation-first phase. The backend and 
 ```text
 frontend/  Electron + Next.js UI
 backend/   NestJS local REST API
-ai/        Python + FastAPI OCR/AI service, prepared later
+tool/      Python + FastAPI Device/OCR Tool used by backend through /tool/v1
+tool-test/ Archived previous Device Tool implementation for reference only
 shared/    shared TypeScript contracts
 docs/      architecture and planning documents
 infra/     local environment and deployment helpers
@@ -59,6 +60,7 @@ Current implemented foundation:
 - Auth, JWT session, permissions, roles, and users APIs are implemented.
 - Backend Device Tool integration foundation exists with inspection start/current/stop endpoints and per-ROI inspection logging.
 - Backend camera APIs proxy Device Tool status, device discovery, connect, grab, and live stream through the local backend.
+- The active Device Tool is the API-Tool-v1 implementation in `tool/`, exposed to the backend through `/tool/v1` by default; it includes camera control and the current AI/yolo_ocr OCR runtime. The previous implementation is kept in `tool-test/` for reference.
 - Backend license APIs check the legacy `System8.dll` dongle flow, log the result, expose login/dashboard status, and block login when the dongle is missing unless dongle mock mode is enabled.
 - Frontend login, dashboard, role permissions, and user management screens exist.
 - Frontend login shows API/license/dongle startup status before allowing sign-in.

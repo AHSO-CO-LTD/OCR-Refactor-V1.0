@@ -72,8 +72,8 @@ Typical runtime sequence:
 1. User chooses product or line profile.
 2. User starts inspection.
 3. Backend records a job/session.
-4. Backend requests image analysis from Python service when ready.
-5. Python service returns OCR/detection result.
+4. Backend requests ROI OCR from the Python/FastAPI Device/OCR Tool in `tool/`.
+5. Device/OCR Tool returns OCR/detection result.
 6. NestJS validates result against product rules.
 7. Result is persisted to PostgreSQL.
 8. UI updates dashboard and history view.
@@ -110,4 +110,3 @@ Recommended behavior:
 - if the dongle is removed, transition the app into a protected state
 
 The protected state should be defined explicitly in the UI and backend.
-

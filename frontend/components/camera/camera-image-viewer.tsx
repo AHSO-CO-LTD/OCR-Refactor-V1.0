@@ -10,6 +10,7 @@ import {
   type ReactNode,
 } from "react";
 import { Button } from "@/components/ui/button";
+import { CameraPreviewTransformLayer } from "@/components/camera/camera-preview-image";
 import type { CameraFrame } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
 
@@ -31,6 +32,8 @@ export type CameraLiveStats = {
 type CameraImageViewerProps = {
   imageSource: string;
   frame: CameraFrame | null;
+  imageHeight?: number;
+  imageWidth?: number;
   live: boolean;
   baseZoom: number;
   initialPreviewPanX?: number;
@@ -60,6 +63,8 @@ const edgeResistance = 0.18;
 export function CameraImageViewer({
   imageSource,
   frame,
+  imageHeight,
+  imageWidth,
   live,
   baseZoom,
   initialPreviewPanX = 0,
@@ -82,7 +87,11 @@ export function CameraImageViewer({
   const [touchedEdge, setTouchedEdge] = useState(false);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const dragStateRef = useRef<DragState | null>(null);
-  const panBounds = getPanBounds(containerSize, imageSize, zoom, rotation);
+  const cameraImageSize = {
+    width: Math.max(0, Math.round(Number(imageWidth) || imageSize.width)),
+    height: Math.max(0, Math.round(Number(imageHeight) || imageSize.height)),
+  };
+  const panBounds = getPanBounds(containerSize, cameraImageSize, zoom, rotation);
   const pan = {
     x: clampRatioToPan(panRatio.x, panBounds.maxX),
     y: clampRatioToPan(panRatio.y, panBounds.maxY),
@@ -211,25 +220,30 @@ export function CameraImageViewer({
       aria-label={title}
     >
       {imageSource ? (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img
-          src={imageSource}
-          alt={title}
-          draggable={false}
-          className={`h-full w-full select-none object-contain ${
-            canDrag ? "cursor-grab active:cursor-grabbing" : ""
-          }`}
-          onLoad={(event) =>
-            setImageSize({
-              width: event.currentTarget.naturalWidth,
-              height: event.currentTarget.naturalHeight,
-            })
-          }
-          style={{
-            transform: `translate(${pan.x}px, ${pan.y}px) rotate(${rotation}deg) scale(${zoom})`,
-            transformOrigin: "center center",
-          }}
-        />
+        <CameraPreviewTransformLayer
+          className={canDrag ? "cursor-grab active:cursor-grabbing" : undefined}
+          imageSource={imageSource}
+          imageHeight={cameraImageSize.height || undefined}
+          imageWidth={cameraImageSize.width || undefined}
+          previewPanX={panRatio.x}
+          previewPanY={panRatio.y}
+          previewRotation={rotation}
+          zoomFactor={zoom}
+        >
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={imageSource}
+            alt={title}
+            draggable={false}
+            className="pointer-events-none absolute inset-0 h-full w-full select-none object-contain"
+            onLoad={(event) =>
+              setImageSize({
+                width: event.currentTarget.naturalWidth,
+                height: event.currentTarget.naturalHeight,
+              })
+            }
+          />
+        </CameraPreviewTransformLayer>
       ) : (
         <div className="flex flex-col items-center gap-3 text-slate-400">
           <ZoomIn className="h-10 w-10" />

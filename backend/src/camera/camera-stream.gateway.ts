@@ -29,13 +29,23 @@ export class CameraStreamGateway {
     }
 
     this.server.on('connection', (client, request) => {
+      const url = new URL(request.url ?? '/', 'http://localhost');
+
+      if (url.pathname === '/api/camera/ai/results') {
+        this.proxyCameraAiResults(client);
+        return;
+      }
+
       this.proxyCameraStream(client, request);
     });
 
     httpServer.on('upgrade', (request, socket, head) => {
       const url = new URL(request.url ?? '/', 'http://localhost');
 
-      if (url.pathname !== '/api/camera/stream') {
+      if (
+        url.pathname !== '/api/camera/stream' &&
+        url.pathname !== '/api/camera/ai/results'
+      ) {
         return;
       }
 
@@ -169,6 +179,47 @@ export class CameraStreamGateway {
     client.on('error', closeBoth);
   }
 
+  private proxyCameraAiResults(client: WebSocket) {
+    const toolSocket = new WebSocket(this.getToolAiResultsUrl());
+
+    const closeBoth = () => {
+      if (toolSocket.readyState === WebSocket.OPEN) {
+        toolSocket.close();
+      }
+
+      if (client.readyState === WebSocket.OPEN) {
+        client.close();
+      }
+    };
+
+    toolSocket.on('message', (data, isBinary) => {
+      if (client.readyState !== WebSocket.OPEN) {
+        return;
+      }
+
+      client.send(data, { binary: isBinary });
+    });
+
+    toolSocket.on('error', (error) => {
+      this.logger.warn(`Camera AI results source failed: ${error.message}`);
+
+      if (client.readyState === WebSocket.OPEN) {
+        client.send(
+          JSON.stringify({
+            success: false,
+            error: `Camera AI results failed: ${error.message}`,
+          }),
+        );
+      }
+
+      closeBoth();
+    });
+
+    toolSocket.on('close', closeBoth);
+    client.on('close', closeBoth);
+    client.on('error', closeBoth);
+  }
+
   private getToolStreamUrl(
     fps: string | null,
     jpegQuality: string,
@@ -179,7 +230,7 @@ export class CameraStreamGateway {
       this.configService.get<string>('DEVICE_TOOL_BASE_URL') ??
       'http://localhost:8000'
     ).replace(/\/+$/, '');
-    const url = new URL('/api/v1/camera/stream', baseUrl);
+    const url = new URL(this.getToolPath('/camera/stream'), baseUrl);
     url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
     if (fps) {
       url.searchParams.set('fps', fps);
@@ -190,6 +241,28 @@ export class CameraStreamGateway {
       url.searchParams.set('debug_timing', debugTiming);
     }
     return url.toString();
+  }
+
+  private getToolAiResultsUrl() {
+    const baseUrl = (
+      this.configService.get<string>('DEVICE_TOOL_BASE_URL') ??
+      'http://localhost:8000'
+    ).replace(/\/+$/, '');
+    const url = new URL(
+      this.getToolPath('/camera/active-camera/AI/yolo_ocr/results'),
+      baseUrl,
+    );
+    url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
+    return url.toString();
+  }
+
+  private getToolPath(path: string) {
+    const prefix =
+      this.configService.get<string>('DEVICE_TOOL_API_PREFIX') ?? '/tool/v1';
+    const normalizedPrefix = `/${prefix.replace(/^\/+|\/+$/g, '')}`;
+    const normalizedPath = `/${path.replace(/^\/+/, '')}`;
+
+    return `${normalizedPrefix}${normalizedPath}`;
   }
 
   private reject(socket: Duplex, statusCode: number, message: string) {

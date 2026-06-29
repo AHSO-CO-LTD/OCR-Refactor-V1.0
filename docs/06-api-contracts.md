@@ -7,10 +7,10 @@ This document defines the first REST API contract for the refactor project.
 The main rule is:
 
 ```text
-frontend -> backend -> ai
+frontend -> backend -> tool
 ```
 
-The frontend only talks to the NestJS backend. The backend talks to the Python/FastAPI AI service when OCR or image processing is needed.
+The frontend only talks to the NestJS backend. The backend talks to the Python/FastAPI Device/OCR Tool in `tool/` when camera, OCR, or image processing is needed.
 
 ## API Style
 
@@ -18,7 +18,7 @@ The frontend only talks to the NestJS backend. The backend talks to the Python/F
 - JSON request and response bodies
 - backend owns authorization
 - frontend renders features based on session permissions
-- AI service can be mocked while it is not ready
+- Device/OCR Tool failures must be surfaced by backend responses; frontend must not call the tool directly
 
 ## Base URLs
 
@@ -27,7 +27,7 @@ Recommended local defaults:
 ```text
 Frontend: http://localhost:3000
 Backend:  http://localhost:4000/api
-AI:       http://localhost:5000
+Tool:     http://localhost:8000/tool/v1
 ```
 
 These ports can change later, but the responsibility split should stay the same.
@@ -332,16 +332,17 @@ Response:
       "thresholdAccept": 0.5,
       "thresholdMns": 0.5,
       "modelPath": "models/SL-40_150_0.998.pt",
+      "rotateTestImageClockwise": false,
       "active": true,
       "camera": {
         "sourceType": "usb",
         "deviceName": "Camera 1",
         "rtspUrl": null,
         "exposure": 3500,
-        "imageWidth": 2500,
-        "imageHeight": 1000,
-        "offsetX": 300,
-        "offsetY": 1400,
+        "imageWidth": 1500,
+        "imageHeight": 500,
+        "offsetX": 0,
+        "offsetY": 0,
         "zoomFactor": 0.4
       },
       "roiPoints": [
@@ -371,16 +372,17 @@ Request:
   "thresholdAccept": 0.5,
   "thresholdMns": 0.5,
   "modelPath": "models/SL-40_150_0.998.pt",
+  "rotateTestImageClockwise": false,
   "active": true,
   "camera": {
     "sourceType": "usb",
     "deviceName": "Camera 1",
     "rtspUrl": null,
     "exposure": 3500,
-    "imageWidth": 2500,
-    "imageHeight": 1000,
-    "offsetX": 300,
-    "offsetY": 1400,
+    "imageWidth": 1500,
+    "imageHeight": 500,
+    "offsetX": 0,
+    "offsetY": 0,
     "zoomFactor": 0.4
   },
   "roiPoints": [
@@ -394,6 +396,34 @@ Request:
 
 ```http
 PATCH /products/:id
+```
+
+### Update OCR Test Settings
+
+Only `dev` can update these test-only OCR settings.
+
+```http
+PATCH /products/:id/ocr-test-settings
+```
+
+Request:
+
+```json
+{
+  "rotateTestImageClockwise": true
+}
+```
+
+Response:
+
+```json
+{
+  "data": {
+    "id": "product_001",
+    "code": "SL-40",
+    "rotateTestImageClockwise": true
+  }
+}
 ```
 
 ### Delete Product
@@ -447,10 +477,10 @@ Response:
     "deviceName": "Camera 1",
     "rtspUrl": null,
     "exposure": 3500,
-    "imageWidth": 2500,
-    "imageHeight": 1000,
-    "offsetX": 300,
-    "offsetY": 1400,
+    "imageWidth": 1500,
+    "imageHeight": 500,
+    "offsetX": 0,
+    "offsetY": 0,
     "zoomFactor": 0.4
   }
 }
@@ -672,52 +702,45 @@ POST /system/shutdown
 
 This endpoint must require a high-level permission such as `system.shutdown`.
 
-## Backend To AI Service Contract
+## Backend To Device/OCR Tool Contract
 
 The frontend must not call this API directly.
 
-### Analyze Image
+### Analyze ROI Image
 
 ```http
-POST /ai/analyze
+POST /tool/v1/ocr/rois
 ```
 
-Request from backend to AI service:
+Request from backend to Device/OCR Tool:
 
 ```json
 {
-  "jobId": "job_001",
-  "productCode": "SL-40",
-  "imagePath": "runtime/frames/frame_001.png",
-  "roi": [
-    { "index": 1, "x": 760, "y": 1180 },
-    { "index": 2, "x": 1250, "y": 1180 }
+  "model_path": "models/SL-40_150_0.998.pt",
+  "grab_from_camera": true,
+  "roi_list": [
+    { "label": "slot-1", "x": 760, "y": 1180, "width": 240, "height": 80, "rotate_clockwise": false },
+    { "label": "slot-2", "x": 1250, "y": 1180, "width": 240, "height": 80, "rotate_clockwise": false }
   ],
-  "thresholds": {
-    "accept": 0.5,
-    "mns": 0.5
-  }
+  "acceptance_threshold_ocr": 0.5,
+  "duplication_threshold_ocr": 0.5,
+  "row_threshold": 20
 }
 ```
 
-Response from AI service:
+Response from Device/OCR Tool:
 
 ```json
 {
-  "jobId": "job_001",
-  "text": "SL40",
-  "confidence": 0.98,
-  "boxes": [
-    {
-      "label": "text",
-      "confidence": 0.98,
-      "x": 100,
-      "y": 120,
-      "width": 240,
-      "height": 80
-    }
+  "success": true,
+  "image_width": 1500,
+  "image_height": 500,
+  "cycle_time_ms": 45,
+  "results": [
+    { "index": 0, "label": "slot-1", "text": "SL40", "x": 760, "y": 1180, "width": 240, "height": 80, "error": null },
+    { "index": 1, "label": "slot-2", "text": "SL40", "x": 1250, "y": 1180, "width": 240, "height": 80, "error": null }
   ],
-  "processingMs": 45
+  "error": null
 }
 ```
 
@@ -731,10 +754,4 @@ Response from AI service:
 
 ## Mocking Rule
 
-While AI service is not ready, backend should provide mock inspection responses behind a config flag.
-
-Recommended flag:
-
-```text
-AI_MOCK_MODE=true
-```
+When the Device/OCR Tool is unavailable, backend should return a clear service-unavailable error and the UI should show a Sonner error state.

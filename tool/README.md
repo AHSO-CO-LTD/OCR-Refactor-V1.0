@@ -1,386 +1,193 @@
-# VisionCenter Device Tool
+# Device API
 
-Headless FastAPI service for local camera, PLC, and OCR runtime work.
+Project integration note:
 
-This repository is no longer a PyQt UI application. It has been reduced toward a
-single local Device Tool that will later be launched together with the main
-backend and frontend in one desktop app/exe.
+- This folder is now the active Device Tool for the OCR refactor repo.
+- Backend and Electron call it through `/tool/v1` by default.
+- The previous Device Tool implementation was moved to `tool-test/` for reference only.
+- Compatibility endpoints were added for the main backend, including `/tool/v1/health`, `/tool/v1/camera/status`, `/tool/v1/camera/devices`, `/tool/v1/camera/grab`, `/tool/v1/camera/stream`, and `/tool/v1/ocr/rois`.
 
-## Purpose
+API điều khiển thiết bị phần cứng (**camera**, sau này **PLC**) và chạy **thuật toán AI** (OCR...), thiết kế **frontend-agnostic**: mọi client (web, PyQt, C#, CLI...) đều dùng được qua REST + WebSocket.
 
-This tool owns only machine-facing work:
+> Trạng thái hiện tại: **Camera** + **AI/yolo_ocr** (predict độc lập A & ký sinh stream camera B, kèm ROI). PLC nằm trong lộ trình (xem [Lộ trình](#7-lộ-trình)).
 
-- Basler camera discovery, connection, settings, and capture.
-- PLC connection, read/write, light control, and pulse commands.
-- OCR model loading and runtime configuration.
-- ROI crop and raw OCR text extraction.
-- Health/status endpoints for the main backend.
+---
 
-This tool must not own business logic:
+## 1. Triết lý thiết kế
 
-- No auth, users, roles, or sessions.
-- No product database/config ownership.
-- No expected-text decision.
-- No OK/NG decision.
-- No reversed-text matching decision.
-- No quantity/count/batch/report/audit logic.
-- No frontend display state.
-- No PyQt/browser UI.
+- **API là nguồn sự thật duy nhất.** Server sở hữu phần cứng; client chỉ điều khiển qua API và nhận dữ liệu (ảnh JPEG, JSON). Không client nào tự mở camera/PLC.
+- **Client chọn driver lúc chạy.** Đổi camera = client gửi `driver` khác trong request, **không sửa/build lại server**. Mở rộng = thêm 1 file driver, không đụng `core/`.
+- **3 lớp tách bạch:**
 
-The main backend calls this tool, applies business rules, and returns final state
-to the frontend. The frontend should call the main backend only.
-
-## Current Structure
-
-```text
-.
-  AGENTS.md
-  README.md
-  config.json
-  main.py
-  requirements.txt
-  docs/
-    AI_AGENT_GUIDE.md
-    DEVICE_TOOL_BE_FE_HANDOFF.md
-  tool/
-    README.md
-    app/
-      core/
-      routers/
-      schemas/
-      services/
-    runtime/
-      ocr/
-        OCR.py
-        RunTime_Sofware/
+```
+┌──────────────────────────────────────────────┐
+│  api/        REST + WebSocket + service        │  ← tầng giao tiếp
+├──────────────────────────────────────────────┤
+│  core/       framework tái dùng MỌI project    │  ← Tool ABC, registry, config, streaming
+├──────────────────────────────────────────────┤
+│  drivers/    driver theo phần cứng/model        │  ← Basler, yolo_ocr (sau: Modbus)
+└──────────────────────────────────────────────┘
 ```
 
-Important paths:
+`core/` không phụ thuộc phần cứng hay frontend → bê sang project khác chỉ cần viết `drivers/` + config mới.
 
-| Path | Purpose |
-| --- | --- |
-| `main.py` | Root launcher. Enforces Python 3.9 and starts `tool.app.main:app`. |
-| `config.json` | Local API host/port config. |
-| `tool/app/main.py` | FastAPI app and router registration. |
-| `tool/app/routers/` | API routes for health, camera, PLC, OCR, and legacy OCR compatibility. |
-| `tool/app/services/` | Runtime logic for camera, PLC, OCR, ROI OCR, and shared services. |
-| `tool/app/schemas/` | Pydantic request/response models. |
-| `tool/runtime/ocr/` | Native OCR wrapper and required `.pyd/.dll` runtime files. |
-| `docs/DEVICE_TOOL_BE_FE_HANDOFF.md` | Full BE/FE handoff and old-vs-new behavior. |
-| `docs/AI_AGENT_GUIDE.md` | Detailed guide for AI agents continuing this project. |
-| `AGENTS.md` | Required rules for coding agents. |
+---
 
-## Runtime Requirement
+## 2. Cấu trúc thư mục
 
-Use Python 3.9.
-
-The native OCR runtime is built for `cp39-win_amd64`. Python 3.10+ or 3.11 may
-start normal Python code but will fail when loading native OCR dependencies.
-
-Recommended command:
-
-```powershell
-py -3.9 main.py
+```
+e:\API\
+├── main.py                  # điểm chạy server (uvicorn)
+├── config.json              # cài đặt vận hành server (bind host/port, presets)
+├── requirements.txt
+│
+├── api/                     # tầng giao tiếp
+│   ├── app.py               # khởi tạo FastAPI, CORS, mount /ui, lifespan
+│   ├── routers/
+│   │   ├── camera_router.py   # REST + WS cho camera
+│   │   └── yolo_ocr_router.py # AI/yolo_ocr: A (độc lập) + B (ký sinh camera)
+│   └── services/
+│       ├── camera_service.py    # CameraManager + CameraSession (encode + detector tách thread)
+│       └── yolo_ocr_service.py  # giữ 1 instance yolo_ocr dùng chung A & B
+│
+├── core/                    # framework tái dùng (KHÔNG phụ thuộc phần cứng/frontend)
+│   ├── tools/
+│   │   ├── base.py          # Tool ABC, ToolState, ToolError
+│   │   ├── camera.py        # CameraTool ABC
+│   │   ├── plc.py           # PlcTool ABC (interface; driver tách file sau)
+│   │   └── vision.py        # VisionTool ABC (interface thuật toán theo-frame)
+│   ├── registry.py          # đăng ký/tra cứu driver theo category (camera/ai/...)
+│   ├── config.py            # nạp config.json
+│   ├── streaming.py         # FrameChannel + LatestFrame (thread → WS, drop-old)
+│   └── logging_setup.py
+│
+├── drivers/                 # driver cụ thể (theo category, đồng bộ với path API)
+│   ├── camera/
+│   │   └── basler.py        # BaslerCamera (pypylon)        → /tool/v1/camera/...
+│   └── AI/
+│       └── yolo_ocr.py      # YoloOcr (ultralytics OBB)     → /tool/v1/AI/yolo_ocr/...
+│
+├── static/                  # UI test (mount tại /ui)
+│   ├── index.html
+│   ├── camera.html          # camera + panel Detect (B) kèm ROI
+│   └── AI_yolo_ocr.html     # predict độc lập (A)
+│
+├── docs/
+│   └── api.md               # tài liệu dùng API cho client
+└── logs/
+    └── api.log
 ```
 
-## Install
+---
 
-Create and use a Python 3.9 environment, then install dependencies:
+## 3. Cài đặt & chạy
 
-```powershell
-py -3.9 -m venv .venv
-.\.venv\Scripts\activate
-python -m pip install --upgrade pip
+```bash
 pip install -r requirements.txt
+python main.py
 ```
 
-If using the global Python 3.9 already installed on the machine:
+- Server: `http://localhost:8000`
+- Swagger UI: `http://localhost:8000/tool/docs`
+- UI test: `http://localhost:8000/ui/`
 
-```powershell
-py -3.9 -m pip install -r requirements.txt
-```
-
-## Run
-
-Start the Device Tool:
-
-```powershell
-py -3.9 main.py
-```
-
-Default local URLs:
-
-```text
-API root:    http://localhost:8000
-Swagger:     http://localhost:8000/api/docs
-ReDoc:       http://localhost:8000/api/redoc
-Health:      http://localhost:8000/api/v1/health
-```
-
-Host/port are read from `config.json`:
-
+Cấu hình bind host/port trong [config.json](config.json):
 ```json
-{
-  "api_host": "localhost",
-  "api_port": 8000
-}
+{ "bind_host": "0.0.0.0", "bind_port": 8000, "presets": {} }
 ```
 
-## API Groups
+Tài liệu API cho client: [docs/api.md](docs/api.md).
 
-Health:
+---
 
-```http
-GET /
-GET /api/v1/health
+## 4. Kiến trúc cốt lõi
+
+### 4.1 Tool & Registry
+Mọi thiết bị là một `Tool` ([core/tools/base.py](core/tools/base.py)) với vòng đời `open()/close()` và trạng thái `ToolState`. Ba loại kế thừa: `CameraTool`, `PlcTool`, `VisionTool`.
+
+Driver tự đăng ký vào registry bằng decorator:
+```python
+from core.registry import cameras
+from core.tools.camera import CameraTool
+
+@cameras.register("basler")
+class BaslerCamera(CameraTool):
+    ...
+```
+Server tra registry theo tên client gửi: `cameras.get("basler")` → tạo instance. Driver chỉ "tồn tại" sau khi module được import — xem `import drivers.camera` trong [api/app.py](api/app.py).
+
+### 4.2 Streaming camera (latest-frame, encode tách thread)
+Để chụp đạt tốc độ phần cứng và không bị encode JPEG kéo chậm:
+
+```
+Thread chụp (driver)        Ô latest        Worker encode (service)      WebSocket
+  RetrieveResult  ──push──►  _LatestFrame  ──pull mới nhất──►  cv2.imencode ──► client
+  (đếm fps #2)               (drop-old)                        FrameChannel
 ```
 
-Camera:
+- Thread chụp chỉ đẩy frame mới nhất vào ô (rất nhẹ) → **fps phần cứng chính xác**.
+- Worker encode lấy **frame mới nhất**, bỏ qua frame cũ nếu không kịp.
+- `FrameChannel` ([core/streaming.py](core/streaming.py)) cầu nối thread → asyncio, hàng đợi 1 phần tử drop-old.
+- Camera **mono** dùng thẳng ảnh xám (bỏ debayer); camera **màu** mới convert BGR — xem `_to_frame()` trong [drivers/camera/basler.py](drivers/camera/basler.py).
 
-```http
-GET  /api/v1/camera/status
-GET  /api/v1/camera/devices
-POST /api/v1/camera/connect
-POST /api/v1/camera/disconnect
-POST /api/v1/camera/settings
-POST /api/v1/camera/grab
-POST /api/v1/camera/grab/raw
+### 4.3 AI / yolo_ocr (YOLO-OBB) — 2 cách chạy, 1 instance chung
+Driver `yolo_ocr` ([drivers/AI/yolo_ocr.py](drivers/AI/yolo_ocr.py)) dùng trực tiếp `ultralytics.YOLO` (task `obb`), **không phụ thuộc PyQt**. Model detect từng ký tự dạng box xoay; `_assemble_rows()` gom box thành **các dòng** (theo `cy` ± `row_threshold`, trong hàng sắp theo `cx`) rồi nối ký tự. `imgsz` tự lấy từ model lúc load.
+
+Thuật toán = module trọn gói (service giữ **1 instance** + router gồm cả A và B); A và B **dùng chung instance** (nạp model 1 lần, config 1 nơi). Thêm thuật toán khác = thêm `drivers/AI/<tên>.py` + router/service của nó, **không đụng** cái cũ.
+
+- **Kiểu A — độc lập** ([api/routers/yolo_ocr_router.py](api/routers/yolo_ocr_router.py)): gửi ảnh (file/binary, REST hoặc WS) → `rows`.
+- **Kiểu B — ký sinh stream camera:** gắn detector (instance chung) vào `CameraSession`. Cùng nguồn frame, 2 nhánh độc lập song song:
+
+```
+                     ┌→ LatestFrame → encode JPEG    → WS /camera/{id}/stream                (xem ảnh)
+Camera (raw frame) ──┤
+                     └→ LatestFrame → detector.infer → WS /camera/{id}/AI/yolo_ocr/results    (text, latest-only)
 ```
 
-`/api/v1/camera/devices` lists hardware that can be discovered.
-`/api/v1/camera/status` reports whether this Device Tool process has opened a
-camera connection. A camera can be listed while `connected` is still `false`
-until `/api/v1/camera/connect` is called.
+Nhánh detector **không ảnh hưởng** nhánh frame; bỏ qua frame cũ nếu infer không kịp; **không sở hữu** model (chỉ mượn instance chung). Xem `start_detector()/_detector_loop()` trong [api/services/camera_service.py](api/services/camera_service.py). Hiện 1 detector/camera (đa detector phát triển sau).
 
-PLC:
+**ROI (tuỳ chọn):** B nhận 1 hoặc list ROI (`{x,y,w,h}` hoặc `{x1,y1,x2,y2}`) → crop & infer **lần lượt từng vùng**, trả kết quả theo từng ROI; bỏ trống → infer toàn frame. ROI là tiền xử lý của nhánh B (`_infer()`), **không đụng thuật toán** nên tái dùng cho mọi detector.
 
-```http
-GET  /api/v1/plc/status
-POST /api/v1/plc/connect
-POST /api/v1/plc/disconnect
-POST /api/v1/plc/read
-GET  /api/v1/plc/signals
-POST /api/v1/plc/write
-POST /api/v1/plc/light
-POST /api/v1/plc/pulse
-POST /api/v1/plc/error-pulse
-```
+---
 
-OCR:
+## 5. Cách mở rộng
 
-```http
-GET  /api/v1/ocr/status
-POST /api/v1/ocr/load-model
-POST /api/v1/ocr/config
-POST /api/v1/ocr/predict
-POST /api/v1/ocr/predict-file
-POST /api/v1/ocr/rois
-WS   /api/v1/ocr/ws
-```
+### 5.1 Thêm một driver camera mới
+1. Tạo `drivers/camera/<tên>.py`, kế thừa `CameraTool`, hiện thực `open/close/grab/start_stream/stop_stream` (+ tuỳ chọn `set_param/diagnostics`).
+2. Gắn `@cameras.register("<tên>")`.
+3. Import nó trong [drivers/camera/__init__.py](drivers/camera/__init__.py).
+4. Xong — client gọi `connect` với `"driver": "<tên>"`, server không sửa gì.
 
-Legacy OCR compatibility:
+### 5.2 Thêm thuật toán AI mới (vd defect, classify)
+- Hiện thực interface [core/tools/vision.py](core/tools/vision.py) (`load_model/configure/infer`) trong **1 file riêng** `drivers/AI/<tên>.py`, gắn `@ai.register("<tên>")`, import ở [drivers/AI/__init__.py](drivers/AI/__init__.py).
+- Tạo **service + router riêng** cho thuật toán (I/O, endpoint tuỳ thuật toán — không ép chung schema), namespace `/tool/v1/AI/<tên>/...`; include ở [api/app.py](api/app.py).
+- Nếu chạy theo-frame → gắn ký sinh camera (B) qua `CameraSession.start_detector()` y như yolo_ocr (chỉ cần object có `infer(frame)->dict`); nếu không thì tự có cách tự động hoá khác. **Không đụng** thuật toán cũ.
 
-```http
-POST /api/v1/ai/ocr_ai/load_model
-POST /api/v1/ai/ocr_ai/input_config
-WS   /api/v1/ai/ocr_ai/ws
-```
+### 5.3 Thêm loại tool PLC
+- Interface đã có: [core/tools/plc.py](core/tools/plc.py). Mỗi protocol là **1 file riêng** trong `drivers/plc/` (vd modbus_tcp, slmp), tự đăng ký registry `plcs`.
+- Thêm router + service tương tự camera; `import drivers.plc` vào lifespan.
 
-New backend code should prefer `/api/v1/ocr/*`.
+---
 
-## Primary Backend Endpoint
+## 6. Quy ước
 
-The main backend should primarily call:
+- **Trung lập ngôn ngữ:** ảnh truyền dạng **JPEG bytes**, kết quả dạng **JSON** (chỉ kiểu cơ bản). Không dùng định dạng riêng của Python.
+- **Lỗi tool:** driver raise `ToolError` (thông điệp an toàn để trả client) thay vì exception thô.
+- **REST trả** `{"success": true/false, ...}`; lỗi → `{"success": false, "error": "..."}`.
+- **`core/` không import PyQt / phần cứng.** (pypylon nằm trong driver, không ở core.)
 
-```http
-POST /api/v1/ocr/rois
-```
+---
 
-Example request using camera capture:
+## 7. Lộ trình
 
-```json
-{
-  "model_path": "C:/duyhai/AHSO/model/IS35R_100_E35.pt",
-  "grab_from_camera": true,
-  "roi_list": [
-    {
-      "label": "slot-1",
-      "x": 410,
-      "y": 260,
-      "width": 300,
-      "height": 440,
-      "rotate_clockwise": true
-    },
-    {
-      "label": "slot-2",
-      "x": 890,
-      "y": 260,
-      "width": 300,
-      "height": 440,
-      "rotate_clockwise": true
-    }
-  ],
-  "acceptance_threshold_ocr": 0.5,
-  "duplication_threshold_ocr": 0.5,
-  "row_threshold": 20
-}
-```
-
-Example response:
-
-```json
-{
-  "success": true,
-  "image_width": 3000,
-  "image_height": 1000,
-  "cycle_time_ms": 293.3,
-  "results": [
-    {
-      "index": 0,
-      "label": "slot-1",
-      "text": "IS-35R",
-      "x": 410,
-      "y": 260,
-      "width": 300,
-      "height": 440,
-      "error": null
-    }
-  ],
-  "error": null
-}
-```
-
-This response is raw OCR output. It intentionally does not include `ok`,
-`matched`, `expected_text`, `count`, `batch`, `ok_count`, or `ng_count`.
-
-## Backend Responsibilities
-
-The main backend should:
-
-- Store product config.
-- Store expected text.
-- Store ROI list per product.
-- Store model path or model identifier.
-- Store camera settings per product.
-- Store OCR thresholds per product.
-- Decide matching rules, including reversed text.
-- Call the Device Tool for raw OCR.
-- Convert raw OCR into OK/NG.
-- Update quantity/count/batch/report/audit.
-- Return final inspection state to FE.
-
-Suggested flow:
-
-```text
-1. FE asks BE to run inspection.
-2. BE loads active product config.
-3. BE checks Device Tool health.
-4. BE connects/configures camera if needed.
-5. BE calls POST /api/v1/ocr/rois.
-6. BE receives raw OCR text per ROI.
-7. BE applies product matching rules.
-8. BE computes OK/NG, quantity, count, batch, report.
-9. BE returns final result to FE.
-```
-
-## Frontend Responsibilities
-
-The frontend should call the main backend only.
-
-The frontend may display:
-
-- Device health from BE.
-- Active product.
-- Camera preview proxied by BE.
-- ROI overlays from BE config.
-- Raw OCR text returned by BE.
-- Final OK/NG returned by BE.
-- Count, batch, reports, and errors returned by BE.
-
-The frontend must not:
-
-- Call `localhost:8000` Device Tool directly in production flow.
-- Decide whether OCR text is correct.
-- Implement reversed-text matching.
-- Compute batch/count as source of truth.
-- Bypass BE permission checks.
-
-## Verification
-
-Syntax check without writing bytecode:
-
-```powershell
-$env:PYTHONDONTWRITEBYTECODE='1'
-@'
-from pathlib import Path
-files = [Path('main.py'), *Path('tool').rglob('*.py')]
-for path in files:
-    compile(path.read_text(encoding='utf-8'), str(path), 'exec')
-print(f'syntax_ok {len(files)} files')
-'@ | py -3.9 -
-```
-
-OpenAPI check:
-
-```powershell
-$env:PYTHONDONTWRITEBYTECODE='1'
-@'
-from fastapi.testclient import TestClient
-from tool.app.main import app
-client = TestClient(app)
-paths = client.get('/openapi.json').json()['paths']
-print('ocr_rois', '/api/v1/ocr/rois' in paths)
-print('inspection_removed', '/api/v1/inspection/run' not in paths)
-'@ | py -3.9 -
-```
-
-OCR runtime smoke test:
-
-```powershell
-$env:PYTHONDONTWRITEBYTECODE='1'
-@'
-from tool.app.services.ocr_service import OCRService
-service = OCRService()
-print(service.load_model(r'C:\duyhai\AHSO\model\IS35R_100_E35.pt'))
-print(service.status())
-'@ | py -3.9 -
-```
-
-PLC connection test is intentionally deferred until real PLC hardware testing is
-approved.
-
-## Packaging Notes
-
-When packaging the final app/exe, the launcher should start:
-
-- Device Tool FastAPI local service.
-- Main backend local service.
-- Frontend/Electron shell.
-
-Packaging must include:
-
-- Python 3.9 runtime.
-- `tool/runtime/ocr/RunTime_Sofware/*.pyd`
-- `tool/runtime/ocr/RunTime_Sofware/*.dll`
-- `tool/runtime/ocr/RunTime_Sofware/form_UI/*.ui`
-- Model files or a stable model path resolution strategy.
-- Local health checks so BE/FE know whether Device Tool is ready.
-
-## Current Verified State
-
-- `AGENTS.md` exists at repository root.
-- Legacy `api/`, `frontend/`, and old `backend/` folders were removed from the
-  active source tree.
-- OCR native runtime now lives under `tool/runtime/ocr`.
-- OpenAPI still exposes `/api/v1/ocr/rois`.
-- Removed business endpoint `/api/v1/inspection/run` is not present.
-- OCR model load was verified with `C:\duyhai\AHSO\model\IS35R_100_E35.pt`.
-- ROI OCR was verified with the local test image and returned `IS-35R` and
-  `R53-SI`.
-
-## More Documentation
-
-- Full BE/FE handoff: `docs/DEVICE_TOOL_BE_FE_HANDOFF.md`
-- AI agent guide: `docs/AI_AGENT_GUIDE.md`
-- Tool-local README: `tool/README.md`
-- Coding agent rules: `AGENTS.md`
+| Hạng mục | Trạng thái |
+|---|---|
+| Camera (control + grab + live stream WS) | ✅ Xong |
+| Đo 3 loại FPS + chẩn đoán phần cứng | ✅ Xong |
+| AI/yolo_ocr A — predict độc lập (YOLO-OBB, file/binary, REST+WS) | ✅ Xong |
+| AI/yolo_ocr B — ký sinh stream camera (latest-frame, kèm ROI) | ✅ Xong |
+| PLC (Modbus TCP/RTU, SLMP) | ⬜ Chưa |
+| Đa detector / pipeline nhiều thuật toán trên 1 camera | ⬜ Chưa |
+#   A P I - T o o l - v 1  
+ #   A P I - T o o l - v 1  
+ 

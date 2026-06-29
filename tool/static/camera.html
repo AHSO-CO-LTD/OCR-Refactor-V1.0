@@ -1,0 +1,408 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Camera — UI test</title>
+  <style>
+    body { font-family: system-ui, sans-serif; background:#0f1115; color:#e6e6e6; margin:0; padding:24px; }
+    h1 { font-size:18px; margin:0 0 16px; }
+    a { color:#7cc4ff; }
+    .wrap { display:flex; gap:24px; flex-wrap:wrap; }
+    .panel { background:#1a1d24; border:1px solid #2a2f3a; border-radius:10px; padding:16px; }
+    .controls { width:340px; }
+    label { display:block; font-size:12px; color:#8a93a3; margin:10px 0 4px; }
+    input { width:100%; box-sizing:border-box; background:#0f1115; color:#e6e6e6;
+            border:1px solid #2a2f3a; border-radius:6px; padding:7px 9px; font-size:13px; }
+    .row { display:flex; gap:8px; }
+    .row > div { flex:1; }
+    button { margin-top:12px; margin-right:8px; background:#2a3a52; color:#e6e6e6; border:1px solid #3a557d;
+             border-radius:6px; padding:8px 14px; font-size:13px; cursor:pointer; }
+    button:hover { background:#34507a; }
+    button.stop { background:#522a2a; border-color:#7d3a3a; }
+    img { max-width:640px; background:#000; border:1px solid #2a2f3a; border-radius:8px; display:block; }
+    .status { font-size:12px; margin-top:10px; }
+    .ok { color:#69db7c; } .err { color:#ff8787; }
+    pre { background:#0b0d11; border:1px solid #2a2f3a; border-radius:6px; padding:10px;
+          font-size:12px; max-height:200px; overflow:auto; margin-top:12px; }
+    .badge { font-size:12px; color:#8a93a3; }
+  </style>
+</head>
+<body>
+  <h1>Camera test &middot; <a href="index.html">← về trang chính</a></h1>
+  <div class="wrap">
+    <div class="panel controls">
+      <label>Driver</label>
+      <input id="driver" value="basler" />
+      <div class="row">
+        <div><label>Interface</label><input id="interface" value="GigE" /></div>
+        <div><label>Exposure</label><input id="exposure" type="number" value="3000" /></div>
+      </div>
+      <div class="row">
+        <div><label>Serial (tuỳ chọn)</label><input id="serial" placeholder="trống = camera đầu" /></div>
+        <div><label>JPEG quality</label><input id="quality" type="number" value="80" /></div>
+      </div>
+      <label>Tool id (tuỳ chọn)</label>
+      <input id="toolId" placeholder="trống = tự sinh (cam1...)" />
+
+      <label>Hình học (width / height / offsetX / offsetY)</label>
+      <div class="row">
+        <div><input id="width" type="number" placeholder="width" /></div>
+        <div><input id="height" type="number" placeholder="height" /></div>
+      </div>
+      <div class="row">
+        <div><input id="offsetX" type="number" placeholder="offsetX" /></div>
+        <div><input id="offsetY" type="number" placeholder="offsetY" /></div>
+      </div>
+
+      <div>
+        <button onclick="connect()">Connect</button>
+        <button class="stop" onclick="disconnect()">Disconnect</button>
+      </div>
+      <div>
+        <button onclick="grab()">Grab 1 frame</button>
+        <button onclick="applyExposure()">Apply exposure</button>
+        <button onclick="applyGeometry()">Apply geometry</button>
+      </div>
+      <div>
+        <button onclick="readCamInfo()">Camera info</button>
+        <button onclick="readRanges()">Đọc ranges</button>
+        <button onclick="readInfo()">Đọc chẩn đoán (debug)</button>
+      </div>
+      <div>
+        <button onclick="startStream()">Start stream</button>
+        <button class="stop" onclick="stopStream()">Stop stream</button>
+      </div>
+
+      <div class="status">Camera id: <b id="curId">—</b> &middot; <span id="status" class="badge">chưa kết nối</span></div>
+      <div class="status">① Hiển thị (browser, render): <b id="fps">—</b></div>
+      <div class="status">② Camera phần cứng (server chụp): <b id="camFps">—</b></div>
+      <div class="status">③ Nhận qua WS (client, gồm truyền): <b id="recvFps">—</b></div>
+      <div class="status">Geometry: <b id="geom">—</b></div>
+      <div class="status">Chẩn đoán: <b id="diagShort">—</b></div>
+      <pre id="log"></pre>
+    </div>
+
+    <div class="panel">
+      <div class="badge">Live stream (WS) — <b id="fpsLive" style="color:#69db7c">0 fps</b></div>
+      <img id="live" alt="live" />
+      <div class="badge" style="margin-top:12px">Grab (REST)</div>
+      <img id="shot" alt="grab" />
+    </div>
+
+    <div class="panel" style="width:320px">
+      <div class="badge">Detect (B) — ký sinh stream camera</div>
+      <label>Vision model path (.pt trên server)</label>
+      <input id="vModel" placeholder="E:\\...\\OCR5.pt" />
+      <div class="row">
+        <div><label>conf</label><input id="vConf" type="number" step="0.05" value="0.5" /></div>
+        <div><label>iou</label><input id="vIou" type="number" step="0.05" value="0.5" /></div>
+        <div><label>row_th</label><input id="vRow" type="number" value="20" /></div>
+      </div>
+      <label>ROI (tuỳ chọn) — JSON, trống = toàn frame</label>
+      <input id="vRois" placeholder='[{"x":0,"y":0,"w":400,"h":200}]' />
+      <div>
+        <button onclick="startDetect()">Start detect</button>
+        <button class="stop" onclick="stopDetect()">Stop detect</button>
+        <button onclick="applyDetectConfig()">Apply config</button>
+      </div>
+      <div class="status">Kết quả (rows):</div>
+      <div id="detRows" style="font-size:18px;font-weight:600;color:#69db7c;min-height:24px">—</div>
+      <div class="status">Detect: <b id="detFps">—</b> &middot; seq <b id="detSeq">—</b></div>
+    </div>
+  </div>
+
+<script>
+const api = (p) => `/tool/v1${p}`;
+let curId = null;
+let ws = null;
+let lastUrl = null, frames = 0, recv = 0, fpsTimer = null, statusTimer = null;
+
+function log(msg, cls) {
+  const el = document.getElementById('log');
+  const t = new Date().toLocaleTimeString();
+  el.innerHTML = `<span class="${cls||''}">[${t}] ${msg}</span>\n` + el.innerHTML;
+}
+function setStatus(txt, ok) {
+  const s = document.getElementById('status');
+  s.textContent = txt; s.className = 'badge ' + (ok ? 'ok' : 'err');
+}
+
+async function connect() {
+  const body = {
+    driver: document.getElementById('driver').value.trim(),
+    id: document.getElementById('toolId').value.trim() || null,
+    params: {
+      interface: document.getElementById('interface').value.trim(),
+      exposure: Number(document.getElementById('exposure').value),
+      jpeg_quality: Number(document.getElementById('quality').value),
+    },
+  };
+  const serial = document.getElementById('serial').value.trim();
+  if (serial) body.params.serial = serial;
+
+  try {
+    const r = await fetch(api('/camera/connect'), {
+      method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body),
+    });
+    const j = await r.json();
+    if (j.success) {
+      curId = j.id; document.getElementById('curId').textContent = curId;
+      setStatus('connected (' + j.state + ')', true);
+      renderGeom(j.geometry); fillGeomFields(j.geometry);
+      log('Connected: ' + JSON.stringify(j), 'ok');
+    } else { setStatus('lỗi', false); log('Connect lỗi: ' + j.error, 'err'); }
+  } catch (e) { setStatus('lỗi', false); log('Connect exception: ' + e, 'err'); }
+}
+
+async function disconnect() {
+  if (!curId) return log('Chưa có camera', 'err');
+  stopStream();
+  const r = await fetch(api(`/camera/${curId}/disconnect`), { method:'POST' });
+  const j = await r.json();
+  log('Disconnect: ' + JSON.stringify(j), j.success ? 'ok':'err');
+  setStatus('đã ngắt', false); curId = null; document.getElementById('curId').textContent = '—';
+}
+
+async function grab() {
+  if (!curId) return log('Chưa connect', 'err');
+  try {
+    const t0 = performance.now();
+    const r = await fetch(api(`/camera/${curId}/grab`));
+    if (!r.ok) { log('Grab lỗi HTTP ' + r.status + ': ' + (await r.text()), 'err'); return; }
+    const blob = await r.blob();
+    const rtt = (performance.now() - t0).toFixed(1);
+    document.getElementById('shot').src = URL.createObjectURL(blob);
+    log('Grab OK (' + blob.size + ' bytes, ' + rtt + ' ms)', 'ok');
+  } catch (e) { log('Grab exception: ' + e, 'err'); }
+}
+
+async function applyExposure() {
+  if (!curId) return log('Chưa connect', 'err');
+  const exposure = Number(document.getElementById('exposure').value);
+  const j = await postParam({ exposure });
+  log('Set exposure: ' + JSON.stringify(j), j.success ? 'ok':'err');
+}
+
+async function applyGeometry() {
+  if (!curId) return log('Chưa connect', 'err');
+  const body = {};
+  for (const [k, id] of [['width','width'],['height','height'],['offset_x','offsetX'],['offset_y','offsetY']]) {
+    const v = document.getElementById(id).value.trim();
+    if (v !== '') body[k] = Number(v);
+  }
+  if (Object.keys(body).length === 0) return log('Chưa nhập giá trị hình học', 'err');
+  const j = await postParam(body);
+  if (j.success && j.status) { renderGeom(j.status.geometry); fillGeomFields(j.status.geometry); }
+  log('Set geometry: ' + JSON.stringify(j), j.success ? 'ok':'err');
+}
+
+async function readCamInfo() {
+  if (!curId) return log('Chưa connect', 'err');
+  try {
+    const j = await (await fetch(api(`/camera/${curId}/info`))).json();
+    if (j.success) log('Camera info: ' + JSON.stringify(j.info), 'ok');
+    else log('Info lỗi: ' + j.error, 'err');
+  } catch (e) { log('Info exception: ' + e, 'err'); }
+}
+
+async function readRanges() {
+  if (!curId) return log('Chưa connect', 'err');
+  try {
+    const j = await (await fetch(api(`/camera/${curId}/ranges`))).json();
+    if (!j.success) { log('Ranges lỗi: ' + j.error, 'err'); return; }
+    const r = j.ranges || {};
+    const apply = (id, rg) => {
+      if (!rg) return;
+      const el = document.getElementById(id);
+      if (rg.min != null) el.min = rg.min;
+      if (rg.max != null) el.max = rg.max;
+      if (rg.inc != null) el.step = rg.inc;
+    };
+    apply('width', r.width); apply('height', r.height);
+    apply('offsetX', r.offset_x); apply('offsetY', r.offset_y); apply('exposure', r.exposure);
+    log('Ranges (đã áp min/max/step): ' + JSON.stringify(r), 'ok');
+  } catch (e) { log('Ranges exception: ' + e, 'err'); }
+}
+
+async function readInfo() {
+  if (!curId) return log('Chưa connect', 'err');
+  try {
+    const r = await fetch(api(`/camera/${curId}/debug_info`));
+    const j = await r.json();
+    if (!j.success) { log('Debug lỗi: ' + j.error, 'err'); return; }
+    const d = j.diagnostics || {};
+    document.getElementById('diagShort').textContent =
+      `trần ${d.resulting_fps ?? '?'} fps · packet ${d.packet_size ?? '?'} · throughput ${d.throughput_limit ?? '?'}`;
+    log('Chẩn đoán: ' + JSON.stringify(d, null, 2), 'ok');
+  } catch (e) { log('Info exception: ' + e, 'err'); }
+}
+
+async function postParam(body) {
+  const r = await fetch(api(`/camera/${curId}/param`), {
+    method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body),
+  });
+  return r.json();
+}
+
+function renderGeom(g) {
+  if (!g) return;
+  document.getElementById('geom').textContent =
+    `${g.width}x${g.height} @ (${g.offset_x}, ${g.offset_y})`;
+}
+function fillGeomFields(g) {
+  if (!g) return;
+  document.getElementById('width').value = g.width;
+  document.getElementById('height').value = g.height;
+  document.getElementById('offsetX').value = g.offset_x;
+  document.getElementById('offsetY').value = g.offset_y;
+}
+
+function startStream() {
+  if (!curId) return log('Chưa connect', 'err');
+  if (ws) return log('Stream đang chạy', 'err');
+  const url = `ws://${location.host}/tool/v1/camera/${curId}/stream`;
+  ws = new WebSocket(url);
+  ws.binaryType = 'blob';
+  ws.onopen = () => { log('WS mở: ' + url, 'ok'); startFps(); startStatusPoll(); };
+  ws.onmessage = (ev) => {
+    recv++;  // ③ đếm fps NHẬN qua WS (gồm thời gian server xử lý + truyền)
+    const u = URL.createObjectURL(ev.data);
+    const img = document.getElementById('live');
+    // ① đếm fps khi ảnh THỰC SỰ render xong (decode + hiển thị).
+    img.onload = () => { if (lastUrl) URL.revokeObjectURL(lastUrl); lastUrl = u; frames++; };
+    img.src = u;
+  };
+  ws.onclose = (ev) => { log('WS đóng: code=' + ev.code + (ev.reason? ' ' + ev.reason:''), 'err'); stopFps(); ws = null; };
+  ws.onerror = () => log('WS lỗi', 'err');
+}
+
+function stopStream() {
+  if (ws) { ws.close(); ws = null; }
+  stopFps();
+  stopStatusPoll();
+}
+
+function startStatusPoll() {
+  stopStatusPoll();
+  statusTimer = setInterval(async () => {
+    if (!curId) return;
+    try {
+      const r = await fetch(api(`/camera/${curId}/status`));
+      const j = await r.json();
+      if (j.success) {
+        document.getElementById('camFps').textContent = (j.fps ?? 0) + ' fps';
+        renderGeom(j.geometry);
+      }
+    } catch (e) { /* bỏ qua lỗi poll */ }
+  }, 1000);
+}
+function stopStatusPoll() {
+  if (statusTimer) { clearInterval(statusTimer); statusTimer = null; }
+  document.getElementById('camFps').textContent = '—';
+}
+
+function startFps() {
+  frames = 0; recv = 0;
+  fpsTimer = setInterval(() => {
+    document.getElementById('fps').textContent = frames + ' fps';
+    document.getElementById('fpsLive').textContent = frames + ' fps';
+    document.getElementById('recvFps').textContent = recv + ' fps';
+    frames = 0; recv = 0;
+  }, 1000);
+}
+function stopFps() {
+  if (fpsTimer) { clearInterval(fpsTimer); fpsTimer = null; }
+  document.getElementById('fps').textContent = '—';
+  document.getElementById('fpsLive').textContent = '0 fps';
+  document.getElementById('recvFps').textContent = '—';
+}
+
+// ── Detect (B): ký sinh stream camera ──
+let resWs = null, detCount = 0, detTimer = null;
+
+// Instance yolo_ocr dùng CHUNG (A và B): nạp model qua /AI/yolo_ocr/load_model,
+// rồi gắn vào camera qua /camera/{id}/AI/yolo_ocr/start.
+async function startDetect() {
+  if (!curId) return log('Chưa connect camera', 'err');
+  // 1) nạp model (instance chung) — nếu đã nạp ở trang AI thì vẫn nạp lại theo ô này
+  const load = { model_path: document.getElementById('vModel').value.trim(),
+    conf: Number(document.getElementById('vConf').value),
+    iou: Number(document.getElementById('vIou').value),
+    row_threshold: Number(document.getElementById('vRow').value) };
+  const lj = await (await fetch(api('/AI/yolo_ocr/load_model'), {
+    method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(load)
+  })).json();
+  if (!lj.success) { log('Load model lỗi: ' + lj.error, 'err'); return; }
+  // 2) gắn vào camera (kèm ROI nếu có)
+  let bodyStr = '{}';
+  const roiTxt = document.getElementById('vRois').value.trim();
+  if (roiTxt) {
+    try { bodyStr = JSON.stringify({ rois: JSON.parse(roiTxt) }); }
+    catch (e) { return log('ROI JSON không hợp lệ: ' + e, 'err'); }
+  }
+  const j = await (await fetch(api(`/camera/${curId}/AI/yolo_ocr/start`), {
+    method:'POST', headers:{'Content-Type':'application/json'}, body: bodyStr
+  })).json();
+  if (!j.success) { log('Start detect lỗi: ' + j.error, 'err'); return; }
+  log('Detect đã bật' + (j.rois ? ' (ROI: ' + j.rois.length + ')' : ' (toàn frame)'), 'ok');
+  openResults();
+}
+
+function openResults() {
+  if (resWs) return;
+  resWs = new WebSocket(`ws://${location.host}/tool/v1/camera/${curId}/AI/yolo_ocr/results`);
+  resWs.onopen = () => { log('WS results mở', 'ok'); startDetFps(); };
+  resWs.onmessage = (ev) => {
+    const j = JSON.parse(ev.data); detCount++;
+    document.getElementById('detSeq').textContent = j.seq ?? '—';
+    let txt;
+    if (Array.isArray(j.rois)) {
+      // có ROI: hiển thị kết quả từng vùng
+      txt = j.rois.map((r, i) => {
+        const v = r.success ? ((r.rows && r.rows.length) ? r.rows.join('') : '∅') : ('lỗi');
+        return `#${i}: ${v}`;
+      }).join('   ');
+    } else {
+      txt = j.success ? ((j.rows && j.rows.length) ? j.rows.join('  |  ') : '(không có)') : ('lỗi: ' + j.error);
+    }
+    document.getElementById('detRows').textContent = txt;
+  };
+  resWs.onclose = () => { log('WS results đóng', 'err'); stopDetFps(); resWs = null; };
+  resWs.onerror = () => log('WS results lỗi', 'err');
+}
+
+// Config dùng chung A+B (1 instance) → đổi qua /AI/yolo_ocr/config
+async function applyDetectConfig() {
+  const body = {
+    conf: Number(document.getElementById('vConf').value),
+    iou: Number(document.getElementById('vIou').value),
+    row_threshold: Number(document.getElementById('vRow').value),
+  };
+  const j = await (await fetch(api('/AI/yolo_ocr/config'), {
+    method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)
+  })).json();
+  log('Detect config: ' + JSON.stringify(j), j.success ? 'ok' : 'err');
+}
+
+async function stopDetect() {
+  if (resWs) { resWs.close(); resWs = null; }
+  if (!curId) return;
+  const j = await (await fetch(api(`/camera/${curId}/AI/yolo_ocr/stop`), { method:'POST' })).json();
+  log('Stop detect: ' + JSON.stringify(j), j.success ? 'ok' : 'err');
+}
+
+function startDetFps() {
+  detCount = 0;
+  detTimer = setInterval(() => {
+    document.getElementById('detFps').textContent = detCount + ' fps';
+    detCount = 0;
+  }, 1000);
+}
+function stopDetFps() {
+  if (detTimer) { clearInterval(detTimer); detTimer = null; }
+  document.getElementById('detFps').textContent = '—';
+}
+</script>
+</body>
+</html>

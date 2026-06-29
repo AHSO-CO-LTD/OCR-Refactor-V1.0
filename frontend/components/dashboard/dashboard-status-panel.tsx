@@ -36,11 +36,7 @@ export function DashboardStatusPanel() {
   const [snapshot, setSnapshot] = useState<DashboardSnapshot>(initialSnapshot);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const {
-    checking: licenseChecking,
-    error: licenseError,
-    license,
-  } = useLicenseWatchdog();
+  const { license } = useLicenseWatchdog();
 
   useEffect(() => {
     let cancelled = false;
@@ -103,59 +99,49 @@ export function DashboardStatusPanel() {
   const latestResult = inspection?.lastResult?.result ?? "UNKNOWN";
   const inspectionStatus = inspection?.status ?? "idle";
   const latestResultLabel = formatResultLabel(latestResult, t);
-  const licenseDetail = licenseError
-    ? licenseError
-    : licenseChecking && !license
-      ? t("auth.checking")
-      : formatLicenseDetail(license, t);
+  const dongleLabel =
+    license?.donglePresent === true
+      ? t("dashboard.donglePresent")
+      : license?.donglePresent === false
+        ? t("dashboard.dongleMissing")
+        : t("dashboard.pending");
+  const latestResultTone =
+    latestResult === "NG" ? "error" : latestResult === "OK" ? "ok" : "idle";
 
   return (
     <div className="space-y-5">
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
-        <StatusCard
-          label={t("dashboard.apiSession")}
-          value={
-            snapshot.apiHealth?.status === "ok"
-              ? t("dashboard.connected")
-              : t("dashboard.pending")
-          }
-          tone={snapshot.apiHealth?.status === "ok" ? "ok" : "idle"}
-          detail={snapshot.apiHealth?.timestamp ?? t("dashboard.noData")}
-        />
-        <StatusCard
-          label={t("dashboard.license")}
-          value={formatLicenseLabel(license, t)}
-          tone={formatLicenseTone(license)}
-          detail={licenseDetail}
-        />
-        <StatusCard
-          label={t("dashboard.inspection")}
-          value={formatStatusLabel(inspectionStatus, t)}
-          tone={inspectionStatus === "running" ? "ok" : "idle"}
-          detail={
-            inspection?.currentProductCode ??
-            inspection?.productCode ??
-            t("dashboard.noInspection")
-          }
-        />
-        <StatusCard
-          label={t("dashboard.okNg")}
-          value={`${inspection?.okCount ?? 0} / ${inspection?.ngCount ?? 0}`}
-          tone={
-            latestResult === "NG"
-              ? "error"
-              : latestResult === "OK"
-                ? "ok"
-                : "idle"
-          }
-          detail={`${t("dashboard.quantity")}: ${inspection?.quantity ?? 0}`}
-        />
-        <StatusCard
-          label={t("dashboard.productProfiles")}
-          value={String(snapshot.activeProductCount)}
-          tone="info"
-          detail={`${t("dashboard.totalProfiles")}: ${snapshot.productCount}`}
-        />
+      <div className="pb-1">
+        <div className="flex flex-wrap gap-3">
+          <StatusCard
+            label={t("dashboard.apiSession")}
+            value={
+              snapshot.apiHealth?.status === "ok"
+                ? t("dashboard.connected")
+                : t("dashboard.pending")
+            }
+            tone={snapshot.apiHealth?.status === "ok" ? "ok" : "idle"}
+          />
+          <StatusCard
+            label={t("dashboard.license")}
+            value={formatLicenseLabel(license, t)}
+            tone={formatLicenseTone(license)}
+          />
+          <StatusCard
+            label={t("dashboard.inspection")}
+            value={formatStatusLabel(inspectionStatus, t)}
+            tone={inspectionStatus === "running" ? "ok" : "idle"}
+          />
+          <StatusCard
+            label={t("dashboard.lastResult")}
+            value={latestResultLabel}
+            tone={latestResultTone}
+          />
+          <StatusCard
+            label={t("dashboard.dongleStatus")}
+            value={dongleLabel}
+            tone={formatDongleTone(license)}
+          />
+        </div>
       </div>
 
       <div className="grid gap-5 xl:grid-cols-[minmax(0,1.4fr)_minmax(320px,0.9fr)]">
@@ -298,26 +284,25 @@ export function DashboardStatusPanel() {
 function StatusCard({
   label,
   value,
-  detail,
   tone,
 }: {
   label: string;
   value: string;
-  detail: string;
-  tone: "ok" | "error" | "idle" | "info";
+  tone: "ok" | "error" | "idle";
 }) {
   return (
-    <Card>
-      <CardContent className="pt-5">
-        <div className="space-y-3">
-          <div className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
+    <Card className={`${statusCardClass(tone)} w-[132px] shrink-0`}>
+      <CardContent className="p-3">
+        <div className="flex aspect-square flex-col justify-between">
+          <div className="text-[10px] font-semibold uppercase tracking-[0.1em] text-current/70">
             {label}
           </div>
-          <div className="flex items-center justify-between gap-3">
-            <div className="text-2xl font-semibold text-slate-950">{value}</div>
-            <span className={statusPillClass(tone)} />
+          <div className="flex flex-1 items-center justify-center text-center">
+            <div className="text-base font-semibold leading-tight sm:text-lg">
+              {value}
+            </div>
           </div>
-          <div className="text-sm text-slate-500">{detail}</div>
+          <span className={statusPillClass(tone)} />
         </div>
       </CardContent>
     </Card>
@@ -418,9 +403,11 @@ function formatLicenseDetail(
   return `${dongleLabel} · ${t("dashboard.lastChecked")}: ${checkedLabel}`;
 }
 
+void formatLicenseDetail;
+
 function formatLicenseTone(
   license: SystemLicenseState | null,
-): "ok" | "error" | "idle" | "info" {
+): "ok" | "error" | "idle" {
   if (!license || license.status === "unknown") {
     return "idle";
   }
@@ -428,7 +415,29 @@ function formatLicenseTone(
   return license.status === "licensed" ? "ok" : "error";
 }
 
-function statusPillClass(tone: "ok" | "error" | "idle" | "info") {
+function formatDongleTone(
+  license: SystemLicenseState | null,
+): "ok" | "error" | "idle" {
+  if (!license || license.donglePresent == null) {
+    return "idle";
+  }
+
+  return license.donglePresent ? "ok" : "error";
+}
+
+function statusCardClass(tone: "ok" | "error" | "idle") {
+  if (tone === "ok") {
+    return "border-emerald-200 bg-emerald-50 text-emerald-900";
+  }
+
+  if (tone === "error") {
+    return "border-red-200 bg-red-50 text-red-900";
+  }
+
+  return "border-slate-200 bg-slate-100 text-slate-700";
+}
+
+function statusPillClass(tone: "ok" | "error" | "idle") {
   const base = "inline-flex h-2.5 w-2.5 shrink-0 rounded-full";
 
   if (tone === "ok") {
@@ -437,10 +446,6 @@ function statusPillClass(tone: "ok" | "error" | "idle" | "info") {
 
   if (tone === "error") {
     return `${base} bg-red-500`;
-  }
-
-  if (tone === "info") {
-    return `${base} bg-cyan-600`;
   }
 
   return `${base} bg-slate-300`;

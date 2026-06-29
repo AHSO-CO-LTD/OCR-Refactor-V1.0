@@ -10,7 +10,7 @@ The safest order is:
 2. backend foundation
 3. frontend shell
 4. desktop packaging
-5. AI service integration
+5. Device/OCR Tool integration
 6. production hardening
 
 ## Phase 0 - Foundation
@@ -115,13 +115,13 @@ The safest order is:
 - protected app behavior
 - dongle logs
 
-## Phase 6 - AI Service Integration
+## Phase 6 - Device/OCR Tool Integration
 
 ### Goals
 
-- create Python/FastAPI service contract
+- keep the Python/FastAPI `tool/` contract aligned with backend usage
 - define image input and result payloads
-- connect NestJS to AI service
+- connect NestJS to the Device/OCR Tool
 
 ### Outputs
 
@@ -161,7 +161,7 @@ Electron packaging and dongle gating completed.
 
 ### Milestone D
 
-AI service connected and inspection flow operational.
+Device/OCR Tool connected and inspection flow operational.
 
 ### Milestone E
 
@@ -169,9 +169,8 @@ Stabilization and production release candidate.
 
 ## Implementation Rules
 
-- do not block the whole project on AI service readiness
-- keep the UI usable with mocked or stubbed AI responses
+- do not create a separate external OCR service
+- keep the UI usable when the Device/OCR Tool is unavailable
 - ship the backend and shell first
 - keep all critical rules server-side
 - preserve offline/local operation
-

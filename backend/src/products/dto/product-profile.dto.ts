@@ -35,22 +35,22 @@ export class CameraProfileDto {
   @Min(0)
   exposure!: number;
 
-  @ApiProperty({ example: 2500 })
+  @ApiProperty({ example: 1500 })
   @IsInt()
   @Min(1)
   imageWidth!: number;
 
-  @ApiProperty({ example: 1000 })
+  @ApiProperty({ example: 500 })
   @IsInt()
   @Min(1)
   imageHeight!: number;
 
-  @ApiProperty({ example: 300 })
+  @ApiProperty({ example: 0 })
   @IsInt()
   @Min(0)
   offsetX!: number;
 
-  @ApiProperty({ example: 1400 })
+  @ApiProperty({ example: 0 })
   @IsInt()
   @Min(0)
   offsetY!: number;
@@ -151,10 +151,22 @@ export class CreateProductProfileDto {
   @Max(1)
   thresholdMns!: number;
 
+  @ApiPropertyOptional({ example: 20, default: 20 })
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Max(500)
+  rowThreshold?: number;
+
   @ApiPropertyOptional({ example: 'models/SL-40_150_0.998.pt' })
   @IsOptional()
   @IsString()
   modelPath?: string;
+
+  @ApiProperty({ example: false })
+  @IsOptional()
+  @IsBoolean()
+  rotateTestImageClockwise?: boolean;
 
   @ApiProperty({ example: true })
   @IsBoolean()

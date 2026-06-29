@@ -1,7 +1,7 @@
 "use client";
 
 import { AppShell } from "@/components/app-shell";
-import { OperatorRuntimePanel } from "@/components/operator/operator-runtime-panel";
+import { LineWorkspacePanel } from "@/components/operator/line-workspace-panel";
 
 export default function LinePage() {
   return (
@@ -9,7 +9,7 @@ export default function LinePage() {
       titleKey="operator.title"
       descriptionKey="operator.description"
     >
-      <OperatorRuntimePanel />
+      <LineWorkspacePanel />
     </AppShell>
   );
 }
