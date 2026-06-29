@@ -24,9 +24,24 @@ export type OperatorRoiStatus = "CHECKING" | "OK" | "NG";
 
 const previewAspectRatio = 3;
 const fallbackCameraWidth = 1500;
+const defaultRoiTextAnimationMs = 2100;
 
 function clamp(value: number, min: number, max: number) {
   return Math.min(Math.max(value, min), max);
+}
+
+function getTypewriterRevealTiming(text: string, durationMs: number) {
+  const characterCount = Math.max(1, text.length);
+  const characterDurationMs = Math.round(clamp(durationMs * 0.28, 120, 420));
+  const stepMs =
+    characterCount <= 1
+      ? 0
+      : Math.max(
+          18,
+          Math.floor((durationMs - characterDurationMs) / (characterCount - 1)),
+        );
+
+  return { characterDurationMs, stepMs };
 }
 
 function clampRegionCenter(
@@ -186,6 +201,7 @@ export type OperatorRoiEditorProps = {
   roiStatuses?: Record<number, OperatorRoiStatus>;
   roiDetectedTextLabels?: Record<number, string>;
   roiCheckingLabel?: string;
+  roiTextAnimationMs?: number;
   interactive?: boolean;
   previewImageSrc?: string;
   showClock?: boolean;
@@ -201,12 +217,17 @@ export function OperatorRoiEditor({
   roiStatuses,
   roiDetectedTextLabels,
   roiCheckingLabel,
+  roiTextAnimationMs,
   interactive = true,
   previewImageSrc = "",
   showClock = false,
   topRightControls,
 }: OperatorRoiEditorProps) {
   const { t } = useI18n();
+  const roiTextAnimationDurationMs = Math.max(
+    250,
+    Math.round(roiTextAnimationMs ?? defaultRoiTextAnimationMs),
+  );
   const previewRef = useRef<HTMLDivElement | null>(null);
   const [currentTime, setCurrentTime] = useState(() => new Date());
   const [selectedRegionIndex, setSelectedRegionIndex] = useState<number | null>(
@@ -562,6 +583,15 @@ export function OperatorRoiEditor({
           const bandLabel = isChecking
             ? (roiCheckingLabel ?? t("lineAnimationTest.checkingBand"))
             : roiStatus;
+          const detectedTextRevealTiming = detectedTextLabel
+            ? getTypewriterRevealTiming(
+                detectedTextLabel,
+                roiTextAnimationDurationMs,
+              )
+            : null;
+          const bandRevealTiming = bandLabel
+            ? getTypewriterRevealTiming(bandLabel, roiTextAnimationDurationMs)
+            : null;
           const statusTone = isChecking
             ? {
                 surface: "bg-amber-400/20",
@@ -676,13 +706,20 @@ export function OperatorRoiEditor({
                         : "operator-roi-detected-text-tag-unknown",
                   ].join(" ")}
                   title={detectedTextLabel}
+                  style={
+                    detectedTextRevealTiming
+                      ? ({
+                          ["--operator-type-duration" as string]: `${detectedTextRevealTiming.characterDurationMs}ms`,
+                        } as CSSProperties)
+                      : undefined
+                  }
                 >
                   {isChecking
                     ? (
                         <RandomRevealText
-                          key={`${region.index}-${detectedTextLabel}`}
+                          key={`${region.index}-${detectedTextLabel}-${roiTextAnimationDurationMs}`}
                           text={detectedTextLabel}
-                          durationMs={2100}
+                          durationMs={roiTextAnimationDurationMs}
                         />
                       )
                     : detectedTextLabel}
@@ -698,6 +735,14 @@ export function OperatorRoiEditor({
                         ? "operator-roi-status-band-ok"
                         : "operator-roi-status-band-ng",
                   ].join(" ")}
+                  style={
+                    isChecking && bandRevealTiming
+                      ? ({
+                          ["--operator-type-step" as string]: `${bandRevealTiming.stepMs}ms`,
+                          ["--operator-type-duration" as string]: `${bandRevealTiming.characterDurationMs}ms`,
+                        } as CSSProperties)
+                      : undefined
+                  }
                 >
                   {isChecking
                     ? bandLabel.split("").map((character, characterIndex) => (

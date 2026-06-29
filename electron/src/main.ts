@@ -627,11 +627,13 @@ function isIgnoredNavigationAbort(error: unknown, ignoreAborted: boolean) {
     return false;
   }
 
-  return (
-    error instanceof Error &&
-    "code" in error &&
-    (error as { code?: unknown }).code === "ERR_ABORTED"
-  );
+  if (!(error instanceof Error)) {
+    return false;
+  }
+
+  const navigationError = error as { code?: unknown; errno?: unknown };
+
+  return navigationError.code === "ERR_ABORTED" || navigationError.errno === -3;
 }
 
 function delay(ms: number) {
