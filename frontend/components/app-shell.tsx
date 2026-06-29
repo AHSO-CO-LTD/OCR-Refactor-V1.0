@@ -39,6 +39,13 @@ const menuItems = [
     groupKey: "navGroup.overview",
     allowedRoles: ["dev", "admin", "engineer"] as RoleCode[],
   },
+  {
+    labelKey: "nav.lineAnimationTest",
+    href: "/dashboard/line-animation-test",
+    permission: null,
+    groupKey: "navGroup.overview",
+    allowedRoles: ["dev", "admin", "engineer"] as RoleCode[],
+  },
   { labelKey: "nav.users", href: "/dashboard/users", permission: "user.manage", groupKey: "navGroup.management" },
   { labelKey: "nav.roles", href: "/dashboard/roles", permission: "role.manage", groupKey: "navGroup.management" },
   {

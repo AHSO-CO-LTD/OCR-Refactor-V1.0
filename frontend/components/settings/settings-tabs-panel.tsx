@@ -5,11 +5,18 @@ import { AiSettingsPanel } from "@/components/settings/ai-settings-panel";
 import { DesktopSettingsPanel } from "@/components/settings/desktop-settings-panel";
 import { LanguageSettingsPanel } from "@/components/settings/language-settings-panel";
 import { OcrTestSettingsPanel } from "@/components/settings/ocr-test-settings-panel";
+import { RuntimeTestSettingsPanel } from "@/components/settings/runtime-test-settings-panel";
 import { VolumeSettingsPanel } from "@/components/settings/volume-settings-panel";
 import { useI18n } from "@/lib/i18n";
 import { getStoredUser } from "@/lib/session";
 
-type SettingsTab = "desktop" | "language" | "volume" | "ai" | "ocr-test";
+type SettingsTab =
+  | "desktop"
+  | "language"
+  | "volume"
+  | "ai"
+  | "ocr-test"
+  | "runtime-test";
 
 export function SettingsTabsPanel() {
   const { t } = useI18n();
@@ -20,6 +27,7 @@ export function SettingsTabsPanel() {
     currentRole === "admin" ||
     currentRole === "engineer";
   const canManageOcrTestSettings = currentRole === "dev";
+  const canManageRuntimeTestSettings = currentRole === "dev";
   const [activeTab, setActiveTab] = useState<SettingsTab>("desktop");
 
   return (
@@ -54,6 +62,13 @@ export function SettingsTabsPanel() {
             onClick={() => setActiveTab("ocr-test")}
           />
         ) : null}
+        {canManageRuntimeTestSettings ? (
+          <TabButton
+            active={activeTab === "runtime-test"}
+            label={t("settings.tabRuntimeTest")}
+            onClick={() => setActiveTab("runtime-test")}
+          />
+        ) : null}
       </div>
 
       {activeTab === "desktop" ? <DesktopSettingsPanel /> : null}
@@ -62,6 +77,9 @@ export function SettingsTabsPanel() {
       {canManageAiSettings && activeTab === "ai" ? <AiSettingsPanel /> : null}
       {canManageOcrTestSettings && activeTab === "ocr-test" ? (
         <OcrTestSettingsPanel />
+      ) : null}
+      {canManageRuntimeTestSettings && activeTab === "runtime-test" ? (
+        <RuntimeTestSettingsPanel />
       ) : null}
     </div>
   );

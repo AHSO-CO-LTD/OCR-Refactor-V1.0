@@ -2,8 +2,6 @@
 
 import {
   Camera,
-  CheckCircle2,
-  CircleDot,
   Minus,
   Package,
   Plus,
@@ -31,9 +29,7 @@ import {
 } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
 import { getAccessToken } from "@/lib/session";
-import { getResultSoundLevel, getSoundSettings } from "@/lib/sound-settings";
 
-type ResultState = "OK" | "NG";
 type DataSource = "api" | "demo";
 
 const demoProducts: ProductProfile[] = [
@@ -75,60 +71,8 @@ const demoProducts: ProductProfile[] = [
   },
 ];
 
-function playInspectionSound(result: ResultState) {
-  const AudioContextClass =
-    window.AudioContext ??
-    (window as Window & { webkitAudioContext?: typeof AudioContext })
-      .webkitAudioContext;
-
-  if (!AudioContextClass) {
-    return;
-  }
-
-  const soundSettings = getSoundSettings();
-  const level = getResultSoundLevel(soundSettings, result);
-
-  if (level <= 0) {
-    return;
-  }
-
-  const context = new AudioContextClass();
-
-  const playBurst = (
-    startAt: number,
-    frequency: number,
-    duration: number,
-    oscillatorType: OscillatorType,
-    volume: number,
-  ) => {
-    const oscillator = context.createOscillator();
-    const gain = context.createGain();
-
-    oscillator.type = oscillatorType;
-    oscillator.frequency.setValueAtTime(frequency, startAt);
-    gain.gain.setValueAtTime(0.0001, startAt);
-    gain.gain.exponentialRampToValueAtTime(volume, startAt + 0.02);
-    gain.gain.exponentialRampToValueAtTime(0.0001, startAt + duration);
-    oscillator.connect(gain);
-    gain.connect(context.destination);
-    oscillator.start(startAt);
-    oscillator.stop(startAt + duration);
-  };
-
-  if (result === "OK") {
-    playBurst(context.currentTime, 880, 0.18, "sine", 0.16 * level);
-    window.setTimeout(() => void context.close(), 320);
-    return;
-  }
-
-  playBurst(context.currentTime, 150, 0.18, "sawtooth", 0.2 * level);
-  playBurst(context.currentTime + 0.24, 120, 0.22, "sawtooth", 0.2 * level);
-  window.setTimeout(() => void context.close(), 620);
-}
-
 export function OperatorRuntimePanel() {
   const { t } = useI18n();
-  const overlayTimeoutRef = useRef<number | null>(null);
   const batchCountRef = useRef(0);
   const batchQuantityRef = useRef(0);
   const [products, setProducts] = useState<ProductProfile[]>(demoProducts);
@@ -144,7 +88,6 @@ export function OperatorRuntimePanel() {
   const [batchDraft, setBatchDraft] = useState(String(demoProducts[0].batchSize));
   const [keypadOpen, setKeypadOpen] = useState(false);
   const [savingBatch, setSavingBatch] = useState(false);
-  const [overlayResult, setOverlayResult] = useState<ResultState | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -192,14 +135,6 @@ export function OperatorRuntimePanel() {
     };
   }, [t]);
 
-  useEffect(() => {
-    return () => {
-      if (overlayTimeoutRef.current) {
-        window.clearTimeout(overlayTimeoutRef.current);
-      }
-    };
-  }, []);
-
   const selectedProduct = useMemo(
     () =>
       products.find((product) => product.id === selectedProductId) ??
@@ -221,7 +156,6 @@ export function OperatorRuntimePanel() {
     imageSrc: livePreviewImageSrc,
   } = useConnectedCameraPreview(selectedProduct.camera.deviceName);
 
-  const roiCount = displayProduct.roiRegions.length;
   const safeBatchSize = Math.max(1, Number(batchSize) || 1);
 
   function handleRoiChange(newRois: typeof selectedProduct.roiRegions) {
@@ -347,42 +281,6 @@ export function OperatorRuntimePanel() {
     } finally {
       setSavingBatch(false);
     }
-  }
-
-  function triggerResult(result: ResultState) {
-    const countIncrement = roiCount;
-    const nextBatchQuantity = batchQuantityRef.current + countIncrement;
-    const batchIncrement = Math.floor(nextBatchQuantity / safeBatchSize);
-    const remainder = nextBatchQuantity % safeBatchSize;
-
-    setOverlayResult(result);
-    setScanCount(countIncrement);
-
-    if (result === "OK") {
-      setOkCount((current) => current + countIncrement);
-    } else {
-      setNgCount((current) => current + countIncrement);
-    }
-
-    batchCountRef.current += batchIncrement;
-    batchQuantityRef.current = remainder;
-    setBatchCount(batchCountRef.current);
-    setBatchQuantity(remainder);
-
-    try {
-      playInspectionSound(result);
-    } catch {
-      toast.warning(t("operator.soundBlocked"));
-    }
-
-    if (overlayTimeoutRef.current) {
-      window.clearTimeout(overlayTimeoutRef.current);
-    }
-
-    overlayTimeoutRef.current = window.setTimeout(
-      () => setOverlayResult(null),
-      result === "OK" ? 900 : 1250,
-    );
   }
 
   const actionButtons = (
@@ -603,32 +501,12 @@ export function OperatorRuntimePanel() {
             <OperatorRoiEditor
               product={displayProduct}
               onChange={handleRoiChange}
-              overlayResult={overlayResult}
+              overlayResult={null}
               okCount={okCount}
               ngCount={ngCount}
               interactive={false}
               previewImageSrc={livePreviewImageSrc}
               showClock
-              topRightControls={
-                <>
-                  <Button
-                    type="button"
-                    className="border-[#23a24d] bg-[#17b74f] text-white hover:bg-[#11923f]"
-                    onClick={() => triggerResult("OK")}
-                  >
-                    <CheckCircle2 className="h-4 w-4 text-white" />
-                    {t("operator.triggerOk")}
-                  </Button>
-                  <Button
-                    type="button"
-                    className="border-[#c43b30] bg-[#e53935] text-white hover:bg-[#c62828]"
-                    onClick={() => triggerResult("NG")}
-                  >
-                    <CircleDot className="h-4 w-4 text-white" />
-                    {t("operator.triggerNg")}
-                  </Button>
-                </>
-              }
             />
           </div>
         </div>
