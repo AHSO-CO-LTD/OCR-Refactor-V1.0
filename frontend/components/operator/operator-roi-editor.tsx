@@ -20,6 +20,7 @@ import { useI18n } from "@/lib/i18n";
 
 type Point = { x: number; y: number };
 type ResizeCorner = "nw" | "ne" | "sw" | "se";
+export type OperatorRoiStatus = "CHECKING" | "OK" | "NG";
 
 const previewAspectRatio = 3;
 const fallbackCameraWidth = 1500;
@@ -182,6 +183,9 @@ export type OperatorRoiEditorProps = {
   overlayResult: "OK" | "NG" | null;
   okCount: number;
   ngCount: number;
+  roiStatuses?: Record<number, OperatorRoiStatus>;
+  roiDetectedTextLabels?: Record<number, string>;
+  roiCheckingLabel?: string;
   interactive?: boolean;
   previewImageSrc?: string;
   showClock?: boolean;
@@ -194,6 +198,9 @@ export function OperatorRoiEditor({
   overlayResult,
   okCount,
   ngCount,
+  roiStatuses,
+  roiDetectedTextLabels,
+  roiCheckingLabel,
   interactive = true,
   previewImageSrc = "",
   showClock = false,
@@ -546,64 +553,100 @@ export function OperatorRoiEditor({
           />
         ) : null}
         <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(to_right,rgba(255,255,255,0.08)_1px,transparent_1px),linear-gradient(to_bottom,rgba(255,255,255,0.08)_1px,transparent_1px)] bg-[size:8.333%_20%]" />
-        {roiRegions.map((region) => (
-          <div
-            key={region.index}
-            onPointerDown={
-              interactive
-                ? (event) => handleRegionPointerDown(event, region.index)
-                : undefined
-            }
-            className={[
-              "absolute flex items-center justify-center outline-none",
-              interactive ? "cursor-move" : "cursor-default",
-            ].join(" ")}
-            style={{
-              left: `${((region.x - region.width / 2) / cameraWidth) * 100}%`,
-              top: `${((region.y - region.height / 2) / cameraHeight) * 100}%`,
-              width: `${(region.width / cameraWidth) * 100}%`,
-              height: `${(region.height / cameraHeight) * 100}%`,
-              transform: `rotate(${region.rotation}deg)`,
-              ["--roi-ui-scale" as string]: roiZoomCompensation,
-              ["--roi-border-width" as string]: `${2 * roiZoomCompensation}px`,
-              ["--roi-ring-width" as string]: `${4 * roiZoomCompensation}px`,
-              ["--roi-corner-size" as string]: `${10 * roiZoomCompensation}px`,
-              ["--roi-corner-offset" as string]: `${1 * roiZoomCompensation}px`,
-              ["--roi-line-height" as string]: `${4 * roiZoomCompensation}px`,
-              ["--roi-glow-height" as string]: `${88 * roiZoomCompensation}px`,
-              ["--roi-handle-size" as string]: `${12 * roiZoomCompensation}px`,
-              ["--roi-handle-offset" as string]: `${6 * roiZoomCompensation}px`,
-              ["--roi-rotate-size" as string]: `${24 * roiZoomCompensation}px`,
-              ["--roi-rotate-offset" as string]: `${28 * roiZoomCompensation}px`,
-              ["--roi-icon-size" as string]: `${12 * roiZoomCompensation}px`,
-              ["--roi-label-size" as string]: `${12 * roiZoomCompensation}px`,
-            } as CSSProperties}
-            title={`${t("products.roiIndex")} ${region.index}: ${region.x}, ${region.y}`}
-          >
+        {roiRegions.map((region) => {
+          const roiStatus = roiStatuses?.[region.index];
+          const isChecking = roiStatus === "CHECKING";
+          const isOk = roiStatus === "OK";
+          const isNg = roiStatus === "NG";
+          const detectedTextLabel = roiDetectedTextLabels?.[region.index];
+          const bandLabel = isChecking
+            ? (roiCheckingLabel ?? t("lineAnimationTest.checkingBand"))
+            : roiStatus;
+          const statusTone = isChecking
+            ? {
+                surface: "bg-amber-400/20",
+                border: "rgb(251 191 36 / 1)",
+                ring: "0 0 0 var(--roi-ring-width) rgb(251 191 36 / 0.28)",
+              }
+            : isOk
+              ? {
+                  surface: "bg-emerald-400/20",
+                  border: "rgb(34 197 94 / 1)",
+                  ring: "0 0 0 var(--roi-ring-width) rgb(34 197 94 / 0.28)",
+                }
+              : isNg
+                ? {
+                    surface: "bg-red-400/20",
+                    border: "rgb(248 113 113 / 1)",
+                    ring: "0 0 0 var(--roi-ring-width) rgb(248 113 113 / 0.3)",
+                  }
+                : null;
+
+          return (
             <div
+              key={region.index}
+              onPointerDown={
+                interactive
+                  ? (event) => handleRegionPointerDown(event, region.index)
+                  : undefined
+              }
               className={[
-                "pointer-events-none absolute inset-0 overflow-hidden text-cyan-100 transition-shadow",
-                overlappingRegionIndexes.has(region.index)
-                  ? "bg-red-400/20"
-                  : selectedRegionIndex === region.index
-                    ? "bg-amber-400/20"
-                    : "bg-cyan-400/20",
+                "absolute flex items-center justify-center outline-none",
+                interactive ? "cursor-move" : "cursor-default",
               ].join(" ")}
               style={{
-                borderStyle: "solid",
-                borderWidth: "var(--roi-border-width)",
-                borderColor: overlappingRegionIndexes.has(region.index)
-                  ? "rgb(248 113 113 / 1)"
-                  : selectedRegionIndex === region.index
-                    ? "rgb(252 211 77 / 1)"
-                    : "rgb(103 232 249 / 1)",
-                boxShadow: overlappingRegionIndexes.has(region.index)
-                  ? "0 0 0 var(--roi-ring-width) rgb(248 113 113 / 0.3)"
-                  : selectedRegionIndex === region.index
-                    ? "0 0 0 var(--roi-ring-width) rgb(252 211 77 / 0.25)"
-                    : "0 0 0 var(--roi-ring-width) rgb(6 182 212 / 0.1)",
-              }}
+                left: `${((region.x - region.width / 2) / cameraWidth) * 100}%`,
+                top: `${((region.y - region.height / 2) / cameraHeight) * 100}%`,
+                width: `${(region.width / cameraWidth) * 100}%`,
+                height: `${(region.height / cameraHeight) * 100}%`,
+                transform: `rotate(${region.rotation}deg)`,
+                ["--roi-ui-scale" as string]: roiZoomCompensation,
+                ["--roi-border-width" as string]: `${2 * roiZoomCompensation}px`,
+                ["--roi-ring-width" as string]: `${4 * roiZoomCompensation}px`,
+                ["--roi-corner-size" as string]: `${10 * roiZoomCompensation}px`,
+                ["--roi-corner-offset" as string]: `${1 * roiZoomCompensation}px`,
+                ["--roi-line-height" as string]: `${4 * roiZoomCompensation}px`,
+                ["--roi-glow-height" as string]: `${88 * roiZoomCompensation}px`,
+                ["--roi-handle-size" as string]: `${12 * roiZoomCompensation}px`,
+                ["--roi-handle-offset" as string]: `${6 * roiZoomCompensation}px`,
+                ["--roi-rotate-size" as string]: `${24 * roiZoomCompensation}px`,
+                ["--roi-rotate-offset" as string]: `${28 * roiZoomCompensation}px`,
+                ["--roi-icon-size" as string]: `${12 * roiZoomCompensation}px`,
+                ["--roi-label-size" as string]: `${12 * roiZoomCompensation}px`,
+                ["--roi-counter-rotation" as string]: `${-region.rotation}deg`,
+              } as CSSProperties}
+              title={`${t("products.roiIndex")} ${region.index}: ${region.x}, ${region.y}`}
             >
+              <div
+                className={[
+                  "pointer-events-none absolute inset-0 overflow-hidden text-cyan-100 transition-shadow",
+                  statusTone
+                    ? statusTone.surface
+                    : overlappingRegionIndexes.has(region.index)
+                      ? "bg-red-400/20"
+                      : selectedRegionIndex === region.index
+                        ? "bg-amber-400/20"
+                        : "bg-cyan-400/20",
+                ].join(" ")}
+                style={{
+                  borderStyle: "solid",
+                  borderWidth: "var(--roi-border-width)",
+                  borderColor:
+                    statusTone?.border ??
+                    (overlappingRegionIndexes.has(region.index)
+                      ? "rgb(248 113 113 / 1)"
+                      : selectedRegionIndex === region.index
+                        ? "rgb(252 211 77 / 1)"
+                        : "rgb(103 232 249 / 1)"),
+                  boxShadow:
+                    statusTone?.ring ??
+                    (overlappingRegionIndexes.has(region.index)
+                      ? "0 0 0 var(--roi-ring-width) rgb(248 113 113 / 0.3)"
+                      : selectedRegionIndex === region.index
+                        ? "0 0 0 var(--roi-ring-width) rgb(252 211 77 / 0.25)"
+                        : "0 0 0 var(--roi-ring-width) rgb(6 182 212 / 0.1)"),
+                }}
+              >
               <div className="operator-roi-scan-surface" />
               <div className="operator-roi-scan-frame">
                 <span className="operator-roi-scan-corner corner-tl" />
@@ -619,8 +662,61 @@ export function OperatorRoiEditor({
                 className="operator-roi-scan-line"
                 style={{ animationDelay: `${region.index * 180}ms` }}
               />
-            </div>
-            {interactive && selectedRegionIndex === region.index ? (
+              </div>
+              {detectedTextLabel ? (
+                <div
+                  className={[
+                    "operator-roi-detected-text-tag",
+                    isChecking
+                      ? "operator-roi-detected-text-tag-checking"
+                      : isOk
+                      ? "operator-roi-detected-text-tag-ok"
+                      : isNg
+                        ? "operator-roi-detected-text-tag-ng"
+                        : "operator-roi-detected-text-tag-unknown",
+                  ].join(" ")}
+                  title={detectedTextLabel}
+                >
+                  {isChecking
+                    ? (
+                        <RandomRevealText
+                          key={`${region.index}-${detectedTextLabel}`}
+                          text={detectedTextLabel}
+                          durationMs={2100}
+                        />
+                      )
+                    : detectedTextLabel}
+                </div>
+              ) : null}
+              {bandLabel ? (
+                <div
+                  className={[
+                    "operator-roi-status-band",
+                    isChecking
+                      ? "operator-roi-status-band-checking"
+                      : isOk
+                        ? "operator-roi-status-band-ok"
+                        : "operator-roi-status-band-ng",
+                  ].join(" ")}
+                >
+                  {isChecking
+                    ? bandLabel.split("").map((character, characterIndex) => (
+                        <span
+                          key={`${region.index}-${characterIndex}`}
+                          style={
+                            {
+                              ["--operator-type-index" as string]:
+                                characterIndex,
+                            } as CSSProperties
+                          }
+                        >
+                          {character === " " ? "\u00a0" : character}
+                        </span>
+                      ))
+                    : bandLabel}
+                </div>
+              ) : null}
+              {interactive && selectedRegionIndex === region.index ? (
               <div
                 className="absolute left-1/2 flex -translate-x-1/2 gap-1"
                 style={{ top: "calc(var(--roi-rotate-offset) * -1)" }}
@@ -651,8 +747,8 @@ export function OperatorRoiEditor({
               </div>
             ) : null}
 
-            {interactive && selectedRegionIndex === region.index
-              ? (["nw", "ne", "sw", "se"] as ResizeCorner[]).map((corner) => (
+              {interactive && selectedRegionIndex === region.index
+                ? (["nw", "ne", "sw", "se"] as ResizeCorner[]).map((corner) => (
                   <button
                     key={corner}
                     type="button"
@@ -690,35 +786,40 @@ export function OperatorRoiEditor({
                   />
                 ))
               : null}
-            <span
-              className="relative z-10 font-bold drop-shadow-[0_2px_6px_rgba(0,0,0,0.55)]"
-              style={{ fontSize: "var(--roi-label-size)" }}
-            >
-              {region.index}
-            </span>
-          </div>
-        ))}
+              <span
+                className="operator-roi-center-label"
+                style={{
+                  fontSize: "var(--roi-label-size)",
+                }}
+              >
+                {region.index}
+              </span>
+            </div>
+          );
+        })}
       </CameraPreviewTransformLayer>
       
-      <div className="absolute left-3 top-3 border border-white/15 bg-black/75 px-2 py-1 font-mono text-xs font-semibold text-white pointer-events-none">
-        {cameraWidth} x {cameraHeight}
-      </div>
-      {showClock ? (
-        <div className="absolute left-3 top-12 border border-cyan-300/30 bg-black/75 px-3 py-1.5 font-mono text-sm font-semibold text-cyan-100 pointer-events-none">
-          {t("operator.time")}: {clockLabel}
-        </div>
-      ) : null}
-      <div className="absolute right-3 top-3 z-20 flex max-w-[min(420px,calc(100%-96px))] flex-col items-end gap-2">
-        {topRightControls ? (
-          <div className="pointer-events-auto flex flex-wrap justify-end gap-2">
-            {topRightControls}
+      <div className="absolute left-3 right-3 top-3 z-20 flex flex-wrap items-start justify-between gap-2 pointer-events-none">
+        <div className="flex flex-wrap items-start gap-2">
+          <div className="border border-white/15 bg-black/75 px-2 py-1 font-mono text-xs font-semibold text-white">
+            {cameraWidth} x {cameraHeight}
           </div>
-        ) : null}
-        <div className="border border-white/15 bg-black px-3 py-2 text-right text-xs text-white pointer-events-none">
+          {showClock ? (
+            <div className="border border-cyan-300/30 bg-black/75 px-3 py-1.5 font-mono text-sm font-semibold text-cyan-100">
+              {t("operator.time")}: {clockLabel}
+            </div>
+          ) : null}
+        </div>
+        <div className="border border-white/15 bg-black px-3 py-2 text-right text-xs text-white">
           <div className="font-semibold">{t("operator.livePreview")}</div>
           <div className="text-white/70">{product.camera.deviceName}</div>
         </div>
       </div>
+      {topRightControls ? (
+        <div className="absolute right-3 top-16 z-20 pointer-events-auto flex flex-wrap justify-end gap-2">
+          {topRightControls}
+        </div>
+      ) : null}
       <div className="absolute bottom-3 left-3 right-3 flex flex-wrap items-center justify-between gap-2 pointer-events-none z-20">
         <div className="inline-flex items-center rounded-full border border-white/20 bg-black/70 px-2.5 py-0.5 text-xs font-semibold transition-colors text-white">
           {t("operator.currentProduct")}: {product.code}
@@ -748,5 +849,57 @@ export function OperatorRoiEditor({
         </div>
       ) : null}
     </div>
+  );
+}
+
+function RandomRevealText({
+  text,
+  durationMs,
+}: {
+  text: string;
+  durationMs: number;
+}) {
+  const [visibleIndexes, setVisibleIndexes] = useState<Set<number>>(
+    () => new Set(),
+  );
+
+  useEffect(() => {
+    if (!text) {
+      return;
+    }
+
+    const characterIndexes = Array.from({ length: text.length }, (_, index) => index);
+    const revealOrder = [...characterIndexes].sort(() => Math.random() - 0.5);
+    const stepMs = Math.max(45, Math.floor(durationMs / Math.max(1, text.length)));
+    const timerIds = revealOrder.map((characterIndex, revealIndex) =>
+      window.setTimeout(() => {
+        setVisibleIndexes((current) => {
+          const next = new Set(current);
+          next.add(characterIndex);
+          return next;
+        });
+      }, revealIndex * stepMs),
+    );
+    const completeTimerId = window.setTimeout(() => {
+      setVisibleIndexes(new Set(characterIndexes));
+    }, durationMs);
+
+    return () => {
+      timerIds.forEach((timerId) => window.clearTimeout(timerId));
+      window.clearTimeout(completeTimerId);
+    };
+  }, [durationMs, text]);
+
+  return (
+    <>
+      {text
+        .split("")
+        .filter((_character, index) => visibleIndexes.has(index))
+        .map((character, index) => (
+          <span key={`${character}-${index}`}>
+            {character === " " ? "\u00a0" : character}
+          </span>
+        ))}
+    </>
   );
 }
