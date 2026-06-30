@@ -2,6 +2,7 @@
 
 export type RuntimeTestSettings = {
   ignorePlcInDev: boolean;
+  operatorAutoLoginOnStartup: boolean;
   inspectionResultDelayMs: number;
 };
 
@@ -13,6 +14,8 @@ export const DEFAULT_INSPECTION_RESULT_DELAY_MS = 2000;
 
 export const defaultRuntimeTestSettings: RuntimeTestSettings = {
   ignorePlcInDev: true,
+  operatorAutoLoginOnStartup:
+    process.env.NEXT_PUBLIC_OPERATOR_AUTO_LOGIN_ENABLED !== "false",
   inspectionResultDelayMs: DEFAULT_INSPECTION_RESULT_DELAY_MS,
 };
 

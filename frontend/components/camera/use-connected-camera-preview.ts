@@ -19,7 +19,10 @@ type ConnectedCameraPreviewState = {
 
 const STATUS_POLL_MS = 4000;
 
-export function useConnectedCameraPreview(expectedDeviceName?: string) {
+export function useConnectedCameraPreview(
+  expectedDeviceName?: string,
+  enabled = true,
+) {
   const [state, setState] = useState<ConnectedCameraPreviewState>({
     connected: false,
     imageSrc: "",
@@ -57,6 +60,27 @@ export function useConnectedCameraPreview(expectedDeviceName?: string) {
       if (clearImage) {
         replaceImage("");
       }
+    }
+
+    if (!enabled) {
+      const resetTimer = window.setTimeout(() => {
+        setState({
+          connected: false,
+          imageSrc: "",
+          matchesExpectedCamera: false,
+          runtimeConnected: false,
+          runtimeDeviceName: "",
+        });
+        closeSocket();
+      }, 0);
+
+      return () => {
+        window.clearTimeout(resetTimer);
+        closeSocket();
+        if (imageUrlRef.current) {
+          URL.revokeObjectURL(imageUrlRef.current);
+        }
+      };
     }
 
     function openSocket() {
@@ -154,7 +178,7 @@ export function useConnectedCameraPreview(expectedDeviceName?: string) {
         URL.revokeObjectURL(imageUrlRef.current);
       }
     };
-  }, [expectedDeviceName]);
+  }, [enabled, expectedDeviceName]);
 
   return state;
 }

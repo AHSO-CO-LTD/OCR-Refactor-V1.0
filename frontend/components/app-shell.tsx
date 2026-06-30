@@ -5,10 +5,25 @@ import { usePathname, useRouter } from "next/navigation";
 import { ReactNode, useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { AccountMenu } from "@/components/account-menu";
+import { ConfirmModal } from "@/components/ui/confirm-modal";
 import type { RoleCode, SessionUser, SystemLicenseState } from "@/lib/api";
-import { getCameraStatus, getCurrentSession, listCameraDevices } from "@/lib/api";
+import {
+  ApiError,
+  connectCamera,
+  getCameraStatus,
+  getCurrentSession,
+  listCameraDevices,
+  listProductProfiles,
+} from "@/lib/api";
 import type { TranslationKey } from "@/lib/i18n";
 import { useI18n } from "@/lib/i18n";
+import {
+  clearOperatorStartupAutoLoginRequest,
+  getPostLoginRoute,
+  isExpectedRuntimeCamera,
+  selectOperatorStartupProduct,
+  shouldUseOperatorStartup,
+} from "@/lib/operator-startup-preferences";
 import {
   clearSession,
   getAccessToken,
@@ -91,11 +106,17 @@ const navGroups = [
 export function AppShell({ children }: AppShellProps) {
   const router = useRouter();
   const pathname = usePathname();
-  const { t } = useI18n();
+  const { apiError, t } = useI18n();
   const adminNavRef = useRef<HTMLDivElement | null>(null);
+  const cameraPrimeToastShownRef = useRef(false);
   const [user, setUser] = useState<SessionUser | null>(null);
   const [loading, setLoading] = useState(true);
   const [selectedAdminGroup, setSelectedAdminGroup] = useState<NavGroupKey | null>(null);
+  const [exitConfirmOpen, setExitConfirmOpen] = useState(false);
+  const [restartConfirmOpen, setRestartConfirmOpen] = useState(false);
+  const [shutdownLoading, setShutdownLoading] = useState(false);
+  const [shutdownMode, setShutdownMode] = useState<"exit" | "restart">("exit");
+  const [shutdownStatus, setShutdownStatus] = useState("");
   const handleLicenseLost = useCallback(
     (license: SystemLicenseState) => {
       clearSession();
@@ -124,8 +145,46 @@ export function AppShell({ children }: AppShellProps) {
         saveSession(token, nextUser);
         setUser(nextUser);
 
+        if (shouldUseOperatorStartup(nextUser) && pathname === "/dashboard") {
+          router.replace(getPostLoginRoute(nextUser));
+        }
+
         if (shouldPrimeCameraRuntime(nextUser)) {
-          void primeCameraRuntime(token);
+          void primeCameraRuntime(token)
+            .then((result) => {
+              if (cameraPrimeToastShownRef.current) {
+                return;
+              }
+
+              if (result === "connected") {
+                cameraPrimeToastShownRef.current = true;
+                toast.success(t("camera.startupConnected"));
+                return;
+              }
+
+              if (result === "noProduct") {
+                cameraPrimeToastShownRef.current = true;
+                toast.warning(t("camera.startupNoProduct"));
+                return;
+              }
+
+              if (result === "notConnected") {
+                cameraPrimeToastShownRef.current = true;
+                toast.warning(t("camera.startupConnectError"));
+              }
+            })
+            .catch((cause) => {
+              if (cameraPrimeToastShownRef.current) {
+                return;
+              }
+
+              cameraPrimeToastShownRef.current = true;
+              const message =
+                cause instanceof ApiError
+                  ? apiError(cause.message, "camera.startupConnectError")
+                  : t("camera.startupConnectError");
+              toast.warning(message);
+            });
         }
       })
       .catch(() => {
@@ -133,14 +192,27 @@ export function AppShell({ children }: AppShellProps) {
         router.replace("/login");
       })
       .finally(() => setLoading(false));
-  }, [router]);
+  }, [apiError, pathname, router, t]);
+
+  useEffect(() => {
+    const bridge = getDesktopBridge();
+
+    if (!bridge) {
+      return;
+    }
+
+    return bridge.onShutdownStatus((message) => {
+      setShutdownStatus(message);
+    });
+  }, []);
 
   function handleLogout() {
+    clearOperatorStartupAutoLoginRequest();
     clearSession();
     router.replace("/login");
   }
 
-  async function handleExitApp() {
+  function handleExitApp() {
     const bridge = getDesktopBridge();
 
     if (!bridge) {
@@ -148,8 +220,68 @@ export function AppShell({ children }: AppShellProps) {
       return;
     }
 
-    toast.loading(t("settings.exiting"));
-    await bridge.exitApp();
+    setExitConfirmOpen(true);
+  }
+
+  function handleRestartApp() {
+    const bridge = getDesktopBridge();
+
+    if (!bridge) {
+      toast.warning(t("settings.desktopOnly"));
+      return;
+    }
+
+    setRestartConfirmOpen(true);
+  }
+
+  async function confirmExitApp() {
+    const bridge = getDesktopBridge();
+
+    if (!bridge) {
+      toast.warning(t("settings.desktopOnly"));
+      setExitConfirmOpen(false);
+      return;
+    }
+
+    setExitConfirmOpen(false);
+    setShutdownLoading(true);
+    setShutdownMode("exit");
+    setShutdownStatus(t("settings.shutdownPreparing"));
+    const toastId = toast.loading(t("settings.exiting"));
+
+    try {
+      await bridge.exitApp();
+    } catch {
+      toast.dismiss(toastId);
+      toast.error(t("settings.exitError"));
+      setShutdownLoading(false);
+      setShutdownStatus("");
+    }
+  }
+
+  async function confirmRestartApp() {
+    const bridge = getDesktopBridge();
+
+    if (!bridge) {
+      toast.warning(t("settings.desktopOnly"));
+      setRestartConfirmOpen(false);
+      return;
+    }
+
+    setRestartConfirmOpen(false);
+    setShutdownLoading(true);
+    setShutdownMode("restart");
+    setShutdownStatus(t("settings.restartPreparing"));
+    const toastId = toast.loading(t("settings.restarting"));
+
+    try {
+      await bridge.restartApp();
+    } catch {
+      toast.dismiss(toastId);
+      toast.error(t("settings.restartError"));
+      setShutdownLoading(false);
+      setShutdownStatus("");
+    }
   }
 
   const visibleMenuItems = menuItems.filter(
@@ -331,6 +463,7 @@ export function AppShell({ children }: AppShellProps) {
                 donglePresent={license?.licensed === true && license.donglePresent === true}
                 onExitApp={handleExitApp}
                 onLogout={handleLogout}
+                onRestartApp={handleRestartApp}
                 user={user}
               />
             </div>
@@ -362,9 +495,118 @@ export function AppShell({ children }: AppShellProps) {
             </section>
           </div>
         )}
+        <ConfirmModal
+          open={exitConfirmOpen}
+          title={t("settings.exitConfirmTitle")}
+          description={t("settings.exitConfirmDescription")}
+          confirmLabel={t("settings.exitConfirm")}
+          cancelLabel={t("common.cancel")}
+          destructive
+          onConfirm={confirmExitApp}
+          onCancel={() => setExitConfirmOpen(false)}
+        />
+        <ConfirmModal
+          open={restartConfirmOpen}
+          title={t("settings.restartConfirmTitle")}
+          description={t("settings.restartConfirmDescription")}
+          confirmLabel={t("settings.restartConfirm")}
+          cancelLabel={t("common.cancel")}
+          onConfirm={confirmRestartApp}
+          onCancel={() => setRestartConfirmOpen(false)}
+        />
+        {shutdownLoading ? (
+          <ShutdownOverlay
+            detail={formatShutdownStatus(shutdownStatus, t)}
+            title={
+              shutdownMode === "restart"
+                ? t("settings.restartTitle")
+                : t("settings.shutdownTitle")
+            }
+            description={
+              shutdownMode === "restart"
+                ? t("settings.restartDescription")
+                : t("settings.shutdownDescription")
+            }
+          />
+        ) : null}
       </div>
     </main>
   );
+}
+
+function ShutdownOverlay({
+  description,
+  detail,
+  title,
+}: {
+  description: string;
+  detail: string;
+  title: string;
+}) {
+  return (
+    <div
+      className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/70 px-4 text-slate-950"
+      role="status"
+      aria-live="polite"
+      aria-busy="true"
+    >
+      <section className="w-full max-w-lg border border-slate-200 bg-white p-6">
+        <div className="flex items-start gap-4">
+          <div className="mt-1 h-9 w-9 shrink-0 animate-spin border-2 border-slate-300 border-t-cyan-700" />
+          <div className="min-w-0">
+            <h2 className="text-lg font-semibold">{title}</h2>
+            <p className="mt-2 text-sm leading-6 text-slate-600">{description}</p>
+            <p className="mt-4 border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-medium text-slate-700">
+              {detail}
+            </p>
+          </div>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function formatShutdownStatus(
+  status: string,
+  t: (key: string) => string,
+) {
+  if (status.includes("Preparing shutdown")) {
+    return t("settings.shutdownPreparing");
+  }
+
+  if (status.includes("Restarting app")) {
+    return t("settings.restartPreparing");
+  }
+
+  if (status.includes("frontend: stopping")) {
+    return t("settings.shutdownFrontendStopping");
+  }
+
+  if (status.includes("frontend: stopped")) {
+    return t("settings.shutdownFrontendStopped");
+  }
+
+  if (status.includes("backend: stopping")) {
+    return t("settings.shutdownBackendStopping");
+  }
+
+  if (status.includes("backend: stopped")) {
+    return t("settings.shutdownBackendStopped");
+  }
+
+  if (status.includes("device-tool: stopping")) {
+    return t("settings.shutdownToolStopping");
+  }
+
+  if (status.includes("device-tool: stopped")) {
+    return t("settings.shutdownToolStopped");
+  }
+
+  if (status.includes("Shutdown complete")) {
+    return t("settings.shutdownComplete");
+  }
+
+  return status || t("settings.shutdownPreparing");
 }
 
 function isActivePath(pathname: string, href: string) {
@@ -384,8 +626,32 @@ function shouldPrimeCameraRuntime(user: SessionUser) {
 }
 
 async function primeCameraRuntime(accessToken: string) {
-  await Promise.allSettled([
+  const [statusResponse, , productsResponse] = await Promise.all([
     getCameraStatus(accessToken),
     listCameraDevices(accessToken),
+    listProductProfiles(accessToken),
   ]);
+  const startupProduct = selectOperatorStartupProduct(productsResponse.data);
+
+  if (!startupProduct) {
+    return statusResponse.data.connected
+      ? ("alreadyConnected" as const)
+      : ("noProduct" as const);
+  }
+
+  if (
+    statusResponse.data.connected &&
+    isExpectedRuntimeCamera(
+      statusResponse.data.device_name,
+      startupProduct.camera.deviceName,
+    )
+  ) {
+    return "alreadyConnected" as const;
+  }
+
+  const connectedStatus = await connectCamera(accessToken, startupProduct.camera);
+
+  return connectedStatus.data.connected
+    ? ("connected" as const)
+    : ("notConnected" as const);
 }

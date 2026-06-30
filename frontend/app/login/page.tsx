@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import {
@@ -14,6 +14,13 @@ import { useVirtualKeyboard } from "@/components/ui/virtual-keyboard";
 import { ApiError, getCurrentSession, login } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
 import {
+  clearOperatorStartupAutoLoginRequest,
+  getPostLoginRoute,
+  hasOperatorStartupAutoLoginRequest,
+  OPERATOR_AUTO_LOGIN_PASSWORD,
+  OPERATOR_AUTO_LOGIN_USERNAME,
+} from "@/lib/operator-startup-preferences";
+import {
   clearSession,
   getAccessToken,
   saveSession,
@@ -23,10 +30,15 @@ export default function LoginPage() {
   const router = useRouter();
   const { apiError, t } = useI18n();
   const { isKeyboardOpen } = useVirtualKeyboard();
+  const autoLoginAttemptedRef = useRef(false);
+  const [startupAutoLoginRequested] = useState(() =>
+    hasOperatorStartupAutoLoginRequest(),
+  );
   const [username, setUsername] = useState("admin");
   const [password, setPassword] = useState("admin123");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [sessionChecked, setSessionChecked] = useState(false);
   const [gateStatus, setGateStatus] = useState<LoginGateStatus>({
     checking: true,
     apiConnected: false,
@@ -34,21 +46,106 @@ export default function LoginPage() {
   });
 
   useEffect(() => {
+    let cancelled = false;
     const token = getAccessToken();
 
+    function markSessionChecked() {
+      window.setTimeout(() => {
+        if (!cancelled) {
+          setSessionChecked(true);
+        }
+      }, 0);
+    }
+
     if (!token) {
-      return;
+      markSessionChecked();
+      return () => {
+        cancelled = true;
+      };
     }
 
     getCurrentSession(token)
       .then((response) => {
+        if (cancelled) {
+          return;
+        }
+
+        if (startupAutoLoginRequested && response.data.user.role !== "operator") {
+          clearSession();
+          markSessionChecked();
+          return;
+        }
+
+        if (startupAutoLoginRequested) {
+          clearOperatorStartupAutoLoginRequest();
+        }
+
         saveSession(token, response.data.user);
-        router.replace("/dashboard");
+        router.replace(getPostLoginRoute(response.data.user));
       })
       .catch(() => {
+        if (cancelled) {
+          return;
+        }
+
         clearSession();
+        markSessionChecked();
       });
-  }, [router]);
+
+    return () => {
+      cancelled = true;
+    };
+  }, [router, startupAutoLoginRequested]);
+
+  useEffect(() => {
+    const hasExistingToken = Boolean(getAccessToken());
+
+    if (
+      !sessionChecked ||
+      hasExistingToken ||
+      loading ||
+      gateStatus.checking ||
+      !gateStatus.licenseReady ||
+      !startupAutoLoginRequested ||
+      autoLoginAttemptedRef.current
+    ) {
+      return;
+    }
+
+    autoLoginAttemptedRef.current = true;
+    setLoading(true);
+    setError("");
+
+    login(OPERATOR_AUTO_LOGIN_USERNAME, OPERATOR_AUTO_LOGIN_PASSWORD)
+      .then((response) => {
+        saveSession(response.data.accessToken, response.data.user);
+        clearOperatorStartupAutoLoginRequest();
+        toast.success(t("auth.operatorAutoLoginSuccess"));
+        router.replace(getPostLoginRoute(response.data.user));
+      })
+      .catch((cause) => {
+        const message =
+          cause instanceof ApiError
+            ? apiError(cause.message, "auth.operatorAutoLoginFailed")
+            : t("auth.operatorAutoLoginFailed");
+
+        setError(message);
+        toast.warning(message);
+      })
+      .finally(() => {
+        clearOperatorStartupAutoLoginRequest();
+        setLoading(false);
+      });
+  }, [
+    apiError,
+    gateStatus.checking,
+    gateStatus.licenseReady,
+    loading,
+    router,
+    sessionChecked,
+    startupAutoLoginRequested,
+    t,
+  ]);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -65,9 +162,10 @@ export default function LoginPage() {
 
     try {
       const response = await login(username, password);
+      clearOperatorStartupAutoLoginRequest();
       saveSession(response.data.accessToken, response.data.user);
       toast.success(t("auth.loginSuccess"));
-      router.replace("/dashboard");
+      router.replace(getPostLoginRoute(response.data.user));
     } catch (cause) {
       const message =
         cause instanceof ApiError

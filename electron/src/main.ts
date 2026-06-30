@@ -40,6 +40,8 @@ let mainWindow: BrowserWindow | null = null;
 let terminalWindow: BrowserWindow | null = null;
 let serviceManager: ServiceManager | null = null;
 let isQuitting = false;
+let shutdownPromise: Promise<{ success: boolean }> | null = null;
+let restartPromise: Promise<{ success: boolean }> | null = null;
 let windowSettings: DesktopWindowSettings = defaultWindowSettings;
 let testStorageSettings: DesktopTestStorageSettings = defaultTestStorageSettings;
 
@@ -185,9 +187,10 @@ function registerDesktopIpc() {
     };
   });
   ipcMain.handle("desktop:exit-app", () => {
-    isQuitting = false;
-    app.quit();
-    return { success: true };
+    return requestAppShutdown();
+  });
+  ipcMain.handle("desktop:restart-app", () => {
+    return requestAppRestart();
   });
 }
 
@@ -472,9 +475,63 @@ app.on("before-quit", (event) => {
   }
 
   event.preventDefault();
-  isQuitting = true;
-  void serviceManager.stopOwned().finally(() => app.quit());
+  void requestAppShutdown();
 });
+
+async function requestAppShutdown() {
+  if (shutdownPromise) {
+    return shutdownPromise;
+  }
+
+  if (restartPromise) {
+    return restartPromise;
+  }
+
+  shutdownPromise = shutdownAndQuit();
+  return shutdownPromise;
+}
+
+async function requestAppRestart() {
+  if (restartPromise) {
+    return restartPromise;
+  }
+
+  if (shutdownPromise) {
+    return shutdownPromise;
+  }
+
+  restartPromise = shutdownAndRestart();
+  return restartPromise;
+}
+
+async function shutdownAndQuit() {
+  isQuitting = true;
+  reportShutdownStatus("Preparing shutdown...");
+
+  try {
+    await serviceManager?.stopOwned(reportShutdownStatus);
+    reportShutdownStatus("Shutdown complete.");
+  } finally {
+    app.quit();
+  }
+
+  return { success: true };
+}
+
+async function shutdownAndRestart() {
+  isQuitting = true;
+  reportShutdownStatus("Restarting app...");
+
+  try {
+    await serviceManager?.stopOwned(reportShutdownStatus);
+    reportShutdownStatus("Restarting app...");
+  } finally {
+    app.relaunch();
+    app.exit(0);
+  }
+
+  return { success: true };
+}
 
 function escapeHtml(value: string) {
   return value
@@ -634,6 +691,22 @@ function isIgnoredNavigationAbort(error: unknown, ignoreAborted: boolean) {
   const navigationError = error as { code?: unknown; errno?: unknown };
 
   return navigationError.code === "ERR_ABORTED" || navigationError.errno === -3;
+}
+
+function reportShutdownStatus(message: string) {
+  showTerminalLog(`[shutdown] ${message}`);
+
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    return;
+  }
+
+  try {
+    if (!mainWindow.webContents.isDestroyed()) {
+      mainWindow.webContents.send("desktop-shutdown-status", message);
+    }
+  } catch (e) {
+    console.error("Error sending shutdown status:", e);
+  }
 }
 
 function delay(ms: number) {

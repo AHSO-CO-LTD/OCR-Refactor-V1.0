@@ -8,15 +8,20 @@ import {
   useState,
 } from "react";
 import {
+  Camera,
   FolderOpen,
   FileImage,
   Pause,
   Play,
+  Package,
   RotateCcw,
   ScanLine,
   Square,
+  Video,
+  Zap,
 } from "lucide-react";
 import { toast } from "sonner";
+import { useConnectedCameraPreview } from "@/components/camera/use-connected-camera-preview";
 import {
   OperatorRoiEditor,
   type OperatorRoiStatus,
@@ -70,6 +75,9 @@ type AnimationBatchSummary = {
   ngImages: number;
   unknownImages: number;
   errorImages: number;
+};
+type LineAnimationTestPanelProps = {
+  layout?: "animation" | "operator-test";
 };
 
 const detectDelayMs = 300;
@@ -176,7 +184,9 @@ function isImageFile(file: File) {
   return file.type.startsWith("image/") || /\.(bmp|gif|jpe?g|png|tif?f|webp)$/i.test(file.name);
 }
 
-export function LineAnimationTestPanel() {
+export function LineAnimationTestPanel({
+  layout = "animation",
+}: LineAnimationTestPanelProps = {}) {
   const { t, apiError } = useI18n();
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const folderInputRef = useRef<HTMLInputElement | null>(null);
@@ -322,6 +332,15 @@ export function LineAnimationTestPanel() {
     () => ({ ...product, roiRegions: activeRegions }),
     [activeRegions, product],
   );
+  const {
+    imageSrc: livePreviewImageSrc,
+    connected: livePreviewConnected,
+    matchesExpectedCamera: livePreviewMatchesExpectedCamera,
+  } = useConnectedCameraPreview(
+    product.camera.deviceName,
+    layout === "operator-test",
+  );
+  const operatorPreviewImageSrc = selectedImageUrl || livePreviewImageSrc;
 
   const overlayResult =
     animationState === "OK" || animationState === "NG" ? animationState : null;
@@ -1141,6 +1160,299 @@ export function LineAnimationTestPanel() {
     };
   }
 
+  if (layout === "operator-test") {
+    const operatorTestActionButtons = (
+      <>
+        <Button
+          type="button"
+          variant="outline"
+          disabled={batchTesting}
+          className="operator-line-action-button h-14 border-[#1e293b] bg-[#9fc3eb] text-base font-semibold text-slate-950 opacity-100 hover:bg-[#8fb8e6] disabled:opacity-70"
+          onClick={() => fileInputRef.current?.click()}
+        >
+          <FileImage className="h-5 w-5" />
+          <span className="truncate">
+            {selectedImageName || t("lineAnimationTest.chooseImage")}
+          </span>
+        </Button>
+        <Button
+          type="button"
+          variant="outline"
+          disabled={batchTesting}
+          className="operator-line-action-button h-14 border-[#1e293b] bg-[#9fc3eb] text-base font-semibold text-slate-950 opacity-100 hover:bg-[#8fb8e6] disabled:opacity-70"
+          onClick={() => folderInputRef.current?.click()}
+        >
+          <FolderOpen className="h-5 w-5" />
+          <span className="truncate">
+            {batchFolderName
+              ? formatMessage(t("lineTest.folderSelected"), {
+                  folder: batchFolderName,
+                  count: batchFiles.length,
+                })
+              : t("lineTest.selectFolder")}
+          </span>
+        </Button>
+        <Button
+          type="button"
+          variant="outline"
+          disabled={isBusy || !selectedImageBase64}
+          className="operator-line-action-button h-14 border-[#1e293b] bg-[#9fc3eb] text-base font-semibold text-slate-950 opacity-100 hover:bg-[#8fb8e6] disabled:opacity-70"
+          onClick={() => void runRealImageTest()}
+        >
+          <Camera className="h-5 w-5" />
+          {testingRealImage
+            ? t("lineAnimationTest.realTesting")
+            : t("lineAnimationTest.runReal")}
+        </Button>
+        {batchTesting ? (
+          <Button
+            type="button"
+            variant="outline"
+            className="operator-line-action-button h-14 border-[#1e293b] bg-[#9fc3eb] text-base font-semibold text-slate-950 opacity-100 hover:bg-[#8fb8e6]"
+            onClick={() => {
+              cancelBatchTestRef.current = true;
+            }}
+          >
+            <Pause className="h-5 w-5" />
+            {t("lineTest.stopBatchTest")}
+          </Button>
+        ) : (
+          <Button
+            type="button"
+            variant="outline"
+            disabled={isBusy || batchFiles.length === 0}
+            className="operator-line-action-button h-14 border-[#1e293b] bg-[#9fc3eb] text-base font-semibold text-slate-950 opacity-100 hover:bg-[#8fb8e6] disabled:opacity-70"
+            onClick={() => void runBatchFolderTest()}
+          >
+            <Zap className="h-5 w-5" />
+            {savingBatchReport
+              ? t("lineTest.batchReportSaving")
+              : t("lineAnimationTest.runFolder")}
+          </Button>
+        )}
+        <Button
+          type="button"
+          variant="outline"
+          className="operator-line-action-button h-14 border-[#1e293b] bg-[#9fc3eb] text-base font-semibold text-slate-950 opacity-100 hover:bg-[#8fb8e6]"
+          onClick={() =>
+            toast.info(
+              selectedImageName
+                ? selectedImageName
+                : livePreviewConnected && livePreviewMatchesExpectedCamera
+                  ? t("operator.cameraOn")
+                  : t("operator.cameraOff"),
+            )
+          }
+        >
+          <Video className="h-5 w-5" />
+          {t(`lineAnimationTest.state${animationState}`)}
+        </Button>
+        <Button
+          type="button"
+          variant="outline"
+          disabled={batchTesting}
+          className="operator-line-action-button h-14 border-[#1e293b] bg-[#9fc3eb] text-base font-semibold text-slate-950 hover:bg-[#8fb8e6] disabled:opacity-70"
+          onClick={() => resetScenario()}
+        >
+          <RotateCcw className="h-5 w-5" />
+          {t("operator.resetCounter")}
+        </Button>
+      </>
+    );
+
+    return (
+      <div className="grid h-full min-w-0 min-h-0 grid-rows-[auto_minmax(0,1fr)_auto] gap-3">
+        <Card className="operator-line-top-card border-[#86a8cf] bg-[#cfdff2] shadow-none">
+          <CardContent className="operator-line-top-content grid gap-4 p-4 min-[980px]:grid-cols-[340px_minmax(0,1fr)]">
+            <div className="operator-line-product-box rounded-sm border border-[#9db7d8] bg-[#d9e6f5] p-4">
+              <div className="mb-3 flex items-center justify-between gap-3">
+                <CardTitle className="flex items-center gap-2 text-xl font-bold text-slate-950">
+                  <Package className="h-5 w-5 text-[#274d7d]" />
+                  {t("operator.productToday")}
+                </CardTitle>
+                <Badge
+                  className={
+                    dataSource === "api"
+                      ? "border-[#8bb96d] bg-[#eef8e2] text-[#355f13]"
+                      : "border-[#d9a04f] bg-[#fff1d8] text-[#8a4b00]"
+                  }
+                >
+                  {dataSource === "api"
+                    ? t("operator.sourceApi")
+                    : t("operator.sourceDemo")}
+                </Badge>
+              </div>
+
+              <div className="grid gap-3">
+                <div className="grid gap-2">
+                  <label className="text-sm font-semibold text-[#274d7d]">
+                    {t("products.code")}
+                  </label>
+                  <Select
+                    aria-label={t("products.code")}
+                    value={selectedProductId}
+                    disabled={loadingProducts || isBusy}
+                    className="h-11 border-[#9db7d8] bg-white text-base"
+                    onChange={(event) => handleProductChange(event.target.value)}
+                  >
+                    {products.map((item) => (
+                      <option key={item.id} value={item.id}>
+                        {item.code} - {item.name}
+                      </option>
+                    ))}
+                  </Select>
+                </div>
+
+                <div className="grid gap-2">
+                  <label className="text-sm font-semibold text-[#274d7d]">
+                    {t("lineAnimationTest.testImage")}
+                  </label>
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    onChange={handleImageChange}
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="h-11 justify-start border-[#9db7d8] bg-white text-slate-700 hover:bg-slate-50"
+                    disabled={batchTesting}
+                    onClick={() => fileInputRef.current?.click()}
+                  >
+                    <FileImage className="h-4 w-4" />
+                    <span className="truncate">
+                      {selectedImageName || t("lineAnimationTest.chooseImage")}
+                    </span>
+                  </Button>
+                </div>
+
+                <div className="grid gap-2">
+                  <label className="text-sm font-semibold text-[#274d7d]">
+                    {t("lineTest.selectFolder")}
+                  </label>
+                  <input
+                    ref={folderInputRef}
+                    type="file"
+                    accept="image/*"
+                    multiple
+                    className="hidden"
+                    onChange={handleFolderChange}
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="h-11 justify-start border-[#9db7d8] bg-white text-slate-700 hover:bg-slate-50"
+                    disabled={batchTesting}
+                    onClick={() => folderInputRef.current?.click()}
+                  >
+                    <FolderOpen className="h-4 w-4" />
+                    <span className="truncate">
+                      {batchFolderName
+                        ? formatMessage(t("lineTest.folderSelected"), {
+                            folder: batchFolderName,
+                            count: batchFiles.length,
+                          })
+                        : t("lineTest.selectFolder")}
+                    </span>
+                  </Button>
+                </div>
+
+                {batchSummary ? (
+                  <div className="flex flex-wrap gap-2">
+                    <Badge className="border-[#9db7d8] bg-[#edf5ff] text-[#274d7d]">
+                      {formatMessage(t("lineTest.batchReportId"), {
+                        reportId: batchSummary.reportId,
+                      })}
+                    </Badge>
+                    <Badge className="border-slate-200 bg-white text-slate-700">
+                      {batchSummary.folderName}
+                    </Badge>
+                  </div>
+                ) : null}
+              </div>
+            </div>
+
+            <div className="operator-line-stats-shell grid gap-3 min-[860px]:grid-cols-[minmax(0,1fr)_280px]">
+              <div className="operator-line-stats-grid grid gap-3 min-[760px]:grid-cols-2">
+                <OperatorMetricTile
+                  label={t("operator.currentProduct")}
+                  value={product.code}
+                  className="operator-line-info-tile border-[#f0a53b] bg-white text-slate-950"
+                />
+                <OperatorMetricTile
+                  label={t("operator.quantity")}
+                  value={quantity}
+                  className="operator-line-info-tile border-[#f0a53b] bg-white text-slate-950"
+                />
+                <OperatorMetricTile
+                  label={t("operator.count")}
+                  value={count}
+                  className="operator-line-info-tile border-[#f0a53b] bg-white text-slate-950"
+                />
+                <OperatorMetricTile
+                  label={t("operator.batch")}
+                  value={batch}
+                  className="operator-line-info-tile border-[#f0a53b] bg-white text-slate-950"
+                />
+              </div>
+
+              <div className="operator-line-status-grid grid gap-3 min-[520px]:grid-cols-2 min-[860px]:grid-cols-1">
+                <OperatorMetricTile
+                  label={t("operator.ok")}
+                  value={okCount}
+                  className="operator-line-info-tile border-[#0f9f47] bg-[#15b455] text-white"
+                  valueClassName="operator-line-okng-value text-6xl min-[860px]:text-7xl"
+                />
+                <OperatorMetricTile
+                  label={t("operator.ng")}
+                  value={ngCount}
+                  className="operator-line-info-tile border-[#d92d20] bg-[#ef3e36] text-white"
+                  valueClassName="operator-line-okng-value text-6xl min-[860px]:text-7xl"
+                />
+              </div>
+            </div>
+
+            <div className="operator-line-top-actions rounded-sm border border-[#9db7d8] bg-[#d9e6f5] p-4">
+              <div className="grid gap-2">
+                {operatorTestActionButtons}
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className="operator-line-preview-card flex min-h-0 overflow-hidden border-[#86a8cf] bg-[#9fc3eb] shadow-none">
+          <div className="flex min-h-0 flex-1 flex-col">
+            <div className="operator-line-preview-heading shrink-0 border-b border-[#86a8cf] px-4 py-3 text-center text-3xl font-bold text-[#2270c6]">
+              {t("operator.referenceImage")}
+            </div>
+            <div className="operator-line-preview-body min-h-0 flex-1 p-4">
+              <OperatorRoiEditor
+                product={displayProduct}
+                onChange={() => undefined}
+                overlayResult={overlayResult}
+                okCount={okCount}
+                ngCount={ngCount}
+                roiStatuses={roiStatuses}
+                roiDetectedTextLabels={roiDetectedTextLabels}
+                roiCheckingLabel={t("lineAnimationTest.checkingBand")}
+                roiTextAnimationMs={inspectionResultDelayMs}
+                interactive={false}
+                previewImageSrc={operatorPreviewImageSrc}
+                showClock
+              />
+            </div>
+          </div>
+        </Card>
+
+        <div className="operator-line-footer-actions grid shrink-0 gap-2 min-[980px]:grid-cols-6">
+          {operatorTestActionButtons}
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="grid min-w-0 gap-4 pb-4">
       <Card className="border-[#86a8cf] bg-white shadow-none">
@@ -1430,6 +1742,32 @@ function MetricTile({ label, value }: { label: string; value: number }) {
     <div className="border border-slate-200 bg-slate-50 p-4">
       <div className="text-sm font-semibold uppercase text-slate-500">{label}</div>
       <div className="mt-2 text-3xl font-bold text-slate-950">{value}</div>
+    </div>
+  );
+}
+
+function OperatorMetricTile({
+  label,
+  value,
+  className,
+  valueClassName,
+}: {
+  label: string;
+  value: string | number;
+  className?: string;
+  valueClassName?: string;
+}) {
+  return (
+    <div className={["rounded-sm border-2 p-5", className].join(" ")}>
+      <div className="text-sm font-semibold uppercase tracking-normal">{label}</div>
+      <div
+        className={[
+          "mt-3 truncate text-4xl font-bold leading-none",
+          valueClassName ?? "",
+        ].join(" ")}
+      >
+        {value}
+      </div>
     </div>
   );
 }

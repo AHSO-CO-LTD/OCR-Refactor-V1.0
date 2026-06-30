@@ -472,6 +472,42 @@ export async function getCurrentInspection(accessToken: string) {
   return (await response.json()) as { data: CurrentInspectionState | null };
 }
 
+export async function startInspection(
+  accessToken: string,
+  productId: string,
+  operatorNote?: string,
+) {
+  const response = await fetch(`${API_BASE_URL}/inspections/start`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ productId, operatorNote }),
+  });
+
+  if (!response.ok) {
+    throw new ApiError(await parseError(response), response.status);
+  }
+
+  return (await response.json()) as { data: CurrentInspectionState };
+}
+
+export async function stopInspection(accessToken: string, jobId: string) {
+  const response = await fetch(`${API_BASE_URL}/inspections/${jobId}/stop`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+    },
+  });
+
+  if (!response.ok) {
+    throw new ApiError(await parseError(response), response.status);
+  }
+
+  return (await response.json()) as { data: CurrentInspectionState };
+}
+
 export async function testInspectionImage(
   accessToken: string,
   productId: string,

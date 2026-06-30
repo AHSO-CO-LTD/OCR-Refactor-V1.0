@@ -93,6 +93,9 @@ const translations = {
     "auth.password": "Password",
     "auth.login": "Login",
     "auth.loginSuccess": "Signed in successfully.",
+    "auth.operatorAutoLoginSuccess": "Operator account signed in automatically.",
+    "auth.operatorAutoLoginFailed":
+      "Cannot sign in to the operator account automatically.",
     "auth.checking": "Checking...",
     "auth.signingIn": "Signing in...",
     "auth.connectionError": "Cannot connect to local API service.",
@@ -204,6 +207,33 @@ const translations = {
     "settings.windowSize": "Window size",
     "settings.exitApp": "Exit app",
     "settings.exiting": "Closing local app...",
+    "settings.exitError": "Cannot close the local app cleanly.",
+    "settings.exitConfirmTitle": "Confirm exit",
+    "settings.exitConfirmDescription":
+      "Are you sure you want to exit the app?",
+    "settings.exitConfirm": "Exit app",
+    "settings.restartApp": "Restart app",
+    "settings.restarting": "Restarting local app...",
+    "settings.restartError": "Cannot restart the local app cleanly.",
+    "settings.restartConfirmTitle": "Confirm restart",
+    "settings.restartConfirmDescription":
+      "The app will close local services and open again. Do you want to restart now?",
+    "settings.restartConfirm": "Restart app",
+    "settings.restartTitle": "Restarting local app",
+    "settings.restartDescription":
+      "Please wait while the app restarts local services.",
+    "settings.restartPreparing": "Preparing restart...",
+    "settings.shutdownTitle": "Shutting down local services",
+    "settings.shutdownDescription":
+      "Please wait while the app closes local services in order.",
+    "settings.shutdownPreparing": "Preparing shutdown...",
+    "settings.shutdownFrontendStopping": "Stopping frontend service...",
+    "settings.shutdownFrontendStopped": "Frontend service stopped.",
+    "settings.shutdownBackendStopping": "Stopping backend service...",
+    "settings.shutdownBackendStopped": "Backend service stopped.",
+    "settings.shutdownToolStopping": "Stopping camera and Device Tool service...",
+    "settings.shutdownToolStopped": "Device Tool service stopped.",
+    "settings.shutdownComplete": "Shutdown complete.",
     "settings.languageTitle": "Language",
     "settings.languageSelector": "Application language",
     "settings.languageDescription":
@@ -430,6 +460,10 @@ const translations = {
     "camera.selectProductFirst": "Select a product profile first.",
     "camera.loadError": "Cannot load camera context.",
     "camera.connectError": "Cannot connect camera.",
+    "camera.startupConnected": "Camera connected during app startup.",
+    "camera.startupConnectError": "Cannot connect camera during app startup.",
+    "camera.startupNoProduct":
+      "No active USB camera product profile is available for startup connection.",
     "camera.grabError": "Cannot grab camera frame.",
     "camera.genericError": "Camera action failed.",
     "camera.errorDeviceNotFound":
@@ -911,6 +945,33 @@ const translations = {
     "settings.windowSize": "Kích thước cửa sổ",
     "settings.exitApp": "Thoát app",
     "settings.exiting": "Đang đóng app local...",
+    "settings.exitError": "Không thể đóng app local sạch sẽ.",
+    "settings.exitConfirmTitle": "Xác nhận thoát app",
+    "settings.exitConfirmDescription":
+      "Bạn có chắc chắn muốn thoát app không?",
+    "settings.exitConfirm": "Thoát app",
+    "settings.restartApp": "Khởi động lại app",
+    "settings.restarting": "Đang khởi động lại app local...",
+    "settings.restartError": "Không thể khởi động lại app local sạch sẽ.",
+    "settings.restartConfirmTitle": "Xác nhận khởi động lại",
+    "settings.restartConfirmDescription":
+      "App sẽ đóng các dịch vụ local rồi mở lại. Bạn có muốn khởi động lại ngay không?",
+    "settings.restartConfirm": "Khởi động lại app",
+    "settings.restartTitle": "Đang khởi động lại app local",
+    "settings.restartDescription":
+      "Vui lòng chờ trong khi app khởi động lại các dịch vụ local.",
+    "settings.restartPreparing": "Đang chuẩn bị khởi động lại...",
+    "settings.shutdownTitle": "Đang tắt dịch vụ local",
+    "settings.shutdownDescription":
+      "Vui lòng chờ trong khi app đóng các dịch vụ local theo đúng thứ tự.",
+    "settings.shutdownPreparing": "Đang chuẩn bị tắt app...",
+    "settings.shutdownFrontendStopping": "Đang tắt dịch vụ frontend...",
+    "settings.shutdownFrontendStopped": "Đã tắt dịch vụ frontend.",
+    "settings.shutdownBackendStopping": "Đang tắt dịch vụ backend...",
+    "settings.shutdownBackendStopped": "Đã tắt dịch vụ backend.",
+    "settings.shutdownToolStopping": "Đang tắt camera và Device Tool...",
+    "settings.shutdownToolStopped": "Đã tắt Device Tool.",
+    "settings.shutdownComplete": "Đã tắt xong.",
     "settings.languageTitle": "Ngôn ngữ",
     "settings.languageSelector": "Ngôn ngữ giao diện",
     "settings.languageDescription":
@@ -1082,6 +1143,10 @@ const translations = {
     "camera.selectProductFirst": "Vui lòng chọn profile sản phẩm trước.",
     "camera.loadError": "Không thể tải ngữ cảnh camera.",
     "camera.connectError": "Không thể kết nối camera.",
+    "camera.startupConnected": "Đã kết nối camera khi mở app.",
+    "camera.startupConnectError": "Không thể kết nối camera khi mở app.",
+    "camera.startupNoProduct":
+      "Chưa có profile sản phẩm active dùng camera USB để kết nối khi mở app.",
     "camera.grabError": "Không thể chụp frame camera.",
     "camera.genericError": "Thao tác camera thất bại.",
     "camera.errorDeviceNotFound":
@@ -1379,11 +1444,18 @@ const translationOverrides: Record<Language, Record<string, string>> = {
     "settings.runtimeTestIgnorePlc": "Ignore PLC in development",
     "settings.runtimeTestIgnorePlcHint":
       "Allows the line test flow to use manual/software triggers until PLC wiring is available.",
+    "settings.runtimeTestOperatorAutoLogin":
+      "Auto-login operator on app startup",
+    "settings.runtimeTestOperatorAutoLoginHint":
+      "Only applies to the first app entry screen. Logout still opens the normal login form.",
     "settings.runtimeTestSave": "Save runtime test setting",
     "settings.runtimeTestSaved": "Runtime test setting saved.",
     "settings.runtimeTestIgnorePlcState": "PLC requirement",
     "settings.runtimeTestIgnored": "Ignored in development",
     "settings.runtimeTestRequired": "Required",
+    "settings.runtimeTestOperatorAutoLoginState": "Operator auto-login",
+    "settings.runtimeTestOperatorAutoLoginEnabled": "Enabled on startup",
+    "settings.runtimeTestOperatorAutoLoginDisabled": "Disabled",
     "settings.runtimeTestResultDelay": "Checking-to-result delay",
     "settings.runtimeTestResultDelayHint":
       "Used by the line animation test. Adjustable from 0.5s to 2.0s.",
@@ -1645,11 +1717,18 @@ const translationOverrides: Record<Language, Record<string, string>> = {
     "settings.runtimeTestIgnorePlc": "Bỏ qua PLC trong môi trường dev",
     "settings.runtimeTestIgnorePlcHint":
       "Cho phép flow line dùng trigger tay/phần mềm cho đến khi PLC sẵn sàng.",
+    "settings.runtimeTestOperatorAutoLogin":
+      "Tự đăng nhập operator khi khởi động app",
+    "settings.runtimeTestOperatorAutoLoginHint":
+      "Chỉ áp dụng ở màn vào app đầu tiên. Đăng xuất vẫn mở form đăng nhập bình thường.",
     "settings.runtimeTestSave": "Lưu cài đặt test runtime",
     "settings.runtimeTestSaved": "Đã lưu cài đặt test runtime.",
     "settings.runtimeTestIgnorePlcState": "Yêu cầu PLC",
     "settings.runtimeTestIgnored": "Đang bỏ qua trong dev",
     "settings.runtimeTestRequired": "Bắt buộc",
+    "settings.runtimeTestOperatorAutoLoginState": "Tự đăng nhập operator",
+    "settings.runtimeTestOperatorAutoLoginEnabled": "Bật khi khởi động",
+    "settings.runtimeTestOperatorAutoLoginDisabled": "Đã tắt",
     "settings.runtimeTestResultDelay": "Thời gian từ checking đến kết quả",
     "settings.runtimeTestResultDelayHint":
       "Áp dụng cho trang test animation line. Có thể chỉnh từ 0.5s đến 2.0s.",
@@ -1968,6 +2047,10 @@ const translationOverrides: Record<Language, Record<string, string>> = {
     "apiError.License dongle is missing":
       "Thi\u1ebfu dongle b\u1ea3n quy\u1ec1n. Vui l\u00f2ng c\u1eafm dongle r\u1ed3i ki\u1ec3m tra l\u1ea1i.",
     "auth.loginSuccess": "\u0110\u0103ng nh\u1eadp th\u00e0nh c\u00f4ng.",
+    "auth.operatorAutoLoginSuccess":
+      "\u0110\u00e3 t\u1ef1 \u0111\u1ed9ng \u0111\u0103ng nh\u1eadp t\u00e0i kho\u1ea3n operator.",
+    "auth.operatorAutoLoginFailed":
+      "Kh\u00f4ng th\u1ec3 t\u1ef1 \u0111\u1ed9ng \u0111\u0103ng nh\u1eadp t\u00e0i kho\u1ea3n operator.",
     "login.statusTitle": "Ki\u1ec3m tra kh\u1edfi \u0111\u1ed9ng",
     "login.ready": "API local v\u00e0 dongle \u0111\u00e3 s\u1eb5n s\u00e0ng.",
     "login.blocked":

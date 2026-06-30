@@ -2,13 +2,34 @@
 
 import { useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { getAccessToken } from "@/lib/session";
+import {
+  clearOperatorStartupAutoLoginRequest,
+  getPostLoginRoute,
+  requestOperatorStartupAutoLogin,
+  shouldAutoLoginOperator,
+} from "@/lib/operator-startup-preferences";
+import { getAccessToken, getStoredUser } from "@/lib/session";
 
 export default function Home() {
   const router = useRouter();
 
   useEffect(() => {
-    router.replace(getAccessToken() ? "/dashboard" : "/login");
+    const storedUser = getStoredUser();
+    const hasAccessToken = Boolean(getAccessToken());
+    const shouldRefreshOperatorSession =
+      shouldAutoLoginOperator() && storedUser?.role !== "operator";
+
+    if (shouldRefreshOperatorSession) {
+      requestOperatorStartupAutoLogin();
+    } else {
+      clearOperatorStartupAutoLoginRequest();
+    }
+
+    router.replace(
+      hasAccessToken && !shouldRefreshOperatorSession
+        ? getPostLoginRoute(storedUser)
+        : "/login",
+    );
   }, [router]);
 
   return (

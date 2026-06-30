@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { execFile } from 'node:child_process';
+import { execFile, spawnSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { promisify } from 'node:util';
@@ -149,11 +149,28 @@ export class DongleCheckerService {
       return { command, args };
     }
 
-    if (process.platform === 'win32') {
-      return { command: 'py', args: ['-3.9'] };
+    if (process.platform !== 'win32') {
+      return { command: 'python3', args: [] };
     }
 
-    return { command: 'python3', args: [] };
+    if (this.canRun('py', ['-3.11', '--version'])) {
+      return { command: 'py', args: ['-3.11'] };
+    }
+
+    if (this.canRun('uv', ['--version'])) {
+      return { command: 'uv', args: ['run', '--python', '3.11', 'python'] };
+    }
+
+    return { command: 'py', args: ['-3.11'] };
+  }
+
+  private canRun(command: string, args: string[]) {
+    const result = spawnSync(command, args, {
+      stdio: 'ignore',
+      windowsHide: true,
+    });
+
+    return result.status === 0;
   }
 
   private parseHelperOutput(stdout: string): DongleHelperPayload {

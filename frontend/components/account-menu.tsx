@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { ChevronDown, LogOut, Power, Settings, Usb } from "lucide-react";
+import { ChevronDown, LogOut, Power, RefreshCw, Settings, Usb } from "lucide-react";
 import { useEffect, useId, useRef, useState } from "react";
 import { LanguageToggle } from "@/components/language-toggle";
 import { Button } from "@/components/ui/button";
@@ -14,6 +14,7 @@ type AccountMenuProps = {
   donglePresent: boolean;
   onExitApp: () => void | Promise<void>;
   onLogout: () => void;
+  onRestartApp: () => void | Promise<void>;
   user: SessionUser;
 };
 
@@ -22,6 +23,7 @@ export function AccountMenu({
   donglePresent,
   onExitApp,
   onLogout,
+  onRestartApp,
   user,
 }: AccountMenuProps) {
   const { t } = useI18n();
@@ -123,6 +125,19 @@ export function AccountMenu({
               {t("nav.settings")}
             </Link>
           ) : null}
+
+          <button
+            type="button"
+            role="menuitem"
+            className="flex h-10 w-full items-center gap-3 px-3 text-left text-sm font-medium text-slate-700 transition hover:bg-slate-50"
+            onClick={() => {
+              setOpen(false);
+              void onRestartApp();
+            }}
+          >
+            <RefreshCw className="h-4 w-4" />
+            {t("settings.restartApp")}
+          </button>
 
           <button
             type="button"

@@ -46,7 +46,8 @@ Electron.
 The Device Tool interpreter defaults to:
 
 ```text
-tool/.venv/Scripts/python.exe, then py -3.9 on Windows when no tool venv exists
+tool/.venv/Scripts/python.exe, then py -3.11 on Windows when no tool venv exists,
+then uv run --python 3.11 when Python Launcher cannot resolve 3.11
 ```
 
 Override it when needed:
