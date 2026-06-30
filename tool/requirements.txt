@@ -1,6 +1,7 @@
 fastapi
 uvicorn[standard]
 pydantic
+python-multipart
 numpy
 opencv-contrib-python
 pypylon
