@@ -28,12 +28,14 @@ export type DesktopBridge = {
   exitApp(): Promise<{ success: boolean }>;
   getTestStorageSettings(): Promise<DesktopTestStorageSettings>;
   getWindowSettings(): Promise<DesktopWindowSettings>;
+  restartApp(): Promise<{ success: boolean }>;
   saveTestStorageSettings(
     settings: DesktopTestStorageSettings,
   ): Promise<DesktopTestStorageSettings>;
   selectFolder(): Promise<{ canceled: boolean; folderPath: string | null }>;
   selectModelFile(): Promise<{ canceled: boolean; filePath: string | null }>;
   onTerminalLog(callback: (message: string) => void): () => void;
+  onShutdownStatus(callback: (message: string) => void): () => void;
   platform: string;
   versions: {
     chrome: string;

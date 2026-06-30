@@ -1,4 +1,4 @@
-import { spawn, type ChildProcess } from "node:child_process";
+import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { existsSync } from "node:fs";
 import { createConnection } from "node:net";
 import { join } from "node:path";
@@ -15,13 +15,21 @@ type LocalServiceDefinition = {
 };
 
 type ManagedService = LocalServiceDefinition & {
+  lastRestartAt: number;
+  missedHealthChecks: number;
   owned: boolean;
   process: ChildProcess | null;
+  restartInProgress: boolean;
+  startedByApp: boolean;
 };
 
 const STARTUP_TIMEOUT_MS = 120_000;
 const EXISTING_SERVICE_TIMEOUT_MS = 10_000;
 const HEALTH_POLL_MS = 500;
+const SHUTDOWN_TIMEOUT_MS = 15_000;
+const WATCHDOG_INTERVAL_MS = 5_000;
+const WATCHDOG_FAILURE_THRESHOLD = 3;
+const WATCHDOG_RESTART_COOLDOWN_MS = 20_000;
 const DEVICE_TOOL_API_PREFIX = "/tool/v1";
 const DEFAULT_PORTS: Record<LocalServiceName, number> = {
   backend: 4000,
@@ -43,6 +51,7 @@ const FRONTEND_ORIGINS = Array.from({ length: 100 }, (_, index) => index + 3000)
 export class ServiceManager {
   private readonly services: ManagedService[];
   private logListener: ((message: string) => void) | null = null;
+  private watchdogTimer: NodeJS.Timeout | null = null;
 
   constructor(repoRoot: string) {
     const toolPython = resolveToolPython(repoRoot);
@@ -70,8 +79,12 @@ export class ServiceManager {
         cwd: join(repoRoot, "tool"),
         healthUrl: `http://127.0.0.1:8000${DEVICE_TOOL_API_PREFIX}/health`,
         port: 8000,
+        lastRestartAt: 0,
+        missedHealthChecks: 0,
         owned: false,
         process: null,
+        restartInProgress: false,
+        startedByApp: false,
       },
       {
         name: "backend",
@@ -80,8 +93,12 @@ export class ServiceManager {
         cwd: repoRoot,
         healthUrl: "http://127.0.0.1:4000/api/health",
         port: 4000,
+        lastRestartAt: 0,
+        missedHealthChecks: 0,
         owned: false,
         process: null,
+        restartInProgress: false,
+        startedByApp: false,
       },
       {
         name: "frontend",
@@ -90,8 +107,12 @@ export class ServiceManager {
         cwd: repoRoot,
         healthUrl: "http://127.0.0.1:3000/login",
         port: 3000,
+        lastRestartAt: 0,
+        missedHealthChecks: 0,
         owned: false,
         process: null,
+        restartInProgress: false,
+        startedByApp: false,
       },
     ];
   }
@@ -100,6 +121,8 @@ export class ServiceManager {
     for (const service of this.services) {
       await this.ensureService(service, onStatus);
     }
+
+    this.startWatchdog();
   }
 
   getFrontendUrl() {
@@ -111,29 +134,117 @@ export class ServiceManager {
     this.logListener = listener;
   }
 
-  async stopOwned() {
+  async stopOwned(onStatus: (message: string) => void = () => undefined) {
+    this.stopWatchdog();
     const ownedServices = [...this.services].reverse().filter(
-      (service) => service.owned && service.process,
+      (service) => service.startedByApp,
     );
 
-    await Promise.all(
-      ownedServices.map(async (service) => {
-        const child = service.process;
-        service.process = null;
-        service.owned = false;
+    for (const service of ownedServices) {
+      await this.stopOwnedService(service, onStatus);
+    }
+  }
 
-        if (!child || child.killed) {
-          return;
-        }
+  private startWatchdog() {
+    this.stopWatchdog();
+    this.watchdogTimer = setInterval(() => {
+      void this.checkCriticalServices();
+    }, WATCHDOG_INTERVAL_MS);
+    this.watchdogTimer.unref?.();
+    this.emitLog("backend", "watchdog enabled for backend and device-tool");
+  }
 
-        if (process.platform === "win32" && child.pid) {
-          await terminateWindowsProcessTree(child.pid);
-          return;
-        }
+  private stopWatchdog() {
+    if (!this.watchdogTimer) {
+      return;
+    }
 
-        child.kill("SIGTERM");
-      }),
+    clearInterval(this.watchdogTimer);
+    this.watchdogTimer = null;
+  }
+
+  private async checkCriticalServices() {
+    const criticalServices = this.services.filter((service) =>
+      service.name === "backend" || service.name === "device-tool",
     );
+
+    for (const service of criticalServices) {
+      await this.checkCriticalService(service);
+    }
+  }
+
+  private async checkCriticalService(service: ManagedService) {
+    if (service.restartInProgress) {
+      return;
+    }
+
+    const healthy = await isHealthOk(service.healthUrl);
+
+    if (healthy) {
+      if (service.missedHealthChecks > 0) {
+        this.emitLog(service.name, "watchdog health recovered");
+      }
+      service.missedHealthChecks = 0;
+      return;
+    }
+
+    service.missedHealthChecks += 1;
+    this.emitLog(
+      service.name,
+      `watchdog health check failed (${service.missedHealthChecks}/${WATCHDOG_FAILURE_THRESHOLD})`,
+    );
+
+    if (service.missedHealthChecks < WATCHDOG_FAILURE_THRESHOLD) {
+      return;
+    }
+
+    const now = Date.now();
+
+    if (now - service.lastRestartAt < WATCHDOG_RESTART_COOLDOWN_MS) {
+      this.emitLog(service.name, "watchdog restart skipped during cooldown");
+      return;
+    }
+
+    await this.restartCriticalService(service);
+  }
+
+  private async restartCriticalService(service: ManagedService) {
+    service.restartInProgress = true;
+    service.lastRestartAt = Date.now();
+    this.emitLog(service.name, "watchdog restarting service");
+
+    try {
+      const portOpen = await isPortOpen(service.port);
+
+      if (portOpen && !service.startedByApp) {
+        this.emitLog(
+          service.name,
+          `port ${service.port} is occupied by an external service; watchdog will not kill it`,
+        );
+        return;
+      }
+
+      if (portOpen || service.process) {
+        await this.stopOwnedService(service, () => undefined);
+      }
+
+      if (await isPortOpen(service.port)) {
+        this.emitLog(
+          service.name,
+          `port ${service.port} is still occupied; restart postponed`,
+        );
+        return;
+      }
+
+      await this.startOwnedService(service, () => undefined);
+      service.missedHealthChecks = 0;
+      this.emitLog(service.name, "watchdog restart complete");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.emitLog(service.name, `watchdog restart failed (${message})`);
+    } finally {
+      service.restartInProgress = false;
+    }
   }
 
   private async ensureService(
@@ -210,6 +321,7 @@ export class ServiceManager {
 
     service.process = child;
     service.owned = true;
+    service.startedByApp = true;
     let spawnError: Error | null = null;
     this.attachProcessLogs(service, child);
 
@@ -369,6 +481,59 @@ export class ServiceManager {
       `[${new Date().toLocaleTimeString("en-GB", { hour12: false })}] [${serviceName}] ${message}`,
     );
   }
+
+  private async stopOwnedService(
+    service: ManagedService,
+    onStatus: (message: string) => void,
+  ) {
+    onStatus(`${service.name}: stopping`);
+    this.emitLog(service.name, "stopping");
+
+    if (service.name === "device-tool") {
+      await this.stopDeviceToolRuntime(service);
+    }
+
+    const child = service.process;
+    service.process = null;
+    service.owned = false;
+
+    if (child && !child.killed && child.exitCode === null) {
+      await terminateProcessTree(child.pid);
+    } else {
+      await terminateProcessOnPort(service.port);
+    }
+
+    const closed = await waitForPortClosed(service.port, SHUTDOWN_TIMEOUT_MS);
+
+    if (closed) {
+      onStatus(`${service.name}: stopped`);
+      this.emitLog(service.name, "stopped");
+    } else {
+      onStatus(`${service.name}: port ${service.port} is still open`);
+      this.emitLog(service.name, `port ${service.port} is still open after shutdown`);
+    }
+
+    service.startedByApp = false;
+  }
+
+  private async stopDeviceToolRuntime(service: ManagedService) {
+    const baseUrl = `http://127.0.0.1:${service.port}${DEVICE_TOOL_API_PREFIX}`;
+    const requests = [
+      `${baseUrl}/camera/active-camera/AI/yolo_ocr/stop`,
+      `${baseUrl}/camera/disconnect`,
+    ];
+
+    for (const url of requests) {
+      try {
+        await fetch(url, {
+          method: "POST",
+          signal: AbortSignal.timeout(3_000),
+        });
+      } catch {
+        // Device cleanup is best-effort; process shutdown below is the fallback.
+      }
+    }
+  }
 }
 
 function resolveNpmCommand(args: string[]) {
@@ -398,9 +563,38 @@ function resolveToolPython(repoRoot: string) {
     return { command: venvPython, args: [] };
   }
 
-  return process.platform === "win32"
-    ? { command: "py", args: ["-3.9"] }
-    : { command: "python3", args: [] };
+  if (process.platform !== "win32") {
+    return { command: "python3", args: [] };
+  }
+
+  if (canRun("py", ["-3.11", "--version"])) {
+    return { command: "py", args: ["-3.11"] };
+  }
+
+  if (canRun("uv", ["--version"])) {
+    return {
+      command: "uv",
+      args: [
+        "run",
+        "--python",
+        "3.11",
+        "--with-requirements",
+        "requirements.txt",
+        "python",
+      ],
+    };
+  }
+
+  return { command: "py", args: ["-3.11"] };
+}
+
+function canRun(command: string, args: string[]) {
+  const result = spawnSync(command, args, {
+    stdio: "ignore",
+    windowsHide: true,
+  });
+
+  return result.status === 0;
 }
 
 async function waitForHealth(
@@ -438,6 +632,15 @@ async function waitForHealth(
   throw new Error(`Timed out waiting for ${url}`);
 }
 
+async function isHealthOk(url: string) {
+  try {
+    const response = await fetch(url, { signal: AbortSignal.timeout(2_000) });
+    return response.ok;
+  } catch {
+    return false;
+  }
+}
+
 function isPortOpen(port: number) {
   return new Promise<boolean>((resolve) => {
     const socket = createConnection({ host: "127.0.0.1", port });
@@ -469,6 +672,49 @@ async function findAvailablePort(startPort: number, endPort: number) {
   return null;
 }
 
+async function waitForPortClosed(port: number, timeoutMs: number) {
+  const startedAt = Date.now();
+
+  while (Date.now() - startedAt < timeoutMs) {
+    if (!(await isPortOpen(port))) {
+      return true;
+    }
+
+    await delay(HEALTH_POLL_MS);
+  }
+
+  return !(await isPortOpen(port));
+}
+
+async function terminateProcessTree(pid?: number) {
+  if (!pid) {
+    return;
+  }
+
+  if (process.platform === "win32") {
+    await terminateWindowsProcessTree(pid);
+    return;
+  }
+
+  try {
+    process.kill(pid, "SIGTERM");
+  } catch {
+    // Already stopped.
+  }
+}
+
+async function terminateProcessOnPort(port: number) {
+  if (process.platform !== "win32") {
+    return;
+  }
+
+  const pids = await findWindowsPidsByPort(port);
+
+  for (const pid of pids) {
+    await terminateWindowsProcessTree(pid);
+  }
+}
+
 function terminateWindowsProcessTree(pid: number) {
   return new Promise<void>((resolve) => {
     const taskkill = spawn("taskkill.exe", ["/pid", String(pid), "/t", "/f"], {
@@ -477,5 +723,38 @@ function terminateWindowsProcessTree(pid: number) {
     });
     taskkill.once("exit", () => resolve());
     taskkill.once("error", () => resolve());
+  });
+}
+
+function findWindowsPidsByPort(port: number) {
+  return new Promise<number[]>((resolve) => {
+    const script = [
+      "$ErrorActionPreference='SilentlyContinue';",
+      `Get-NetTCPConnection -LocalPort ${port} |`,
+      "Where-Object { $_.State -eq 'Listen' } |",
+      "Select-Object -ExpandProperty OwningProcess -Unique",
+    ].join(" ");
+    const child = spawn(
+      "powershell.exe",
+      ["-NoProfile", "-Command", script],
+      {
+        stdio: ["ignore", "pipe", "ignore"],
+        windowsHide: true,
+      },
+    );
+    let output = "";
+
+    child.stdout?.setEncoding("utf8");
+    child.stdout?.on("data", (chunk: string) => {
+      output += chunk;
+    });
+    child.once("exit", () => {
+      const pids = output
+        .split(/\r?\n/)
+        .map((line) => Number.parseInt(line.trim(), 10))
+        .filter((pid) => Number.isInteger(pid) && pid > 0);
+      resolve(Array.from(new Set(pids)));
+    });
+    child.once("error", () => resolve([]));
   });
 }

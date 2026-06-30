@@ -7,6 +7,9 @@ contextBridge.exposeInMainWorld("ocrDesktop", {
   exitApp() {
     return ipcRenderer.invoke("desktop:exit-app");
   },
+  restartApp() {
+    return ipcRenderer.invoke("desktop:restart-app");
+  },
   getTestStorageSettings() {
     return ipcRenderer.invoke("desktop:get-test-storage-settings");
   },
@@ -28,6 +31,14 @@ contextBridge.exposeInMainWorld("ocrDesktop", {
 
     return () => {
       ipcRenderer.removeListener("terminal-log", listener);
+    };
+  },
+  onShutdownStatus(callback: (message: string) => void) {
+    const listener = (_event: unknown, message: string) => callback(message);
+    ipcRenderer.on("desktop-shutdown-status", listener);
+
+    return () => {
+      ipcRenderer.removeListener("desktop-shutdown-status", listener);
     };
   },
   platform: process.platform,
