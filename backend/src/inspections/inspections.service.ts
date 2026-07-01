@@ -14,13 +14,14 @@ import { CameraProfileDto } from '../products/dto/product-profile.dto';
 import { CreateTestSessionReportDto } from './dto/create-test-session-report.dto';
 import {
   evaluateInspectionSlot,
+  resolveInspectionAggregateResult,
   resolveInspectionResults,
 } from './inspection-text-matcher';
 import { StartInspectionDto } from './dto/start-inspection.dto';
 import { TestInspectionImageDto } from './dto/test-inspection-image.dto';
 
 const productInclude = {
-  cameraConfig: true,
+  cameraConfig: { include: { cameraIdentity: true } },
   roiRegions: { orderBy: { index: 'asc' as const } },
 };
 
@@ -113,6 +114,7 @@ export class InspectionsService {
         const slotResult = scan.results[index];
         const evaluation = evaluateInspectionSlot({
           rawText: slotResult?.text,
+          rows: slotResult?.rows,
           errorMessage: slotResult?.error,
           expectedText,
         });
@@ -124,6 +126,7 @@ export class InspectionsService {
           expectedText,
           result: evaluation.result,
           text: evaluation.rawText,
+          rows: slotResult?.rows ?? [],
           confidence: null,
           imagePath: null,
           errorMessage: evaluation.errorMessage,
@@ -218,6 +221,7 @@ export class InspectionsService {
           const slotResult = scan.results[index];
           const evaluation = evaluateInspectionSlot({
             rawText: slotResult?.text,
+            rows: slotResult?.rows,
             errorMessage: slotResult?.error,
             expectedText,
           });
@@ -227,6 +231,7 @@ export class InspectionsService {
             slotLabel: `slot-${region.index}`,
             expectedText,
             rawText: evaluation.rawText,
+            rows: slotResult?.rows ?? [],
             result: evaluation.result,
             errorMessage: evaluation.errorMessage,
             toolDebugImageBase64: slotResult?.debugImageBase64 ?? null,
@@ -324,6 +329,7 @@ export class InspectionsService {
               "slotLabel",
               "expectedText",
               "rawText",
+              "rows",
               "result",
               "errorMessage",
               "toolDebugImageBase64",
@@ -336,6 +342,7 @@ export class InspectionsService {
               ${roi.slotLabel ?? null},
               ${roi.expectedText ?? null},
               ${roi.rawText ?? null},
+              CAST(${JSON.stringify(roi.rows ?? [])} AS JSONB),
               CAST(${roi.result} AS "InspectionResult"),
               ${roi.errorMessage ?? null},
               ${roi.toolDebugImageBase64 ?? null},
@@ -479,6 +486,7 @@ export class InspectionsService {
               slotLabel: string | null;
               expectedText: string | null;
               rawText: string | null;
+              rows: Prisma.JsonValue | null;
               result: string;
               errorMessage: string | null;
               createdAt: Date;
@@ -492,6 +500,7 @@ export class InspectionsService {
                 roi."slotLabel",
                 roi."expectedText",
                 roi."rawText",
+                roi."rows",
                 roi."result"::text AS "result",
                 roi."errorMessage",
                 roi."createdAt"
@@ -509,6 +518,7 @@ export class InspectionsService {
         slotLabel: string | null;
         expectedText: string | null;
         rawText: string | null;
+        rows: string[];
         result: string;
         errorMessage: string | null;
       }>
@@ -521,6 +531,7 @@ export class InspectionsService {
         slotLabel: roi.slotLabel,
         expectedText: roi.expectedText,
         rawText: roi.rawText,
+        rows: this.normalizeRows(roi.rows),
         result: roi.result,
         errorMessage: roi.errorMessage,
       });
@@ -542,6 +553,7 @@ export class InspectionsService {
           slotLabel: string | null;
           expectedText: string | null;
           rawText: string | null;
+          rows: string[];
           result: string;
           errorMessage: string | null;
         }>;
@@ -895,7 +907,9 @@ export class InspectionsService {
       return (left.slotIndex ?? 0) - (right.slotIndex ?? 0);
     });
 
-    const totalRecognized = logs.filter((log) => !!log.text?.trim()).length;
+    const totalRecognized = logs.filter((log) =>
+      this.isKnownInspectionResult(log.result),
+    ).length;
     const okCount = logs.filter(
       (log) => log.result === InspectionResult.OK,
     ).length;
@@ -912,22 +926,10 @@ export class InspectionsService {
           (log) => log.capturedAt.getTime() === latestCapturedAt.getTime(),
         )
       : [];
-    const latestQuantity = latestLogs.filter(
-      (log) => !!log.text?.trim(),
+    const latestQuantity = latestLogs.filter((log) =>
+      this.isKnownInspectionResult(log.result),
     ).length;
-    const latestOkCount = latestLogs.filter(
-      (log) => log.result === InspectionResult.OK,
-    ).length;
-    const latestNgCount = latestLogs.filter(
-      (log) => log.result === InspectionResult.NG,
-    ).length;
-    const latestResult = this.resolveLatestResult(
-      latestLogs,
-      product.roiRegions.length,
-      latestQuantity,
-      latestOkCount,
-      latestNgCount,
-    );
+    const latestResult = this.resolveLatestResult(latestLogs);
 
     return {
       jobId: job.id,
@@ -960,40 +962,49 @@ export class InspectionsService {
         slotLabel: log.slotLabel,
         expectedText: log.expectedText,
         rawText: log.text,
+        rows: this.normalizeRows(log.rows),
         result: log.result,
         errorMessage: log.errorMessage,
       })),
     };
   }
 
-  private resolveLatestResult(
-    latestLogs: InspectionJobWithLogs['logs'],
-    expectedRoiCount: number,
-    latestQuantity: number,
-    latestOkCount: number,
-    latestNgCount: number,
-  ) {
+  private normalizeRows(rows: Prisma.JsonValue | string[] | null | undefined) {
+    if (!Array.isArray(rows)) {
+      return [];
+    }
+
+    return rows.map((row) => {
+      if (
+        typeof row === 'string' ||
+        typeof row === 'number' ||
+        typeof row === 'boolean'
+      ) {
+        return String(row);
+      }
+
+      return JSON.stringify(row);
+    });
+  }
+
+  private resolveLatestResult(latestLogs: InspectionJobWithLogs['logs']) {
     if (latestLogs.length === 0) {
       return InspectionResult.UNKNOWN;
     }
 
-    if (
-      latestOkCount === expectedRoiCount &&
-      latestQuantity === expectedRoiCount
-    ) {
-      return InspectionResult.OK;
-    }
+    return resolveInspectionAggregateResult(
+      latestLogs.map((log) => log.result),
+    );
+  }
 
-    if (latestNgCount > 0 || latestQuantity < expectedRoiCount) {
-      return InspectionResult.NG;
-    }
-
-    return InspectionResult.UNKNOWN;
+  private isKnownInspectionResult(result: InspectionResult) {
+    return result === InspectionResult.OK || result === InspectionResult.NG;
   }
 
   private toCameraProfile(product: ProductWithProfile): CameraProfileDto {
     if (product.cameraConfig) {
       return {
+        cameraIdentityId: product.cameraConfig.cameraIdentityId ?? undefined,
         sourceType: product.cameraConfig.sourceType,
         deviceName: product.cameraConfig.deviceName ?? undefined,
         rtspUrl: product.cameraConfig.rtspUrl ?? undefined,

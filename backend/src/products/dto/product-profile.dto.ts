@@ -15,6 +15,11 @@ import {
 import { Type } from 'class-transformer';
 
 export class CameraProfileDto {
+  @ApiPropertyOptional({ example: 'cmb123cameraidentityid' })
+  @IsOptional()
+  @IsString()
+  cameraIdentityId?: string;
+
   @ApiProperty({ example: 'usb' })
   @IsString()
   @IsNotEmpty()

@@ -796,6 +796,9 @@
   .min-h-7 {
     min-height: calc(var(--spacing) * 7);
   }
+  .min-h-11 {
+    min-height: calc(var(--spacing) * 11);
+  }
   .min-h-12 {
     min-height: calc(var(--spacing) * 12);
   }
@@ -943,6 +946,9 @@
   .min-w-\[760px\] {
     min-width: 760px;
   }
+  .min-w-\[880px\] {
+    min-width: 880px;
+  }
   .min-w-\[940px\] {
     min-width: 940px;
   }
@@ -1016,6 +1022,9 @@
   }
   .cursor-nesw-resize {
     cursor: nesw-resize;
+  }
+  .cursor-not-allowed {
+    cursor: not-allowed;
   }
   .cursor-nwse-resize {
     cursor: nwse-resize;
@@ -2200,6 +2209,9 @@
   }
   .accent-cyan-700 {
     accent-color: var(--color-cyan-700);
+  }
+  .opacity-75 {
+    opacity: 75%;
   }
   .opacity-95 {
     opacity: 95%;

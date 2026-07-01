@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useEffect, useRef, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import {
@@ -13,16 +13,10 @@ import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { useVirtualKeyboard } from "@/components/ui/virtual-keyboard";
 import { ApiError, disconnectCamera, getCurrentSession, login } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
-import {
-  clearOperatorStartupAutoLoginRequest,
-  getPostLoginRoute,
-  hasOperatorStartupAutoLoginRequest,
-  OPERATOR_AUTO_LOGIN_PASSWORD,
-  OPERATOR_AUTO_LOGIN_USERNAME,
-} from "@/lib/operator-startup-preferences";
+import { getPostLoginRoute } from "@/lib/operator-startup-preferences";
 import {
   clearSession,
-  getAccessToken,
+  getRememberedAccessToken,
   saveSession,
 } from "@/lib/session";
 
@@ -30,15 +24,11 @@ export default function LoginPage() {
   const router = useRouter();
   const { apiError, t } = useI18n();
   const { isKeyboardOpen } = useVirtualKeyboard();
-  const autoLoginAttemptedRef = useRef(false);
-  const [startupAutoLoginRequested] = useState(() =>
-    hasOperatorStartupAutoLoginRequest(),
-  );
   const [username, setUsername] = useState("admin");
   const [password, setPassword] = useState("admin123");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
-  const [sessionChecked, setSessionChecked] = useState(false);
+  const [rememberLogin, setRememberLogin] = useState(false);
   const [gateStatus, setGateStatus] = useState<LoginGateStatus>({
     checking: true,
     apiConnected: false,
@@ -47,41 +37,21 @@ export default function LoginPage() {
 
   useEffect(() => {
     let cancelled = false;
-    const token = getAccessToken();
-
-    function markSessionChecked() {
-      window.setTimeout(() => {
-        if (!cancelled) {
-          setSessionChecked(true);
-        }
-      }, 0);
-    }
+    const token = getRememberedAccessToken();
 
     if (!token) {
-      markSessionChecked();
       return () => {
         cancelled = true;
       };
     }
 
-    getCurrentSession(token)
+    getCurrentSessionWithTimeout(token)
       .then((response) => {
         if (cancelled) {
           return;
         }
 
-        if (startupAutoLoginRequested && response.data.user.role !== "operator") {
-          silentlyDisconnectCamera(token);
-          clearSession();
-          markSessionChecked();
-          return;
-        }
-
-        if (startupAutoLoginRequested) {
-          clearOperatorStartupAutoLoginRequest();
-        }
-
-        saveSession(token, response.data.user);
+        saveSession(token, response.data.user, { remember: true });
         router.replace(getPostLoginRoute(response.data.user));
       })
       .catch(() => {
@@ -91,69 +61,12 @@ export default function LoginPage() {
 
         silentlyDisconnectCamera(token);
         clearSession();
-        markSessionChecked();
       });
 
     return () => {
       cancelled = true;
     };
-  }, [router, startupAutoLoginRequested]);
-
-  useEffect(() => {
-    const hasExistingToken = Boolean(getAccessToken());
-
-    if (
-      !sessionChecked ||
-      hasExistingToken ||
-      loading ||
-      gateStatus.checking ||
-      !gateStatus.licenseReady ||
-      !startupAutoLoginRequested ||
-      autoLoginAttemptedRef.current
-    ) {
-      return;
-    }
-
-    autoLoginAttemptedRef.current = true;
-    setLoading(true);
-    setError("");
-
-    login(OPERATOR_AUTO_LOGIN_USERNAME, OPERATOR_AUTO_LOGIN_PASSWORD)
-      .then((response) => {
-        if (response.data.user.role !== "operator") {
-          silentlyDisconnectCamera(response.data.accessToken);
-          clearSession();
-          throw new Error("Operator auto-login returned a non-operator user");
-        }
-
-        saveSession(response.data.accessToken, response.data.user);
-        clearOperatorStartupAutoLoginRequest();
-        toast.success(t("auth.operatorAutoLoginSuccess"));
-        router.replace(getPostLoginRoute(response.data.user));
-      })
-      .catch((cause) => {
-        const message =
-          cause instanceof ApiError
-            ? apiError(cause.message, "auth.operatorAutoLoginFailed")
-            : t("auth.operatorAutoLoginFailed");
-
-        setError(message);
-        toast.warning(message);
-      })
-      .finally(() => {
-        clearOperatorStartupAutoLoginRequest();
-        setLoading(false);
-      });
-  }, [
-    apiError,
-    gateStatus.checking,
-    gateStatus.licenseReady,
-    loading,
-    router,
-    sessionChecked,
-    startupAutoLoginRequested,
-    t,
-  ]);
+  }, [router]);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -170,8 +83,9 @@ export default function LoginPage() {
 
     try {
       const response = await login(username, password);
-      clearOperatorStartupAutoLoginRequest();
-      saveSession(response.data.accessToken, response.data.user);
+      saveSession(response.data.accessToken, response.data.user, {
+        remember: rememberLogin,
+      });
       toast.success(t("auth.loginSuccess"));
       router.replace(getPostLoginRoute(response.data.user));
     } catch (cause) {
@@ -252,6 +166,16 @@ export default function LoginPage() {
                 />
               </label>
 
+              <label className="mt-5 flex min-h-11 items-center gap-3 text-sm font-medium text-slate-700">
+                <input
+                  checked={rememberLogin}
+                  onChange={(event) => setRememberLogin(event.target.checked)}
+                  className="h-5 w-5 border border-slate-300 accent-cyan-700"
+                  type="checkbox"
+                />
+                <span>{t("auth.rememberLogin")}</span>
+              </label>
+
               <LoginSystemStatus onChange={setGateStatus} />
 
               {error ? (
@@ -280,4 +204,13 @@ function silentlyDisconnectCamera(accessToken: string | null | undefined) {
   }
 
   void disconnectCamera(accessToken).catch(() => undefined);
+}
+
+function getCurrentSessionWithTimeout(accessToken: string) {
+  const controller = new AbortController();
+  const timeoutId = window.setTimeout(() => controller.abort(), 8000);
+
+  return getCurrentSession(accessToken, { signal: controller.signal }).finally(
+    () => window.clearTimeout(timeoutId),
+  );
 }

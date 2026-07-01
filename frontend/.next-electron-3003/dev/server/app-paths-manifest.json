@@ -1,7 +1,7 @@
 {
+  "/dashboard/line/page": "app/dashboard/line/page.js",
+  "/dashboard/products/page": "app/dashboard/products/page.js",
+  "/dashboard/line-test/page": "app/dashboard/line-test/page.js",
   "/dashboard/page": "app/dashboard/page.js",
-  "/dashboard/users/page": "app/dashboard/users/page.js",
-  "/dashboard/camera-debug/page": "app/dashboard/camera-debug/page.js",
-  "/dashboard/line-animation-test/page": "app/dashboard/line-animation-test/page.js",
-  "/dashboard/line-test/page": "app/dashboard/line-test/page.js"
+  "/dashboard/reports/page": "app/dashboard/reports/page.js"
 }

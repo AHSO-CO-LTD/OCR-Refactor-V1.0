@@ -37,6 +37,12 @@ export class CreateTestSessionReportRoiDto {
   @IsString()
   rawText?: string;
 
+  @ApiPropertyOptional({ type: [String], example: ['IS-35R', 'R53-SI'] })
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  rows?: string[];
+
   @ApiProperty({ enum: InspectionResult, example: InspectionResult.NG })
   @IsEnum(InspectionResult)
   result!: InspectionResult;

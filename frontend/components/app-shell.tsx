@@ -6,7 +6,7 @@ import { ReactNode, useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { AccountMenu } from "@/components/account-menu";
 import { ConfirmModal } from "@/components/ui/confirm-modal";
-import type { RoleCode, SessionUser, SystemLicenseState } from "@/lib/api";
+import type { SessionUser, SystemLicenseState } from "@/lib/api";
 import {
   connectCamera,
   disconnectCamera,
@@ -18,7 +18,6 @@ import {
 import type { TranslationKey } from "@/lib/i18n";
 import { useI18n } from "@/lib/i18n";
 import {
-  clearOperatorStartupAutoLoginRequest,
   getPostLoginRoute,
   isExpectedRuntimeCamera,
   selectOperatorStartupProduct,
@@ -27,7 +26,7 @@ import {
 import {
   clearSession,
   getAccessToken,
-  saveSession,
+  refreshSession,
 } from "@/lib/session";
 import { getDesktopBridge } from "@/lib/desktop";
 import { useLicenseWatchdog } from "@/lib/use-license-watchdog";
@@ -50,16 +49,14 @@ const menuItems = [
   {
     labelKey: "nav.lineTest",
     href: "/dashboard/line-test",
-    permission: null,
+    permission: "inspection.test",
     groupKey: "navGroup.overview",
-    allowedRoles: ["dev", "admin", "engineer"] as RoleCode[],
   },
   {
     labelKey: "nav.lineAnimationTest",
     href: "/dashboard/line-animation-test",
-    permission: null,
+    permission: "inspection.test",
     groupKey: "navGroup.overview",
-    allowedRoles: ["dev", "admin", "engineer"] as RoleCode[],
   },
   { labelKey: "nav.users", href: "/dashboard/users", permission: "user.manage", groupKey: "navGroup.management" },
   { labelKey: "nav.roles", href: "/dashboard/roles", permission: "role.manage", groupKey: "navGroup.management" },
@@ -71,26 +68,28 @@ const menuItems = [
   },
   { labelKey: "nav.camera", href: "/dashboard/camera", permission: "camera.manage", groupKey: "navGroup.configuration" },
   {
-    labelKey: "nav.cameraDebug",
-    href: "/dashboard/camera-debug",
-    permission: "camera.manage",
+    labelKey: "nav.cameraIdentity",
+    href: "/dashboard/camera-identities",
+    permission: "camera.identity.manage",
     groupKey: "navGroup.configuration",
   },
-  { labelKey: "nav.roi", href: "/dashboard/roi", permission: "roi.edit", groupKey: "navGroup.configuration" },
-  { labelKey: "nav.history", href: "/dashboard/history", permission: "history.view", groupKey: "navGroup.inspection" },
+  {
+    labelKey: "nav.cameraDebug",
+    href: "/dashboard/camera-debug",
+    permission: "camera.debug.view",
+    groupKey: "navGroup.configuration",
+  },
   {
     labelKey: "nav.reports",
     href: "/dashboard/reports",
     permission: "report.view",
     groupKey: "navGroup.inspection",
-    allowedRoles: ["dev", "admin", "engineer"] as RoleCode[],
   },
 ] satisfies Array<{
   labelKey: TranslationKey;
   href: string;
   permission: string | null;
   groupKey: NavGroupKey;
-  allowedRoles?: RoleCode[];
 }>;
 
 const navGroups = [
@@ -108,9 +107,9 @@ const cameraRuntimePathPrefixes = [
   "/dashboard/line-test",
   "/dashboard/line-animation-test",
   "/dashboard/camera",
+  "/dashboard/camera-identities",
   "/dashboard/camera-debug",
   "/dashboard/products",
-  "/dashboard/roi",
 ];
 
 export function AppShell({ children }: AppShellProps) {
@@ -149,10 +148,10 @@ export function AppShell({ children }: AppShellProps) {
       return;
     }
 
-    getCurrentSession(token)
+    getCurrentSessionWithTimeout(token)
       .then((response) => {
         const nextUser = response.data.user;
-        saveSession(token, nextUser);
+        refreshSession(token, nextUser);
         setUser(nextUser);
 
         if (shouldUseOperatorStartup(nextUser) && pathname === "/dashboard") {
@@ -201,10 +200,24 @@ export function AppShell({ children }: AppShellProps) {
     silentlyDisconnectCamera(token);
   }, [pathname, user]);
 
+  useEffect(() => {
+    if (!user) {
+      return;
+    }
+
+    const currentMenuItem = findMenuItemForPath(pathname);
+
+    if (!currentMenuItem || canAccessMenuItem(currentMenuItem, user)) {
+      return;
+    }
+
+    toast.error(t("apiError.Missing required permission"));
+    router.replace(getPostLoginRoute(user));
+  }, [pathname, router, t, user]);
+
   function handleLogout() {
     const token = getAccessToken();
 
-    clearOperatorStartupAutoLoginRequest();
     silentlyDisconnectCamera(token);
     clearSession();
     router.replace("/login");
@@ -283,13 +296,7 @@ export function AppShell({ children }: AppShellProps) {
   }
 
   const visibleMenuItems = menuItems.filter(
-    (item) =>
-      (!item.allowedRoles || (user ? item.allowedRoles.includes(user.role) : false)) &&
-      (
-        item.permission === null ||
-        user?.isDev ||
-        user?.permissions.includes(item.permission)
-      ),
+    (item) => user && canAccessMenuItem(item, user),
   );
   const canManageDesktopSettings = true;
   const usesSidebar = user?.role === "dev" || user?.role === "admin";
@@ -619,8 +626,25 @@ function shouldPrimeCameraRuntime(user: SessionUser) {
   return (
     user.isDev ||
     user.permissions.includes("camera.manage") ||
-    user.permissions.includes("inspection.start")
+    user.permissions.includes("inspection.start") ||
+    user.permissions.includes("inspection.test")
   );
+}
+
+function findMenuItemForPath(pathname: string) {
+  return menuItems.find((item) => isActivePath(pathname, item.href));
+}
+
+function canAccessMenuItem(
+  item: (typeof menuItems)[number],
+  user: SessionUser,
+) {
+  const permissionAllowed =
+    item.permission === null ||
+    user.isDev ||
+    user.permissions.includes(item.permission);
+
+  return permissionAllowed;
 }
 
 function requiresCameraRuntime(pathname: string) {
@@ -674,4 +698,13 @@ async function primeCameraRuntime(accessToken: string) {
   return connectedStatus.data.connected
     ? ("connected" as const)
     : ("notConnected" as const);
+}
+
+function getCurrentSessionWithTimeout(accessToken: string) {
+  const controller = new AbortController();
+  const timeoutId = window.setTimeout(() => controller.abort(), 8000);
+
+  return getCurrentSession(accessToken, { signal: controller.signal }).finally(
+    () => window.clearTimeout(timeoutId),
+  );
 }

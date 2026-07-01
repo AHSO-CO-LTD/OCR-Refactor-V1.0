@@ -9,11 +9,15 @@ const permissions = [
   { key: 'permission.manage', name: 'Manage permissions', group: 'role' },
   { key: 'product.manage', name: 'Manage products', group: 'product' },
   { key: 'camera.manage', name: 'Manage camera settings', group: 'camera' },
-  { key: 'roi.edit', name: 'Edit ROI', group: 'inspection' },
+  {
+    key: 'camera.identity.manage',
+    name: 'Manage camera identities',
+    group: 'camera',
+  },
+  { key: 'camera.debug.view', name: 'View camera diagnostics', group: 'camera' },
   { key: 'inspection.start', name: 'Start inspection', group: 'inspection' },
   { key: 'inspection.stop', name: 'Stop inspection', group: 'inspection' },
-  { key: 'inspection.override', name: 'Override inspection', group: 'inspection' },
-  { key: 'history.view', name: 'View history', group: 'history' },
+  { key: 'inspection.test', name: 'Run line tests', group: 'inspection' },
   { key: 'report.view', name: 'View reports', group: 'report' },
   { key: 'system.shutdown', name: 'Shutdown system', group: 'system' },
   { key: 'license.view', name: 'View license state', group: 'system' },
@@ -25,8 +29,15 @@ const rolePermissionMap: Record<RoleCode, string[]> = {
   admin: permissions
     .filter((permission) => !permission.devOnly)
     .map((permission) => permission.key),
-  engineer: ['product.manage', 'camera.manage', 'roi.edit', 'history.view'],
-  operator: ['inspection.start', 'inspection.stop', 'roi.edit'],
+  engineer: [
+    'product.manage',
+    'camera.manage',
+    'camera.identity.manage',
+    'camera.debug.view',
+    'inspection.test',
+    'report.view',
+  ],
+  operator: ['inspection.start', 'inspection.stop'],
 };
 
 async function seed() {

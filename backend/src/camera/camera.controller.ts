@@ -4,6 +4,8 @@ import {
   Controller,
   Get,
   NotFoundException,
+  Param,
+  Patch,
   Post,
   UseGuards,
 } from '@nestjs/common';
@@ -17,6 +19,7 @@ import { DeviceToolService } from '../device-tool/device-tool.service';
 import { CameraProfileDto } from '../products/dto/product-profile.dto';
 import { GrabCameraFrameDto } from './dto/grab-camera-frame.dto';
 import { StartCameraAiDto } from './dto/start-camera-ai.dto';
+import { UpdateCameraIdentityDto } from './dto/update-camera-identity.dto';
 
 @ApiTags('camera')
 @ApiBearerAuth()
@@ -30,23 +33,63 @@ export class CameraController {
 
   @ApiOperation({ summary: 'Get camera runtime status from the Device Tool' })
   @Get('status')
-  @RequireAnyPermission(PERMISSIONS.CAMERA_MANAGE, PERMISSIONS.INSPECTION_START)
+  @RequireAnyPermission(
+    PERMISSIONS.CAMERA_MANAGE,
+    PERMISSIONS.INSPECTION_START,
+    PERMISSIONS.INSPECTION_TEST,
+  )
   getStatus() {
     return this.deviceToolService.getCameraStatus();
   }
 
   @ApiOperation({ summary: 'List camera devices from the Device Tool' })
   @Get('devices')
-  @RequireAnyPermission(PERMISSIONS.CAMERA_MANAGE, PERMISSIONS.INSPECTION_START)
+  @RequireAnyPermission(
+    PERMISSIONS.CAMERA_MANAGE,
+    PERMISSIONS.CAMERA_IDENTITY_MANAGE,
+    PERMISSIONS.INSPECTION_START,
+    PERMISSIONS.INSPECTION_TEST,
+  )
   listDevices() {
     return this.deviceToolService.listCameraDevices();
+  }
+
+  @ApiOperation({ summary: 'List saved camera identities mapped by serial' })
+  @Get('identities')
+  @RequireAnyPermission(PERMISSIONS.CAMERA_IDENTITY_MANAGE)
+  listIdentities() {
+    return this.deviceToolService.listCameraIdentities();
+  }
+
+  @ApiOperation({
+    summary: 'Discover Tool cameras and upsert saved camera identities',
+  })
+  @Post('identities/sync')
+  @RequireAnyPermission(PERMISSIONS.CAMERA_IDENTITY_MANAGE)
+  syncIdentities() {
+    return this.deviceToolService.syncCameraIdentities();
+  }
+
+  @ApiOperation({ summary: 'Update a saved camera identity' })
+  @Patch('identities/:id')
+  @RequireAnyPermission(PERMISSIONS.CAMERA_IDENTITY_MANAGE)
+  updateIdentity(
+    @Param('id') id: string,
+    @Body() dto: UpdateCameraIdentityDto,
+  ) {
+    return this.deviceToolService.updateCameraIdentity(id, dto);
   }
 
   @ApiOperation({
     summary: 'Get actual camera frame rate from the Device Tool',
   })
   @Get('frame-rate')
-  @RequireAnyPermission(PERMISSIONS.CAMERA_MANAGE, PERMISSIONS.INSPECTION_START)
+  @RequireAnyPermission(
+    PERMISSIONS.CAMERA_MANAGE,
+    PERMISSIONS.CAMERA_DEBUG_VIEW,
+    PERMISSIONS.INSPECTION_START,
+    PERMISSIONS.INSPECTION_TEST,
+  )
   getFrameRate() {
     return this.deviceToolService.getCameraFrameRate();
   }
@@ -55,7 +98,11 @@ export class CameraController {
     summary: 'Get hardware camera setting ranges from the Device Tool',
   })
   @Get('ranges')
-  @RequireAnyPermission(PERMISSIONS.CAMERA_MANAGE, PERMISSIONS.INSPECTION_START)
+  @RequireAnyPermission(
+    PERMISSIONS.CAMERA_MANAGE,
+    PERMISSIONS.INSPECTION_START,
+    PERMISSIONS.INSPECTION_TEST,
+  )
   getRanges() {
     return this.deviceToolService.getCameraRanges();
   }
@@ -64,14 +111,23 @@ export class CameraController {
     summary: 'Get camera hardware diagnostics from the Device Tool',
   })
   @Get('debug-info')
-  @RequireAnyPermission(PERMISSIONS.CAMERA_MANAGE, PERMISSIONS.INSPECTION_START)
+  @RequireAnyPermission(
+    PERMISSIONS.CAMERA_MANAGE,
+    PERMISSIONS.CAMERA_DEBUG_VIEW,
+    PERMISSIONS.INSPECTION_START,
+    PERMISSIONS.INSPECTION_TEST,
+  )
   getDebugInfo() {
     return this.deviceToolService.getCameraDebugInfo();
   }
 
   @ApiOperation({ summary: 'Connect camera using a product camera profile' })
   @Post('connect')
-  @RequireAnyPermission(PERMISSIONS.CAMERA_MANAGE, PERMISSIONS.INSPECTION_START)
+  @RequireAnyPermission(
+    PERMISSIONS.CAMERA_MANAGE,
+    PERMISSIONS.INSPECTION_START,
+    PERMISSIONS.INSPECTION_TEST,
+  )
   async connect(@Body() dto: CameraProfileDto) {
     await this.deviceToolService.ensureCameraPreviewReady(dto);
     return this.deviceToolService.getCameraStatus();
@@ -79,21 +135,34 @@ export class CameraController {
 
   @ApiOperation({ summary: 'Disconnect the active camera runtime' })
   @Post('disconnect')
-  @RequireAnyPermission(PERMISSIONS.CAMERA_MANAGE, PERMISSIONS.INSPECTION_START)
+  @RequireAnyPermission(
+    PERMISSIONS.CAMERA_MANAGE,
+    PERMISSIONS.CAMERA_DEBUG_VIEW,
+    PERMISSIONS.INSPECTION_START,
+    PERMISSIONS.INSPECTION_TEST,
+  )
   disconnect() {
     return this.deviceToolService.disconnectCamera();
   }
 
   @ApiOperation({ summary: 'Grab one camera frame from the Device Tool' })
   @Post('grab')
-  @RequireAnyPermission(PERMISSIONS.CAMERA_MANAGE, PERMISSIONS.INSPECTION_START)
+  @RequireAnyPermission(
+    PERMISSIONS.CAMERA_MANAGE,
+    PERMISSIONS.INSPECTION_START,
+    PERMISSIONS.INSPECTION_TEST,
+  )
   grab(@Body() dto: GrabCameraFrameDto) {
     return this.deviceToolService.grabCameraFrame(dto);
   }
 
   @ApiOperation({ summary: 'Load product model and start camera OCR AI' })
   @Post('ai/start')
-  @RequireAnyPermission(PERMISSIONS.CAMERA_MANAGE, PERMISSIONS.INSPECTION_START)
+  @RequireAnyPermission(
+    PERMISSIONS.CAMERA_MANAGE,
+    PERMISSIONS.INSPECTION_START,
+    PERMISSIONS.INSPECTION_TEST,
+  )
   async startAi(@Body() dto: StartCameraAiDto) {
     const product = await this.getActiveProductForAi(dto.productId);
 
@@ -110,7 +179,11 @@ export class CameraController {
 
   @ApiOperation({ summary: 'Stop camera OCR AI' })
   @Post('ai/stop')
-  @RequireAnyPermission(PERMISSIONS.CAMERA_MANAGE, PERMISSIONS.INSPECTION_START)
+  @RequireAnyPermission(
+    PERMISSIONS.CAMERA_MANAGE,
+    PERMISSIONS.INSPECTION_START,
+    PERMISSIONS.INSPECTION_TEST,
+  )
   stopAi() {
     return this.deviceToolService.stopCameraOcr();
   }
@@ -147,6 +220,7 @@ export class CameraController {
       rowThreshold: product.rowThreshold,
       rotateTestImageClockwise: product.rotateTestImageClockwise,
       camera: {
+        cameraIdentityId: product.cameraConfig.cameraIdentityId ?? undefined,
         sourceType: product.cameraConfig.sourceType,
         deviceName: product.cameraConfig.deviceName ?? undefined,
         rtspUrl: product.cameraConfig.rtspUrl ?? undefined,

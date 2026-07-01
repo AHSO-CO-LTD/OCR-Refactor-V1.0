@@ -1,0 +1,45 @@
+DELETE FROM "RolePermission"
+WHERE "roleCode" IN (
+  'dev'::"RoleCode",
+  'admin'::"RoleCode",
+  'engineer'::"RoleCode",
+  'operator'::"RoleCode"
+);
+
+INSERT INTO "RolePermission" ("roleCode", "permissionKey")
+VALUES
+  ('dev'::"RoleCode", 'user.manage'),
+  ('dev'::"RoleCode", 'role.manage'),
+  ('dev'::"RoleCode", 'permission.manage'),
+  ('dev'::"RoleCode", 'product.manage'),
+  ('dev'::"RoleCode", 'camera.manage'),
+  ('dev'::"RoleCode", 'camera.identity.manage'),
+  ('dev'::"RoleCode", 'camera.debug.view'),
+  ('dev'::"RoleCode", 'inspection.start'),
+  ('dev'::"RoleCode", 'inspection.stop'),
+  ('dev'::"RoleCode", 'inspection.test'),
+  ('dev'::"RoleCode", 'report.view'),
+  ('dev'::"RoleCode", 'system.shutdown'),
+  ('dev'::"RoleCode", 'license.view'),
+  ('dev'::"RoleCode", 'system.debug'),
+  ('admin'::"RoleCode", 'user.manage'),
+  ('admin'::"RoleCode", 'role.manage'),
+  ('admin'::"RoleCode", 'permission.manage'),
+  ('admin'::"RoleCode", 'product.manage'),
+  ('admin'::"RoleCode", 'camera.manage'),
+  ('admin'::"RoleCode", 'camera.identity.manage'),
+  ('admin'::"RoleCode", 'camera.debug.view'),
+  ('admin'::"RoleCode", 'inspection.start'),
+  ('admin'::"RoleCode", 'inspection.stop'),
+  ('admin'::"RoleCode", 'inspection.test'),
+  ('admin'::"RoleCode", 'report.view'),
+  ('admin'::"RoleCode", 'system.shutdown'),
+  ('admin'::"RoleCode", 'license.view'),
+  ('engineer'::"RoleCode", 'product.manage'),
+  ('engineer'::"RoleCode", 'camera.manage'),
+  ('engineer'::"RoleCode", 'camera.identity.manage'),
+  ('engineer'::"RoleCode", 'camera.debug.view'),
+  ('engineer'::"RoleCode", 'inspection.test'),
+  ('engineer'::"RoleCode", 'report.view'),
+  ('operator'::"RoleCode", 'inspection.start'),
+  ('operator'::"RoleCode", 'inspection.stop');

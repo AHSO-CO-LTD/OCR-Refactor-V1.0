@@ -85,28 +85,6 @@ export function RuntimeTestSettingsPanel() {
             </div>
           </label>
 
-          <label className="flex min-h-14 items-center gap-3 border border-slate-200 bg-white px-4 py-3">
-            <input
-              type="checkbox"
-              className="h-5 w-5 accent-cyan-700"
-              checked={settings.operatorAutoLoginOnStartup}
-              onChange={(event) =>
-                updateSetting({
-                  ...settings,
-                  operatorAutoLoginOnStartup: event.target.checked,
-                })
-              }
-            />
-            <div className="min-w-0">
-              <div className="font-semibold text-slate-950">
-                {t("settings.runtimeTestOperatorAutoLogin")}
-              </div>
-              <div className="text-sm leading-5 text-slate-500">
-                {t("settings.runtimeTestOperatorAutoLoginHint")}
-              </div>
-            </div>
-          </label>
-
           <div className="grid gap-3 border border-slate-200 bg-white px-4 py-4">
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div className="min-w-0">
@@ -172,14 +150,6 @@ export function RuntimeTestSettingsPanel() {
               settings.ignorePlcInDev
                 ? t("settings.runtimeTestIgnored")
                 : t("settings.runtimeTestRequired")
-            }
-          />
-          <StateRow
-            label={t("settings.runtimeTestOperatorAutoLoginState")}
-            value={
-              settings.operatorAutoLoginOnStartup
-                ? t("settings.runtimeTestOperatorAutoLoginEnabled")
-                : t("settings.runtimeTestOperatorAutoLoginDisabled")
             }
           />
           <StateRow

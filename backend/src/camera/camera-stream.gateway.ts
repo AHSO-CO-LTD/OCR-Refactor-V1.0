@@ -5,6 +5,7 @@ import { Buffer } from 'node:buffer';
 import type { IncomingMessage, Server } from 'node:http';
 import type { Duplex } from 'node:stream';
 import WebSocket, { type RawData, WebSocketServer } from 'ws';
+import { DeviceToolService } from '../device-tool/device-tool.service';
 
 type JwtPayload = {
   sub: string;
@@ -20,6 +21,7 @@ export class CameraStreamGateway {
 
   constructor(
     private readonly configService: ConfigService,
+    private readonly deviceToolService: DeviceToolService,
     private readonly jwtService: JwtService,
   ) {}
 
@@ -32,11 +34,11 @@ export class CameraStreamGateway {
       const url = new URL(request.url ?? '/', 'http://localhost');
 
       if (url.pathname === '/api/camera/ai/results') {
-        this.proxyCameraAiResults(client);
+        void this.proxyCameraAiResults(client);
         return;
       }
 
-      this.proxyCameraStream(client, request);
+      void this.proxyCameraStream(client, request);
     });
 
     httpServer.on('upgrade', (request, socket, head) => {
@@ -79,19 +81,28 @@ export class CameraStreamGateway {
     }
   }
 
-  private proxyCameraStream(client: WebSocket, request: IncomingMessage) {
+  private async proxyCameraStream(client: WebSocket, request: IncomingMessage) {
     const clientUrl = new URL(request.url ?? '/', 'http://localhost');
-    const fps = clientUrl.searchParams.get('fps');
     const debugTiming = clientUrl.searchParams.get('debugTiming');
     const shouldDebugTiming = debugTiming === '1';
-    const jpegQuality = clientUrl.searchParams.get('jpegQuality') ?? '70';
-    const maxWidth = clientUrl.searchParams.get('maxWidth') ?? '1600';
-    const toolUrl = this.getToolStreamUrl(
-      fps,
-      jpegQuality,
-      maxWidth,
-      debugTiming,
+    const jpegQuality = Number(
+      clientUrl.searchParams.get('jpegQuality') ?? '70',
     );
+    let toolUrl: string;
+
+    try {
+      const serial = await this.deviceToolService.setActiveStreamConfig(
+        Number.isFinite(jpegQuality) ? jpegQuality : 70,
+      );
+      toolUrl = this.deviceToolService.getToolWebSocketUrl(
+        `/camera/${encodeURIComponent(serial)}/stream`,
+      );
+    } catch (error) {
+      this.sendClientError(client, 'Camera live stream failed', error);
+      client.close();
+      return;
+    }
+
     const toolSocket = new WebSocket(toolUrl);
     let lastFrameId: number | null = null;
 
@@ -179,8 +190,23 @@ export class CameraStreamGateway {
     client.on('error', closeBoth);
   }
 
-  private proxyCameraAiResults(client: WebSocket) {
-    const toolSocket = new WebSocket(this.getToolAiResultsUrl());
+  private async proxyCameraAiResults(client: WebSocket) {
+    let toolUrl: string;
+
+    try {
+      const serial = await this.deviceToolService.requireActiveCameraSerial(
+        'read camera AI results',
+      );
+      toolUrl = this.deviceToolService.getToolWebSocketUrl(
+        `/camera/${encodeURIComponent(serial)}/AI/yolo_ocr/results`,
+      );
+    } catch (error) {
+      this.sendClientError(client, 'Camera AI results failed', error);
+      client.close();
+      return;
+    }
+
+    const toolSocket = new WebSocket(toolUrl);
 
     const closeBoth = () => {
       if (toolSocket.readyState === WebSocket.OPEN) {
@@ -220,56 +246,25 @@ export class CameraStreamGateway {
     client.on('error', closeBoth);
   }
 
-  private getToolStreamUrl(
-    fps: string | null,
-    jpegQuality: string,
-    maxWidth: string,
-    debugTiming: string | null,
-  ) {
-    const baseUrl = (
-      this.configService.get<string>('DEVICE_TOOL_BASE_URL') ??
-      'http://localhost:8000'
-    ).replace(/\/+$/, '');
-    const url = new URL(this.getToolPath('/camera/stream'), baseUrl);
-    url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
-    if (fps) {
-      url.searchParams.set('fps', fps);
-    }
-    url.searchParams.set('jpeg_quality', jpegQuality);
-    url.searchParams.set('max_width', maxWidth);
-    if (debugTiming) {
-      url.searchParams.set('debug_timing', debugTiming);
-    }
-    return url.toString();
-  }
-
-  private getToolAiResultsUrl() {
-    const baseUrl = (
-      this.configService.get<string>('DEVICE_TOOL_BASE_URL') ??
-      'http://localhost:8000'
-    ).replace(/\/+$/, '');
-    const url = new URL(
-      this.getToolPath('/camera/active-camera/AI/yolo_ocr/results'),
-      baseUrl,
-    );
-    url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
-    return url.toString();
-  }
-
-  private getToolPath(path: string) {
-    const prefix =
-      this.configService.get<string>('DEVICE_TOOL_API_PREFIX') ?? '/tool/v1';
-    const normalizedPrefix = `/${prefix.replace(/^\/+|\/+$/g, '')}`;
-    const normalizedPath = `/${path.replace(/^\/+/, '')}`;
-
-    return `${normalizedPrefix}${normalizedPath}`;
-  }
-
   private reject(socket: Duplex, statusCode: number, message: string) {
     socket.write(
       `HTTP/1.1 ${statusCode} ${message}\r\nConnection: close\r\n\r\n`,
     );
     socket.destroy();
+  }
+
+  private sendClientError(client: WebSocket, prefix: string, error: unknown) {
+    if (client.readyState !== WebSocket.OPEN) {
+      return;
+    }
+
+    const message = error instanceof Error ? error.message : String(error);
+    client.send(
+      JSON.stringify({
+        success: false,
+        error: `${prefix}: ${message}`,
+      }),
+    );
   }
 
   private rawDataToText(data: RawData) {

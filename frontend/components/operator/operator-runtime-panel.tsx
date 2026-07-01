@@ -285,7 +285,11 @@ export function OperatorRuntimePanel() {
     imageSrc: livePreviewImageSrc,
     connected: livePreviewConnected,
     runtimeDeviceName: livePreviewRuntimeDeviceName,
-  } = useConnectedCameraPreview(selectedProduct.camera.deviceName);
+  } = useConnectedCameraPreview(
+    selectedProduct.camera.deviceName,
+    dataSource === "api",
+    dataSource === "api" ? selectedProduct.camera : undefined,
+  );
 
   const safeBatchSize = Math.max(1, Number(batchSize) || 1);
   const inspectionResultDelayMs = runtimeSettings.inspectionResultDelayMs;
@@ -526,6 +530,18 @@ export function OperatorRuntimePanel() {
     };
   }
 
+  function resolveVisibleInspectionResult(inspection: CurrentInspectionState) {
+    const animation = buildAnimationResult(inspection);
+
+    if (animation.regions.length === 0) {
+      return "UNKNOWN";
+    }
+
+    return Object.values(animation.finalStatuses).some((status) => status === "NG")
+      ? "NG"
+      : "OK";
+  }
+
   function scheduleRuntimeFrames(
     frames: RuntimeFrame[],
     finalState: "OK" | "NG",
@@ -653,16 +669,13 @@ export function OperatorRuntimePanel() {
   }
 
   async function playInspectionResult(inspection: CurrentInspectionState) {
-    const finalResult = inspection.lastResult?.result ?? "UNKNOWN";
     const animation = buildAnimationResult(inspection);
 
-    if (finalResult === "UNKNOWN") {
+    if (animation.regions.length === 0) {
       return playRejectedInspectionResult("UNKNOWN", inspection);
     }
 
-    if (animation.regions.length === 0) {
-      return playRejectedInspectionResult("NG", inspection);
-    }
+    const finalResult = resolveVisibleInspectionResult(inspection);
 
     return playRuntimeFrames(
       [
@@ -701,7 +714,7 @@ export function OperatorRuntimePanel() {
       await playInspectionResult(response.data);
 
       if (showToast) {
-        const result = response.data.lastResult?.result ?? "UNKNOWN";
+        const result = resolveVisibleInspectionResult(response.data);
         toast.success(t(`lineAnimationTest.state${result}`));
       }
 

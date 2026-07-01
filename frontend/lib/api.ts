@@ -79,6 +79,7 @@ export type UpdateUserPayload = {
 };
 
 export type CameraProfile = {
+  cameraIdentityId?: string;
   sourceType: string;
   deviceName?: string;
   rtspUrl?: string;
@@ -141,10 +142,34 @@ export type CameraDebugInfo = {
 
 export type CameraDevice = {
   index: number;
+  identityId?: string;
+  identity_id?: string;
   friendly_name: string;
+  identified?: boolean;
+  connectable?: boolean;
+  status?: "identified" | "unidentified" | "disabled";
   model_name?: string | null;
   serial_number?: string | null;
   device_class?: string | null;
+};
+
+export type CameraIdentity = {
+  id: string;
+  serial: string;
+  displayName: string;
+  driver: string;
+  modelName: string | null;
+  vendor: string | null;
+  interfaceName: string | null;
+  toolName: string | null;
+  identified: boolean;
+  identifiedAt: string | null;
+  connectable: boolean;
+  status: "identified" | "unidentified" | "disabled";
+  active: boolean;
+  lastSeenAt: string | null;
+  createdAt: string;
+  updatedAt: string;
 };
 
 export type CameraFrame = {
@@ -207,6 +232,7 @@ export type InspectionSlotState = {
   slotLabel: string | null;
   expectedText: string | null;
   rawText: string | null;
+  rows?: string[];
   result: "OK" | "NG" | "UNKNOWN";
   errorMessage: string | null;
   toolDebugImageBase64?: string | null;
@@ -248,6 +274,7 @@ export type TestSessionReportPayload = {
       slotLabel?: string | null;
       expectedText?: string | null;
       rawText?: string | null;
+      rows?: string[];
       result: InspectionSlotState["result"];
       errorMessage?: string | null;
       toolDebugImageBase64?: string | null;
@@ -298,6 +325,7 @@ export type TestSessionReportListItem = {
       slotLabel: string | null;
       expectedText: string | null;
       rawText: string | null;
+      rows?: string[];
       result: InspectionSlotState["result"];
       errorMessage: string | null;
     }>;
@@ -434,11 +462,15 @@ export async function login(username: string, password: string) {
   return (await response.json()) as LoginResponse;
 }
 
-export async function getCurrentSession(accessToken: string) {
+export async function getCurrentSession(
+  accessToken: string,
+  options: { signal?: AbortSignal } = {},
+) {
   const response = await fetch(`${API_BASE_URL}/auth/me`, {
     headers: {
       Authorization: `Bearer ${accessToken}`,
     },
+    signal: options.signal,
   });
 
   if (!response.ok) {
@@ -621,6 +653,56 @@ export async function listCameraDevices(accessToken: string) {
   }
 
   return (await response.json()) as { data: CameraDevice[] };
+}
+
+export async function listCameraIdentities(accessToken: string) {
+  const response = await fetch(`${API_BASE_URL}/camera/identities`, {
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+    },
+  });
+
+  if (!response.ok) {
+    throw new ApiError(await parseError(response), response.status);
+  }
+
+  return (await response.json()) as { data: CameraIdentity[] };
+}
+
+export async function syncCameraIdentities(accessToken: string) {
+  const response = await fetch(`${API_BASE_URL}/camera/identities/sync`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+    },
+  });
+
+  if (!response.ok) {
+    throw new ApiError(await parseError(response), response.status);
+  }
+
+  return (await response.json()) as { data: CameraIdentity[] };
+}
+
+export async function updateCameraIdentity(
+  accessToken: string,
+  identityId: string,
+  payload: Partial<Pick<CameraIdentity, "active" | "displayName">>,
+) {
+  const response = await fetch(`${API_BASE_URL}/camera/identities/${identityId}`, {
+    method: "PATCH",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(payload),
+  });
+
+  if (!response.ok) {
+    throw new ApiError(await parseError(response), response.status);
+  }
+
+  return (await response.json()) as { data: CameraIdentity };
 }
 
 export async function getCameraFrameRate(accessToken: string) {

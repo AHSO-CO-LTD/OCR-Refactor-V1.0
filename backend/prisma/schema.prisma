@@ -113,9 +113,27 @@ model Product {
   testSessionReports TestSessionReport[]
 }
 
+model CameraIdentity {
+  id            String         @id @default(cuid())
+  serial        String         @unique
+  displayName   String
+  driver        String         @default("basler_area")
+  modelName     String?
+  vendor        String?
+  interfaceName String?
+  toolName      String?
+  identifiedAt  DateTime?
+  active        Boolean        @default(false)
+  lastSeenAt    DateTime?
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+  cameraConfigs CameraConfig[]
+}
+
 model CameraConfig {
   id         String   @id @default(cuid())
   productId  String?  @unique
+  cameraIdentityId String?
   sourceType String   @default("usb")
   deviceName String?
   rtspUrl    String?
@@ -131,6 +149,7 @@ model CameraConfig {
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
   product    Product? @relation(fields: [productId], references: [id], onDelete: Cascade)
+  cameraIdentity CameraIdentity? @relation(fields: [cameraIdentityId], references: [id], onDelete: SetNull)
 }
 
 model RoiRegion {
@@ -171,6 +190,7 @@ model InspectionLog {
   expectedText String?
   result       InspectionResult @default(UNKNOWN)
   text         String?
+  rows         Json?
   confidence   Decimal?         @db.Decimal(5, 4)
   imagePath    String?
   errorMessage String?
@@ -239,6 +259,7 @@ model TestSessionFailedRoiResult {
   slotLabel          String?
   expectedText       String?
   rawText            String?
+  rows               Json?
   result             InspectionResult    @default(UNKNOWN)
   errorMessage       String?
   toolDebugImageBase64 String?           @db.Text
