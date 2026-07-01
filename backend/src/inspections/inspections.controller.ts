@@ -45,7 +45,11 @@ export class InspectionsController {
       'Run a test OCR scan against an uploaded image without saving logs',
   })
   @Post('test-image')
-  @RequireAnyPermission(PERMISSIONS.INSPECTION_START, PERMISSIONS.CAMERA_MANAGE)
+  @RequireAnyPermission(
+    PERMISSIONS.INSPECTION_TEST,
+    PERMISSIONS.INSPECTION_START,
+    PERMISSIONS.CAMERA_MANAGE,
+  )
   testImage(@Body() dto: TestInspectionImageDto) {
     return this.inspectionsService.testImage(dto);
   }
@@ -55,7 +59,11 @@ export class InspectionsController {
       'Save a batch test session report with failed images and ROI details',
   })
   @Post('test-sessions')
-  @RequireAnyPermission(PERMISSIONS.INSPECTION_START, PERMISSIONS.CAMERA_MANAGE)
+  @RequireAnyPermission(
+    PERMISSIONS.INSPECTION_TEST,
+    PERMISSIONS.INSPECTION_START,
+    PERMISSIONS.CAMERA_MANAGE,
+  )
   createTestSessionReport(
     @Body() dto: CreateTestSessionReportDto,
     @CurrentUser() user: { id: string; username: string; role: string },
@@ -67,6 +75,7 @@ export class InspectionsController {
   @Get('test-sessions')
   @RequireAnyPermission(
     PERMISSIONS.REPORT_VIEW,
+    PERMISSIONS.INSPECTION_TEST,
     PERMISSIONS.INSPECTION_START,
     PERMISSIONS.CAMERA_MANAGE,
   )
@@ -85,7 +94,6 @@ export class InspectionsController {
   @RequireAnyPermission(
     PERMISSIONS.INSPECTION_START,
     PERMISSIONS.INSPECTION_STOP,
-    PERMISSIONS.INSPECTION_OVERRIDE,
   )
   getCurrentInspection() {
     return this.inspectionsService.getCurrentInspection();

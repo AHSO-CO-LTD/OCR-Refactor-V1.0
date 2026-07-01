@@ -360,7 +360,10 @@ export function LineAnimationTestPanel({
     matchesExpectedCamera: livePreviewMatchesExpectedCamera,
   } = useConnectedCameraPreview(
     product.camera.deviceName,
-    layout === "operator-test",
+    layout === "operator-test" && dataSource === "api",
+    layout === "operator-test" && dataSource === "api"
+      ? product.camera
+      : undefined,
   );
   const operatorPreviewImageSrc = selectedImageUrl || livePreviewImageSrc;
 
@@ -706,8 +709,10 @@ export function LineAnimationTestPanel({
     regions: RoiRegion[],
   ) {
     const regionByIndex = new Map(regions.map((region) => [region.index, region]));
-    const animationRegions = inspection.slots
-      .filter((slot) => slot.result === "OK" || slot.result === "NG")
+    const animationSlots = inspection.slots.filter(
+      (slot) => slot.result === "OK" || slot.result === "NG",
+    );
+    const animationRegions = animationSlots
       .map((slot) =>
         typeof slot.slotIndex === "number"
           ? regionByIndex.get(slot.slotIndex)
@@ -716,19 +721,17 @@ export function LineAnimationTestPanel({
       .filter((region): region is RoiRegion => Boolean(region));
     const finalStatuses = Object.fromEntries(
       animationRegions.map((region) => {
-        const slot = inspection.slots.find(
-          (item) => item.slotIndex === region.index,
-        );
+        const slot = animationSlots.find((item) => item.slotIndex === region.index);
         return [region.index, slot?.result === "OK" ? "OK" : "NG"];
       }),
     ) as Record<number, OperatorRoiStatus>;
     const finalLabels = Object.fromEntries(
       animationRegions.map((region) => {
-        const slot = inspection.slots.find(
-          (item) => item.slotIndex === region.index,
-        );
+        const slot = animationSlots.find((item) => item.slotIndex === region.index);
         const detectedText =
-          slot?.rawText?.trim() || slot?.expectedText?.trim() || slot?.result;
+          slot?.rawText?.trim() ||
+          slot?.expectedText?.trim() ||
+          slot?.result;
         return [region.index, detectedText || finalStatuses[region.index]];
       }),
     ) as Record<number, string>;
@@ -768,8 +771,8 @@ export function LineAnimationTestPanel({
   ) {
     const animation = buildAnimationResult(inspection, regions);
 
-    if (inspection.result === "UNKNOWN" || animation.regions.length === 0) {
-      return playRejectedInspectionResult(inspection.result);
+    if (animation.regions.length === 0) {
+      return playRejectedInspectionResult("UNKNOWN");
     }
 
     return playRuntimeFrames([
@@ -918,7 +921,9 @@ export function LineAnimationTestPanel({
           }),
         );
 
-        if (response.data.result === "UNKNOWN") {
+        const animation = buildAnimationResult(response.data, product.roiRegions);
+
+        if (animation.regions.length === 0) {
           clearLineSessionRefs();
           setActiveRoiIndexes([]);
           setRoiStatuses({});
@@ -929,33 +934,12 @@ export function LineAnimationTestPanel({
           return;
         }
 
-        const detectedRegions = product.roiRegions.filter((region) => {
-          const slot = response.data.slots.find(
-            (item) => item.slotIndex === region.index,
-          );
-          return slot?.result === "OK" || slot?.result === "NG";
-        });
-        const frameStatuses = Object.fromEntries(
-          detectedRegions.map((region) => {
-            const slot = response.data.slots.find(
-              (item) => item.slotIndex === region.index,
-            );
-            return [region.index, slot?.result === "OK" ? "OK" : "NG"];
-          }),
-        ) as Record<number, OperatorRoiStatus>;
-        const frameLabels = Object.fromEntries(
-          detectedRegions.map((region) => {
-            const slot = response.data.slots.find(
-              (item) => item.slotIndex === region.index,
-            );
-            const detectedText =
-              slot?.rawText?.trim() || slot?.expectedText?.trim() || slot?.result;
-            return [region.index, detectedText || product.code];
-          }),
-        ) as Record<number, string>;
-
-        applyContinuousLineFrame(detectedRegions, frameStatuses, frameLabels);
-        addProductionCount(detectedRegions.length);
+        applyContinuousLineFrame(
+          animation.regions,
+          animation.finalStatuses,
+          animation.finalLabels,
+        );
+        addProductionCount(animation.regions.length);
       } catch (cause) {
         const message =
           cause instanceof ApiError
@@ -1246,6 +1230,7 @@ export function LineAnimationTestPanel({
           slotLabel: slot.slotLabel,
           expectedText: slot.expectedText,
           rawText: slot.rawText,
+          rows: slot.rows ?? [],
           result: slot.result,
           errorMessage: slot.errorMessage,
           toolDebugImageBase64: slot.toolDebugImageBase64,

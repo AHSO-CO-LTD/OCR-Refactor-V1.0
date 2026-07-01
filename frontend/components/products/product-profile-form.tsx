@@ -170,7 +170,7 @@ function getCameraFrame(camera: ProductProfilePayload["camera"]): CameraFrame {
 }
 
 function cameraDeviceValue(device: CameraDevice) {
-  return device.friendly_name;
+  return device.identityId ?? device.identity_id ?? device.friendly_name;
 }
 
 function regionFromClientPoint(
@@ -991,6 +991,9 @@ export function ProductProfileForm({
       ...current,
       camera: {
         ...current.camera,
+        cameraIdentityId: selectedDevice
+          ? selectedDevice.identityId ?? selectedDevice.identity_id
+          : current.camera.cameraIdentityId,
         sourceType: "usb",
         deviceName,
       },
@@ -1858,7 +1861,11 @@ export function ProductProfileForm({
                   <label className="block text-sm font-medium text-slate-700">
                     {t("products.deviceName")}
                     <Select
-                      value={draft.camera.deviceName ?? ""}
+                      value={
+                        draft.camera.cameraIdentityId ??
+                        draft.camera.deviceName ??
+                        ""
+                      }
                       onChange={(event) => selectCameraDevice(event.target.value)}
                       className="mt-2 flex h-12 w-full border border-slate-300 bg-white px-4 py-2 text-base text-slate-950 outline-none transition focus:border-cyan-600 focus:ring-2 focus:ring-cyan-100"
                     >
@@ -1871,15 +1878,21 @@ export function ProductProfileForm({
                         <option
                           key={`${device.index}-${device.serial_number ?? device.friendly_name}`}
                           value={cameraDeviceValue(device)}
+                          disabled={!device.connectable}
                         >
                           #{device.index} {device.friendly_name}
                           {device.serial_number ? ` · ${device.serial_number}` : ""}
+                          {!device.connectable
+                            ? ` · ${t("cameraIdentity.notConnectable")}`
+                            : ""}
                         </option>
                       ))}
                       {draft.camera.deviceName &&
                       !cameraDevices.some(
                         (device) =>
-                          cameraDeviceValue(device) === draft.camera.deviceName,
+                          cameraDeviceValue(device) ===
+                          (draft.camera.cameraIdentityId ??
+                            draft.camera.deviceName),
                       ) ? (
                         <option value={draft.camera.deviceName}>
                           {draft.camera.deviceName}
@@ -1911,7 +1924,11 @@ export function ProductProfileForm({
                     onChange={(value) =>
                       setDraft((current) => ({
                         ...current,
-                        camera: { ...current.camera, deviceName: value },
+                        camera: {
+                          ...current.camera,
+                          cameraIdentityId: undefined,
+                          deviceName: value,
+                        },
                       }))
                     }
                   />

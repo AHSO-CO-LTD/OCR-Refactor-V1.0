@@ -230,6 +230,7 @@ export function TestSessionReportsPanel() {
                                           slotLabel: roi.slotLabel,
                                           expectedText: roi.expectedText,
                                           rawText: roi.rawText,
+                                          rows: roi.rows ?? [],
                                           result: roi.result,
                                           errorMessage: roi.errorMessage,
                                         }))}
@@ -245,7 +246,10 @@ export function TestSessionReportsPanel() {
                                         `${t("lineTest.roiSlot")} ${roi.slotIndex ?? "-"}`,
                                       result: roi.result,
                                       expectedText: roi.expectedText ?? "-",
-                                      rawText: roi.rawText ?? "-",
+                                      rawText:
+                                        roi.rows && roi.rows.length > 0
+                                          ? roi.rows.join(" / ")
+                                          : roi.rawText ?? "-",
                                       errorMessage: roi.errorMessage ?? "-",
                                     }))}
                                     emptyText={t("reports.testSessionNoRoi")}

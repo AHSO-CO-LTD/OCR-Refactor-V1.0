@@ -31,6 +31,7 @@ const WATCHDOG_INTERVAL_MS = 5_000;
 const WATCHDOG_FAILURE_THRESHOLD = 3;
 const WATCHDOG_RESTART_COOLDOWN_MS = 20_000;
 const DEVICE_TOOL_API_PREFIX = "/tool/v1";
+const DEVICE_TOOL_HEALTH_PATH = "/";
 const DEFAULT_PORTS: Record<LocalServiceName, number> = {
   backend: 4000,
   "device-tool": 8000,
@@ -77,7 +78,7 @@ export class ServiceManager {
         command: toolPython.command,
         args: [...toolPython.args, "main.py"],
         cwd: join(repoRoot, "tool"),
-        healthUrl: `http://127.0.0.1:8000${DEVICE_TOOL_API_PREFIX}/health`,
+        healthUrl: `http://127.0.0.1:8000${DEVICE_TOOL_HEALTH_PATH}`,
         port: 8000,
         lastRestartAt: 0,
         missedHealthChecks: 0,
@@ -394,7 +395,7 @@ export class ServiceManager {
 
   private configureServiceForPort(service: ManagedService) {
     if (service.name === "device-tool") {
-      service.healthUrl = `http://127.0.0.1:${service.port}${DEVICE_TOOL_API_PREFIX}/health`;
+      service.healthUrl = `http://127.0.0.1:${service.port}${DEVICE_TOOL_HEALTH_PATH}`;
       return;
     }
 
@@ -518,10 +519,7 @@ export class ServiceManager {
 
   private async stopDeviceToolRuntime(service: ManagedService) {
     const baseUrl = `http://127.0.0.1:${service.port}${DEVICE_TOOL_API_PREFIX}`;
-    const requests = [
-      `${baseUrl}/camera/active-camera/AI/yolo_ocr/stop`,
-      `${baseUrl}/camera/disconnect`,
-    ];
+    const requests = await this.getDeviceToolCleanupUrls(baseUrl);
 
     for (const url of requests) {
       try {
@@ -532,6 +530,30 @@ export class ServiceManager {
       } catch {
         // Device cleanup is best-effort; process shutdown below is the fallback.
       }
+    }
+  }
+
+  private async getDeviceToolCleanupUrls(baseUrl: string) {
+    try {
+      const response = await fetch(`${baseUrl}/camera/list`, {
+        signal: AbortSignal.timeout(3_000),
+      });
+      const payload = (await response.json()) as {
+        data?: Array<{ id?: unknown }>;
+        status?: string;
+      };
+      const serials = Array.isArray(payload.data)
+        ? payload.data
+            .map((item) => (typeof item.id === "string" ? item.id : null))
+            .filter((id): id is string => Boolean(id))
+        : [];
+
+      return serials.flatMap((serial) => [
+        `${baseUrl}/camera/${encodeURIComponent(serial)}/AI/yolo_ocr/stop`,
+        `${baseUrl}/basler_area/${encodeURIComponent(serial)}/disconnect`,
+      ]);
+    } catch {
+      return [];
     }
   }
 }

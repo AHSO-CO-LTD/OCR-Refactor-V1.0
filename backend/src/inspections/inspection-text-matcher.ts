@@ -2,6 +2,7 @@ import { InspectionResult } from '@prisma/client';
 
 type InspectionSlotEvaluationInput = {
   rawText?: string | null;
+  rows?: string[] | null;
   errorMessage?: string | null;
   expectedText: string;
 };
@@ -15,7 +16,7 @@ export function matchesExpectedInspectionText(
 
   return acceptedTexts.some((candidate) => {
     const escaped = candidate.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const pattern = new RegExp(`(^|[-_])${escaped}($|[-_])`);
+    const pattern = new RegExp(`(^|-)${escaped}($|-)`);
     return pattern.test(text);
   });
 }
@@ -47,18 +48,28 @@ export function buildAcceptedInspectionTexts(expectedText: string) {
 
 export function evaluateInspectionSlot({
   rawText,
+  rows,
   errorMessage,
   expectedText,
 }: InspectionSlotEvaluationInput) {
   const normalizedText = rawText?.trim() ?? '';
-  const matched = normalizedText
-    ? matchesExpectedInspectionText(normalizedText, expectedText)
-    : false;
+  const normalizedRows = rows
+    ?.map((row) => row.trim())
+    .filter((row) => row.length > 0);
+  const textsToEvaluate =
+    normalizedRows && normalizedRows.length > 0
+      ? normalizedRows
+      : normalizedText
+        ? [normalizedText]
+        : [];
+  const matched = textsToEvaluate.some((text) =>
+    matchesExpectedInspectionText(text, expectedText),
+  );
 
   let result: InspectionResult = InspectionResult.UNKNOWN;
   if (matched) {
     result = InspectionResult.OK;
-  } else if (normalizedText || errorMessage) {
+  } else if (textsToEvaluate.length > 0 || errorMessage) {
     result = InspectionResult.NG;
   }
 
@@ -71,7 +82,11 @@ export function evaluateInspectionSlot({
 }
 
 export function resolveInspectionResults(
-  results: { text?: string | null; error?: string | null }[],
+  results: {
+    rows?: string[] | null;
+    text?: string | null;
+    error?: string | null;
+  }[],
   expectedText: string,
 ) {
   if (results.length === 0) {
@@ -81,22 +96,30 @@ export function resolveInspectionResults(
   const evaluatedResults = results.map((result) =>
     evaluateInspectionSlot({
       rawText: result.text,
+      rows: result.rows,
       errorMessage: result.error,
       expectedText,
     }),
   );
 
-  if (
-    evaluatedResults.every((result) => result.result === InspectionResult.OK)
-  ) {
-    return InspectionResult.OK;
+  return resolveInspectionAggregateResult(
+    evaluatedResults.map((result) => result.result),
+  );
+}
+
+export function resolveInspectionAggregateResult(results: InspectionResult[]) {
+  const knownResults = results.filter(
+    (result) =>
+      result === InspectionResult.OK || result === InspectionResult.NG,
+  );
+
+  if (knownResults.length === 0) {
+    return InspectionResult.UNKNOWN;
   }
 
-  if (
-    evaluatedResults.some((result) => result.result === InspectionResult.NG)
-  ) {
+  if (knownResults.some((result) => result === InspectionResult.NG)) {
     return InspectionResult.NG;
   }
 
-  return InspectionResult.UNKNOWN;
+  return InspectionResult.OK;
 }

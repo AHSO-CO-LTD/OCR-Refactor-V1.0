@@ -33,6 +33,9 @@ export function DesktopSettingsPanel() {
   const [settings, setSettings] = useState<DesktopWindowSettings>(
     defaultDesktopWindowSettings,
   );
+  const [appliedSettings, setAppliedSettings] = useState<DesktopWindowSettings>(
+    defaultDesktopWindowSettings,
+  );
   const bridge = getDesktopBridge();
   const [loading, setLoading] = useState(Boolean(bridge));
   const [saving, setSaving] = useState(false);
@@ -45,7 +48,10 @@ export function DesktopSettingsPanel() {
 
     bridge
       .getWindowSettings()
-      .then((nextSettings) => setSettings(nextSettings))
+      .then((nextSettings) => {
+        setSettings(nextSettings);
+        setAppliedSettings(nextSettings);
+      })
       .catch(() => toast.error(t("settings.loadError")))
       .finally(() => setLoading(false));
   }, [bridge, t]);
@@ -74,11 +80,16 @@ export function DesktopSettingsPanel() {
 
     setSaving(true);
     const toastId = toast.loading(t("settings.saving"));
+    const requiresRestart = settings.frameless !== appliedSettings.frameless;
 
     try {
       const nextSettings = await bridge.applyWindowSettings(settings);
       setSettings(nextSettings);
+      setAppliedSettings(nextSettings);
       toast.success(t("settings.saved"), { id: toastId });
+      if (requiresRestart) {
+        toast.warning(t("settings.framelessRestartRequired"));
+      }
     } catch {
       toast.error(t("settings.saveError"), { id: toastId });
     } finally {

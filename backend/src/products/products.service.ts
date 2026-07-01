@@ -33,7 +33,7 @@ const defaultCamera: CameraProfileDto = {
 };
 
 const productInclude = {
-  cameraConfig: true,
+  cameraConfig: { include: { cameraIdentity: true } },
   roiRegions: { orderBy: { index: 'asc' as const } },
 };
 
@@ -373,6 +373,7 @@ export class ProductsService {
 
   private toCameraData(camera: CameraProfileDto) {
     return {
+      cameraIdentityId: camera.cameraIdentityId || null,
       sourceType: camera.sourceType,
       deviceName: camera.deviceName || null,
       rtspUrl: camera.rtspUrl || null,
@@ -407,6 +408,7 @@ export class ProductsService {
     }
 
     return {
+      cameraIdentityId: camera.cameraIdentityId ?? undefined,
       sourceType: camera.sourceType,
       deviceName: camera.deviceName ?? undefined,
       rtspUrl: camera.rtspUrl ?? undefined,

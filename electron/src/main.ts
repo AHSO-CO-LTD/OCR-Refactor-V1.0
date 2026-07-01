@@ -195,7 +195,6 @@ function registerDesktopIpc() {
 }
 
 function applyWindowSettings(nextSettings: Partial<DesktopWindowSettings>) {
-  const previousSettings = windowSettings;
   windowSettings = normalizeWindowSettings({
     ...windowSettings,
     ...nextSettings,
@@ -203,23 +202,6 @@ function applyWindowSettings(nextSettings: Partial<DesktopWindowSettings>) {
   saveWindowSettings(windowSettings);
 
   if (!mainWindow || mainWindow.isDestroyed()) {
-    return windowSettings;
-  }
-
-  const shouldRecreateWindow =
-    previousSettings.frameless !== windowSettings.frameless;
-  const currentUrl =
-    mainWindow.webContents.getURL() && !mainWindow.webContents.getURL().startsWith("data:")
-      ? mainWindow.webContents.getURL()
-      : rendererUrl;
-
-  if (shouldRecreateWindow) {
-    const previousWindow = mainWindow;
-    previousWindow.removeAllListeners("closed");
-    previousWindow.close();
-    mainWindow = null;
-    const nextWindow = createMainWindow();
-    void loadWindowUrl(nextWindow, currentUrl);
     return windowSettings;
   }
 

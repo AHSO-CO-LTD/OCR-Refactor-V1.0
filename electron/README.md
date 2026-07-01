@@ -27,7 +27,7 @@ Backend      http://127.0.0.1:4000
 Frontend     http://localhost:3000
 ```
 
-Electron checks the Device Tool at `/tool/v1/health` and passes
+Electron checks the Device Tool at `/` and passes
 `DEVICE_TOOL_API_PREFIX=/tool/v1` to the backend. Override the prefix only when
 the Device Tool routes intentionally change.
 

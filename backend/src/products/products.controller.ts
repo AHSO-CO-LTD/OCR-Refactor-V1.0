@@ -40,6 +40,8 @@ export class ProductsController {
   @RequireAnyPermission(
     PERMISSIONS.PRODUCT_MANAGE,
     PERMISSIONS.INSPECTION_START,
+    PERMISSIONS.INSPECTION_TEST,
+    PERMISSIONS.REPORT_VIEW,
   )
   listProducts() {
     return this.productsService.listProducts();
@@ -64,6 +66,7 @@ export class ProductsController {
   @RequireAnyPermission(
     PERMISSIONS.PRODUCT_MANAGE,
     PERMISSIONS.INSPECTION_START,
+    PERMISSIONS.INSPECTION_TEST,
   )
   updateProductBatchSize(
     @Param('id') id: string,

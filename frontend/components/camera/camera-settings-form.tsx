@@ -100,6 +100,9 @@ export function CameraSettingsForm({
       current
         ? {
             ...current,
+            cameraIdentityId: selectedDevice
+              ? selectedDevice.identityId ?? selectedDevice.identity_id
+              : undefined,
             sourceType: "usb",
             deviceName: selectedDevice?.friendly_name ?? value,
           }
@@ -163,7 +166,7 @@ export function CameraSettingsForm({
                   {t("products.deviceName")}
                 </span>
                 <Select
-                  value={draft.deviceName ?? ""}
+                  value={draft.cameraIdentityId ?? draft.deviceName ?? ""}
                   onChange={(event) => selectCameraDevice(event.target.value)}
                   className="h-10 w-full border border-slate-300 bg-white px-3 text-sm outline-none focus:border-cyan-600"
                   disabled={formDisabled}
@@ -173,8 +176,12 @@ export function CameraSettingsForm({
                     <option
                       key={`${device.index}-${device.serial_number ?? device.friendly_name}`}
                       value={cameraDeviceValue(device)}
+                      disabled={!device.connectable}
                     >
                       #{device.index} {device.friendly_name}
+                      {!device.connectable
+                        ? ` - ${t("cameraIdentity.notConnectable")}`
+                        : ""}
                     </option>
                   ))}
                   {draft.deviceName &&
@@ -397,6 +404,7 @@ function buildProductPayload(
     camera: {
       ...camera,
       deviceName: camera.deviceName?.trim() || undefined,
+      cameraIdentityId: camera.cameraIdentityId,
       rtspUrl: camera.rtspUrl?.trim() || undefined,
     },
     roiRegions: product.roiRegions,
@@ -404,5 +412,5 @@ function buildProductPayload(
 }
 
 function cameraDeviceValue(device: CameraDevice) {
-  return device.friendly_name;
+  return device.identityId ?? device.identity_id ?? device.friendly_name;
 }

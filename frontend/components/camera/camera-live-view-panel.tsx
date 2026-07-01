@@ -802,7 +802,7 @@ export function CameraLiveViewPanel() {
                       key={`${device.index}-${device.serial_number ?? device.friendly_name}`}
                       type="button"
                       onClick={() => {
-                        if (!selectedProduct) {
+                        if (!selectedProduct || !device.connectable) {
                           return;
                         }
 
@@ -810,15 +810,36 @@ export function CameraLiveViewPanel() {
                           ...selectedProduct,
                           camera: {
                             ...selectedProduct.camera,
+                            cameraIdentityId:
+                              device.identityId ?? device.identity_id,
                             sourceType: "usb",
                             deviceName: device.friendly_name,
                           },
                         });
                       }}
-                      className="block w-full border border-slate-200 bg-white px-3 py-3 text-left transition hover:border-cyan-200 hover:bg-cyan-50"
+                      disabled={!device.connectable}
+                      className={[
+                        "block w-full border border-slate-200 bg-white px-3 py-3 text-left transition",
+                        device.connectable
+                          ? "hover:border-cyan-200 hover:bg-cyan-50"
+                          : "cursor-not-allowed bg-slate-50 text-slate-500 opacity-75",
+                      ].join(" ")}
                     >
-                      <div className="font-medium text-slate-900">
-                        #{device.index} {device.friendly_name}
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="font-medium text-slate-900">
+                          #{device.index} {device.friendly_name}
+                        </span>
+                        <Badge
+                          className={
+                            device.connectable
+                              ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                              : "border-amber-200 bg-amber-50 text-amber-800"
+                          }
+                        >
+                          {device.connectable
+                            ? t("cameraIdentity.status.identified")
+                            : t("cameraIdentity.notConnectable")}
+                        </Badge>
                       </div>
                       <div className="mt-1 text-xs text-slate-500">
                         {device.model_name ?? "-"} - {device.serial_number ?? "-"}
@@ -1224,6 +1245,7 @@ function buildProductPayload(
     camera: {
       ...camera,
       deviceName: camera.deviceName?.trim() || undefined,
+      cameraIdentityId: camera.cameraIdentityId,
       rtspUrl: camera.rtspUrl?.trim() || undefined,
     },
     roiRegions: product.roiRegions,
