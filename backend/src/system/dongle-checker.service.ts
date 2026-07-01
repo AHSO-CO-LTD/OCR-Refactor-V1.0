@@ -158,7 +158,6 @@ export class DongleCheckerService {
     }
 
     const candidates = [
-      { command: 'py', args: ['-3.9'] },
       { command: 'py', args: ['-3.11'] },
       ...this.getWindowsPythonLauncherPaths().map((pythonPath) => ({
         command: pythonPath,
@@ -177,7 +176,7 @@ export class DongleCheckerService {
       return { command: 'uv', args: ['run', '--python', '3.11', 'python'] };
     }
 
-    return { command: 'py', args: ['-3.9'] };
+    return { command: 'py', args: ['-3.11'] };
   }
 
   private canRun(command: string, args: string[]) {
