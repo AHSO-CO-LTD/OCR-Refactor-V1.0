@@ -150,18 +150,34 @@ export class DongleCheckerService {
     }
 
     if (process.platform !== 'win32') {
-      return { command: 'python3', args: [] };
+      if (this.canRunDonglePython('python3', [])) {
+        return { command: 'python3', args: [] };
+      }
+
+      return { command: 'python', args: [] };
     }
 
-    if (this.canRun('py', ['-3.11', '--version'])) {
-      return { command: 'py', args: ['-3.11'] };
+    const candidates = [
+      { command: 'py', args: ['-3.9'] },
+      { command: 'py', args: ['-3.11'] },
+      ...this.getWindowsPythonLauncherPaths().map((pythonPath) => ({
+        command: pythonPath,
+        args: [] as string[],
+      })),
+      { command: 'python', args: [] },
+    ];
+
+    for (const candidate of candidates) {
+      if (this.canRunDonglePython(candidate.command, candidate.args)) {
+        return candidate;
+      }
     }
 
     if (this.canRun('uv', ['--version'])) {
       return { command: 'uv', args: ['run', '--python', '3.11', 'python'] };
     }
 
-    return { command: 'py', args: ['-3.11'] };
+    return { command: 'py', args: ['-3.9'] };
   }
 
   private canRun(command: string, args: string[]) {
@@ -171,6 +187,28 @@ export class DongleCheckerService {
     });
 
     return result.status === 0;
+  }
+
+  private canRunDonglePython(command: string, args: string[]) {
+    return this.canRun(command, [...args, '-c', 'import ctypes']);
+  }
+
+  private getWindowsPythonLauncherPaths() {
+    const result = spawnSync('py', ['-0p'], {
+      encoding: 'utf8',
+      windowsHide: true,
+    });
+
+    if (result.status !== 0) {
+      return [];
+    }
+
+    const output = `${result.stdout ?? ''}\n${result.stderr ?? ''}`;
+
+    return output
+      .split(/\r?\n/)
+      .map((line) => line.match(/([A-Za-z]:\\.*?python\.exe)\s*$/i)?.[1])
+      .filter((pythonPath): pythonPath is string => Boolean(pythonPath));
   }
 
   private parseHelperOutput(stdout: string): DongleHelperPayload {

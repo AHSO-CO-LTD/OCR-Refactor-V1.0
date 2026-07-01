@@ -1,4 +1,4 @@
-// File: C:\duyhai\AHSO\OCR\OCR-Metal-Core-Washing-Refactor\frontend\app\dashboard\page.tsx
+// File: C:\duyhai\AHSO\OCR\OCR-Refactor-V1.0\frontend\app\dashboard\page.tsx
 import * as entry from '../../../../../app/dashboard/page.js'
 import type { ResolvingMetadata, ResolvingViewport } from 'next/dist/lib/metadata/types/metadata-interface.js'
 

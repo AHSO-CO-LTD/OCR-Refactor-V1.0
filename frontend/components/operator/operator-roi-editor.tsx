@@ -548,7 +548,7 @@ export function OperatorRoiEditor({
     <div
       ref={previewRef}
       tabIndex={interactive ? 0 : -1}
-      className="relative aspect-[3/1] w-full touch-none overflow-hidden border border-cyan-400 bg-slate-950 outline-none"
+      className="operator-camera-preview-frame relative aspect-[3/1] w-full touch-none overflow-hidden bg-slate-950 outline-none"
       onPointerMove={interactive ? handlePreviewPointerMove : undefined}
       onPointerUp={interactive ? finishPointerSession : undefined}
       onPointerLeave={interactive ? finishPointerSession : undefined}

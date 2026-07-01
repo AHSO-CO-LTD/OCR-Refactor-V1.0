@@ -18,6 +18,7 @@ import {
   ScanLine,
   Square,
   Video,
+  X,
   Zap,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -75,6 +76,25 @@ type AnimationBatchSummary = {
   ngImages: number;
   unknownImages: number;
   errorImages: number;
+};
+type LatestTestResultDetails = {
+  source: "camera" | "image" | "folder";
+  fileName: string;
+  relativePath: string;
+  productCode: string;
+  expectedText: string;
+  result: TestSessionImageResult;
+  cycleTimeMs: number | null;
+  imageWidth: number | null;
+  imageHeight: number | null;
+  errorMessage: string | null;
+  testedAt: string;
+  slots: InspectionSlotState[];
+  roiImages: RoiCropImage[];
+};
+type RoiCropImage = {
+  slotIndex: number;
+  imageBase64: string;
 };
 type LineAnimationTestPanelProps = {
   layout?: "animation" | "operator-test";
@@ -230,6 +250,8 @@ export function LineAnimationTestPanel({
   const [batchSummary, setBatchSummary] = useState<AnimationBatchSummary | null>(
     null,
   );
+  const [latestTestResult, setLatestTestResult] =
+    useState<LatestTestResultDetails | null>(null);
   const [batchProgress, setBatchProgress] = useState<{
     current: number;
     total: number;
@@ -418,6 +440,7 @@ export function LineAnimationTestPanel({
     setNgCount(0);
     resetProductionCounters();
     setBatchProgress(null);
+    setLatestTestResult(null);
 
     if (showToast) {
       toast.info(t("lineAnimationTest.resetDone"));
@@ -474,6 +497,7 @@ export function LineAnimationTestPanel({
     setBatchFiles(nextFiles);
     setBatchFolderName(folderName);
     setBatchSummary(null);
+    setLatestTestResult(null);
     setBatchProgress(null);
     resetScenario(false);
     event.target.value = "";
@@ -482,6 +506,30 @@ export function LineAnimationTestPanel({
         count: nextFiles.length,
       }),
     );
+  }
+
+  function clearSelectedImage() {
+    if (selectedImageUrl) {
+      URL.revokeObjectURL(selectedImageUrl);
+    }
+
+    setSelectedImageUrl("");
+    setSelectedImageBase64("");
+    setSelectedImageName("");
+    setLatestTestResult(null);
+    setActiveRoiIndexes([]);
+    setRoiStatuses({});
+    setRoiDetectedTextLabels({});
+    setAnimationState("UNKNOWN");
+    toast.info(t("lineTest.imageCleared"));
+  }
+
+  function clearSelectedFolder() {
+    setBatchFiles([]);
+    setBatchFolderName("");
+    setBatchSummary(null);
+    setBatchProgress(null);
+    toast.info(t("lineTest.folderCleared"));
   }
 
   function validateRealTestInputs() {
@@ -708,7 +756,10 @@ export function LineAnimationTestPanel({
       testProduct.roiRegions,
     );
 
-    return response.data;
+    return {
+      crops,
+      inspection: response.data,
+    };
   }
 
   async function playInspectionResult(
@@ -857,6 +908,16 @@ export function LineAnimationTestPanel({
           })),
           product.roiRegions,
         );
+        setLatestTestResult(
+          buildLatestTestResult({
+            inspection: response.data,
+            roiImages: crops,
+            source: selectedImageBase64 ? "image" : "camera",
+            fileName: selectedImageName || t("operator.liveCamera"),
+            relativePath: selectedImageName || t("operator.liveCamera"),
+          }),
+        );
+
         if (response.data.result === "UNKNOWN") {
           clearLineSessionRefs();
           setActiveRoiIndexes([]);
@@ -900,6 +961,15 @@ export function LineAnimationTestPanel({
           cause instanceof ApiError
             ? apiError(cause.message, "lineAnimationTest.realTestFailed")
             : t("lineAnimationTest.realTestFailed");
+        setLatestTestResult(
+          buildLatestErrorResult({
+            source: selectedImageBase64 ? "image" : "camera",
+            fileName: selectedImageName || t("operator.liveCamera"),
+            relativePath: selectedImageName || t("operator.liveCamera"),
+            message,
+            productCode: product.code,
+          }),
+        );
         toast.error(message);
         stopLineInterval();
         setLineRunning(false);
@@ -948,11 +1018,6 @@ export function LineAnimationTestPanel({
       return;
     }
 
-    if (!selectedImageBase64) {
-      toast.warning(t("lineTest.selectImageFirst"));
-      return;
-    }
-
     const detectedRegions = product.roiRegions;
 
     if (detectedRegions.length === 0) {
@@ -964,11 +1029,15 @@ export function LineAnimationTestPanel({
     const toastId = toast.loading(t("lineAnimationTest.realTesting"));
 
     try {
+      const imageToTestBase64 = selectedImageBase64
+        ? selectedImageBase64
+        : await grabLineFrameBase64(validated.accessToken);
+      const testFileName = selectedImageName || t("operator.liveCamera");
       const testProduct = {
         ...product,
         roiRegions: detectedRegions,
       };
-      const crops = await cropProductRois(selectedImageBase64, testProduct);
+      const crops = await cropProductRois(imageToTestBase64, testProduct);
       const response = await testInspectionImage(
         validated.accessToken,
         product.id,
@@ -979,12 +1048,30 @@ export function LineAnimationTestPanel({
         detectedRegions,
       );
       await playInspectionResult(response.data, detectedRegions);
+      setLatestTestResult(
+        buildLatestTestResult({
+          inspection: response.data,
+          roiImages: crops,
+          source: selectedImageBase64 ? "image" : "camera",
+          fileName: testFileName,
+          relativePath: testFileName,
+        }),
+      );
       toast.success(t("lineAnimationTest.realScenarioStarted"), { id: toastId });
     } catch (cause) {
       const message =
         cause instanceof ApiError
           ? apiError(cause.message, "lineAnimationTest.realTestFailed")
           : t("lineAnimationTest.realTestFailed");
+      setLatestTestResult(
+        buildLatestErrorResult({
+          source: selectedImageBase64 ? "image" : "camera",
+          fileName: selectedImageName || t("operator.liveCamera"),
+          relativePath: selectedImageName || t("operator.liveCamera"),
+          message,
+          productCode: product.code,
+        }),
+      );
       toast.error(message, { id: toastId });
     } finally {
       setTestingRealImage(false);
@@ -1009,6 +1096,7 @@ export function LineAnimationTestPanel({
     setLineRunning(false);
     setBatchTesting(true);
     setBatchSummary(null);
+    setLatestTestResult(null);
     setBatchProgress(null);
     resetProductionCounters();
     cancelBatchTestRef.current = false;
@@ -1037,7 +1125,7 @@ export function LineAnimationTestPanel({
         try {
           currentImageBase64 = await readFileAsDataUrl(file);
           setSelectedImageBase64(currentImageBase64);
-          const inspection = await runInspectionForImage(
+          const { crops, inspection } = await runInspectionForImage(
             validated.accessToken,
             currentImageBase64,
             validated.product,
@@ -1047,6 +1135,15 @@ export function LineAnimationTestPanel({
           );
 
           await playInspectionResult(inspection, validated.product.roiRegions);
+          setLatestTestResult(
+            buildLatestTestResult({
+              inspection,
+              roiImages: crops,
+              source: "folder",
+              fileName: file.name,
+              relativePath: file.webkitRelativePath || file.name,
+            }),
+          );
 
           rows.push({
             fileName: file.name,
@@ -1067,6 +1164,15 @@ export function LineAnimationTestPanel({
             : "";
 
           await playRejectedInspectionResult("ERROR");
+          setLatestTestResult(
+            buildLatestErrorResult({
+              source: "folder",
+              fileName: file.name,
+              relativePath: file.webkitRelativePath || file.name,
+              message,
+              productCode: validated.product.code,
+            }),
+          );
 
           rows.push({
             fileName: file.name,
@@ -1160,50 +1266,104 @@ export function LineAnimationTestPanel({
     };
   }
 
+  function buildLatestTestResult({
+    fileName,
+    inspection,
+    relativePath,
+    roiImages,
+    source,
+  }: {
+    fileName: string;
+    inspection: TestInspectionImageResult;
+    relativePath: string;
+    roiImages: RoiCropImage[];
+    source: LatestTestResultDetails["source"];
+  }): LatestTestResultDetails {
+    return {
+      source,
+      fileName,
+      relativePath,
+      productCode: inspection.productCode,
+      expectedText: inspection.expectedText,
+      result: inspection.result,
+      cycleTimeMs: inspection.cycleTimeMs,
+      imageWidth: inspection.imageWidth,
+      imageHeight: inspection.imageHeight,
+      errorMessage: inspection.error,
+      testedAt: new Date().toISOString(),
+      slots: inspection.slots,
+      roiImages,
+    };
+  }
+
+  function buildLatestErrorResult({
+    fileName,
+    message,
+    productCode,
+    relativePath,
+    source,
+  }: {
+    fileName: string;
+    message: string;
+    productCode: string;
+    relativePath: string;
+    source: LatestTestResultDetails["source"];
+  }): LatestTestResultDetails {
+    return {
+      source,
+      fileName,
+      relativePath,
+      productCode,
+      expectedText: "",
+      result: "ERROR",
+      cycleTimeMs: null,
+      imageWidth: null,
+      imageHeight: null,
+      errorMessage: message,
+      testedAt: new Date().toISOString(),
+      slots: [],
+      roiImages: [],
+    };
+  }
+
   if (layout === "operator-test") {
     const operatorTestActionButtons = (
       <>
         <Button
           type="button"
           variant="outline"
-          disabled={batchTesting}
-          className="operator-line-action-button h-14 border-[#1e293b] bg-[#9fc3eb] text-base font-semibold text-slate-950 opacity-100 hover:bg-[#8fb8e6] disabled:opacity-70"
-          onClick={() => fileInputRef.current?.click()}
-        >
-          <FileImage className="h-5 w-5" />
-          <span className="truncate">
-            {selectedImageName || t("lineAnimationTest.chooseImage")}
-          </span>
-        </Button>
-        <Button
-          type="button"
-          variant="outline"
-          disabled={batchTesting}
-          className="operator-line-action-button h-14 border-[#1e293b] bg-[#9fc3eb] text-base font-semibold text-slate-950 opacity-100 hover:bg-[#8fb8e6] disabled:opacity-70"
-          onClick={() => folderInputRef.current?.click()}
-        >
-          <FolderOpen className="h-5 w-5" />
-          <span className="truncate">
-            {batchFolderName
-              ? formatMessage(t("lineTest.folderSelected"), {
-                  folder: batchFolderName,
-                  count: batchFiles.length,
-                })
-              : t("lineTest.selectFolder")}
-          </span>
-        </Button>
-        <Button
-          type="button"
-          variant="outline"
-          disabled={isBusy || !selectedImageBase64}
+          disabled={isBusy}
           className="operator-line-action-button h-14 border-[#1e293b] bg-[#9fc3eb] text-base font-semibold text-slate-950 opacity-100 hover:bg-[#8fb8e6] disabled:opacity-70"
           onClick={() => void runRealImageTest()}
         >
           <Camera className="h-5 w-5" />
           {testingRealImage
             ? t("lineAnimationTest.realTesting")
-            : t("lineAnimationTest.runReal")}
+            : t("lineAnimationTest.runOnce")}
         </Button>
+        {lineRunning ? (
+          <Button
+            type="button"
+            variant="outline"
+            disabled={batchTesting}
+            className="operator-line-action-button h-14 border-[#1e293b] bg-[#9fc3eb] text-base font-semibold text-slate-950 opacity-100 hover:bg-[#8fb8e6] disabled:opacity-70"
+            onClick={finishLineSession}
+          >
+            <Pause className="h-5 w-5" />
+            {t("lineAnimationTest.checkingOff")}
+          </Button>
+        ) : (
+          <Button
+            type="button"
+            variant="outline"
+            disabled={testingRealImage || batchTesting}
+            className="operator-line-action-button h-14 border-[#1e293b] bg-[#9fc3eb] text-base font-semibold text-slate-950 opacity-100 hover:bg-[#8fb8e6] disabled:opacity-70"
+            onClick={runLineContinuously}
+          >
+            <Play className="h-5 w-5" />
+            {t("lineAnimationTest.checkingOn")}
+          </Button>
+        )}
         {batchTesting ? (
           <Button
             type="button"
@@ -1261,8 +1421,9 @@ export function LineAnimationTestPanel({
     );
 
     return (
-      <div className="grid h-full min-w-0 min-h-0 grid-rows-[auto_minmax(0,1fr)_auto] gap-3">
-        <Card className="operator-line-top-card border-[#86a8cf] bg-[#cfdff2] shadow-none">
+      <div className="grid min-w-0 gap-4 pb-4">
+        <div className="grid min-h-[calc(100dvh-170px)] min-w-0 grid-rows-[auto_minmax(0,1fr)_auto] gap-3">
+          <Card className="operator-line-top-card border-[#86a8cf] bg-[#cfdff2] shadow-none">
           <CardContent className="operator-line-top-content grid gap-4 p-4 min-[980px]:grid-cols-[340px_minmax(0,1fr)]">
             <div className="operator-line-product-box rounded-sm border border-[#9db7d8] bg-[#d9e6f5] p-4">
               <div className="mb-3 flex items-center justify-between gap-3">
@@ -1314,18 +1475,30 @@ export function LineAnimationTestPanel({
                     className="hidden"
                     onChange={handleImageChange}
                   />
-                  <Button
-                    type="button"
-                    variant="outline"
-                    className="h-11 justify-start border-[#9db7d8] bg-white text-slate-700 hover:bg-slate-50"
-                    disabled={batchTesting}
-                    onClick={() => fileInputRef.current?.click()}
-                  >
-                    <FileImage className="h-4 w-4" />
-                    <span className="truncate">
-                      {selectedImageName || t("lineAnimationTest.chooseImage")}
-                    </span>
-                  </Button>
+                  <div className="grid grid-cols-[minmax(0,1fr)_44px] gap-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="h-11 justify-start border-[#9db7d8] bg-white text-slate-700 hover:bg-slate-50"
+                      disabled={batchTesting}
+                      onClick={() => fileInputRef.current?.click()}
+                    >
+                      <FileImage className="h-4 w-4" />
+                      <span className="truncate">
+                        {selectedImageName || t("lineAnimationTest.chooseImage")}
+                      </span>
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      aria-label={t("lineTest.clearImage")}
+                      className="h-11 border-[#9db7d8] bg-white px-0 text-slate-700 hover:bg-slate-50"
+                      disabled={isBusy || !selectedImageBase64}
+                      onClick={clearSelectedImage}
+                    >
+                      <X className="h-4 w-4" />
+                    </Button>
+                  </div>
                 </div>
 
                 <div className="grid gap-2">
@@ -1340,23 +1513,35 @@ export function LineAnimationTestPanel({
                     className="hidden"
                     onChange={handleFolderChange}
                   />
-                  <Button
-                    type="button"
-                    variant="outline"
-                    className="h-11 justify-start border-[#9db7d8] bg-white text-slate-700 hover:bg-slate-50"
-                    disabled={batchTesting}
-                    onClick={() => folderInputRef.current?.click()}
-                  >
-                    <FolderOpen className="h-4 w-4" />
-                    <span className="truncate">
-                      {batchFolderName
-                        ? formatMessage(t("lineTest.folderSelected"), {
-                            folder: batchFolderName,
-                            count: batchFiles.length,
-                          })
-                        : t("lineTest.selectFolder")}
-                    </span>
-                  </Button>
+                  <div className="grid grid-cols-[minmax(0,1fr)_44px] gap-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="h-11 justify-start border-[#9db7d8] bg-white text-slate-700 hover:bg-slate-50"
+                      disabled={batchTesting}
+                      onClick={() => folderInputRef.current?.click()}
+                    >
+                      <FolderOpen className="h-4 w-4" />
+                      <span className="truncate">
+                        {batchFolderName
+                          ? formatMessage(t("lineTest.folderSelected"), {
+                              folder: batchFolderName,
+                              count: batchFiles.length,
+                            })
+                          : t("lineTest.selectFolder")}
+                      </span>
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      aria-label={t("lineTest.clearFolder")}
+                      className="h-11 border-[#9db7d8] bg-white px-0 text-slate-700 hover:bg-slate-50"
+                      disabled={batchTesting || batchFiles.length === 0}
+                      onClick={clearSelectedFolder}
+                    >
+                      <X className="h-4 w-4" />
+                    </Button>
+                  </div>
                 </div>
 
                 {batchSummary ? (
@@ -1420,9 +1605,9 @@ export function LineAnimationTestPanel({
               </div>
             </div>
           </CardContent>
-        </Card>
+          </Card>
 
-        <Card className="operator-line-preview-card flex min-h-0 overflow-hidden border-[#86a8cf] bg-[#9fc3eb] shadow-none">
+          <Card className="operator-line-preview-card flex min-h-0 overflow-hidden border-[#86a8cf] bg-[#9fc3eb] shadow-none">
           <div className="flex min-h-0 flex-1 flex-col">
             <div className="operator-line-preview-heading shrink-0 border-b border-[#86a8cf] px-4 py-3 text-center text-3xl font-bold text-[#2270c6]">
               {t("operator.referenceImage")}
@@ -1444,11 +1629,17 @@ export function LineAnimationTestPanel({
               />
             </div>
           </div>
-        </Card>
+          </Card>
 
-        <div className="operator-line-footer-actions grid shrink-0 gap-2 min-[980px]:grid-cols-6">
-          {operatorTestActionButtons}
+          <div className="operator-line-footer-actions grid shrink-0 gap-2 min-[980px]:grid-cols-5">
+            {operatorTestActionButtons}
+          </div>
         </div>
+
+        <LatestTestResultCard
+          result={latestTestResult}
+          t={t}
+        />
       </div>
     );
   }
@@ -1733,6 +1924,11 @@ export function LineAnimationTestPanel({
           )}
         </CardContent>
       </Card>
+
+      <LatestTestResultCard
+        result={latestTestResult}
+        t={t}
+      />
     </div>
   );
 }
@@ -1744,6 +1940,254 @@ function MetricTile({ label, value }: { label: string; value: number }) {
       <div className="mt-2 text-3xl font-bold text-slate-950">{value}</div>
     </div>
   );
+}
+
+function LatestTestResultCard({
+  result,
+  t,
+}: {
+  result: LatestTestResultDetails | null;
+  t: (key: string) => string;
+}) {
+  const roiImageBySlot = new Map(
+    (result?.roiImages ?? []).map((image) => [image.slotIndex, image.imageBase64]),
+  );
+
+  return (
+    <Card className="border-[#86a8cf] bg-white shadow-none">
+      <CardContent className="grid gap-4 p-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-2 text-lg font-bold text-slate-950">
+            <FileImage className="h-5 w-5 text-[#274d7d]" />
+            {t("lineTest.latestResultDetails")}
+          </div>
+          {result ? (
+            <div className="flex flex-wrap gap-2">
+              <Badge className={getResultBadgeClass(result.result)}>
+                {result.result}
+              </Badge>
+              <Badge className="border-slate-200 bg-slate-50 text-slate-700">
+                {result.source === "folder"
+                  ? t("lineTest.sourceFolder")
+                  : result.source === "camera"
+                    ? t("lineTest.sourceCamera")
+                    : t("lineTest.sourceImage")}
+              </Badge>
+            </div>
+          ) : null}
+        </div>
+
+        {result ? (
+          <>
+            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+              <DetailTile label={t("lineTest.batchImage")} value={result.fileName} />
+              <DetailTile label={t("operator.currentProduct")} value={result.productCode} />
+              <DetailTile
+                label={t("lineTest.cycleTime")}
+                value={
+                  result.cycleTimeMs == null
+                    ? "-"
+                    : `${Math.round(result.cycleTimeMs)} ms`
+                }
+              />
+              <DetailTile
+                label={t("lineTest.imageSize")}
+                value={
+                  result.imageWidth && result.imageHeight
+                    ? `${result.imageWidth} x ${result.imageHeight}`
+                    : "-"
+                }
+              />
+            </div>
+
+            <div className="grid gap-2 text-sm text-slate-700 sm:grid-cols-2">
+              <div className="border border-slate-200 bg-slate-50 px-3 py-2">
+                <span className="font-semibold text-slate-950">
+                  {t("lineTest.relativePath")}:
+                </span>{" "}
+                {result.relativePath || "-"}
+              </div>
+              <div className="border border-slate-200 bg-slate-50 px-3 py-2">
+                <span className="font-semibold text-slate-950">
+                  {t("lineTest.testedAt")}:
+                </span>{" "}
+                {formatDateTime(result.testedAt)}
+              </div>
+              <div className="border border-slate-200 bg-slate-50 px-3 py-2">
+                <span className="font-semibold text-slate-950">
+                  {t("dashboard.expectedText")}:
+                </span>{" "}
+                {result.expectedText || "-"}
+              </div>
+              <div className="border border-slate-200 bg-slate-50 px-3 py-2">
+                <span className="font-semibold text-slate-950">
+                  {t("lineTest.error")}:
+                </span>{" "}
+                {result.errorMessage || "-"}
+              </div>
+            </div>
+
+            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+              {result.slots.length > 0 ? (
+                result.slots.map((slot, index) => {
+                  const slotIndex =
+                    typeof slot.slotIndex === "number" ? slot.slotIndex : null;
+                  const roiImage =
+                    slotIndex == null ? "" : roiImageBySlot.get(slotIndex) ?? "";
+
+                  return (
+                    <div
+                      key={`roi-image-${slot.slotIndex ?? "unknown"}-${index}`}
+                      className="border border-slate-200 bg-slate-50"
+                    >
+                      <div className="flex items-center justify-between gap-2 border-b border-slate-200 bg-white px-3 py-2">
+                        <div className="truncate text-sm font-bold text-slate-950">
+                          {slot.slotLabel ??
+                            `${t("lineTest.roiSlot")} ${slot.slotIndex ?? "-"}`}
+                        </div>
+                        <Badge className={getResultBadgeClass(slot.result)}>
+                          {slot.result}
+                        </Badge>
+                      </div>
+                      <div className="flex aspect-[4/3] items-center justify-center bg-slate-950 p-2">
+                        {roiImage ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img
+                            alt={`${t("lineTest.roiCropImage")} ${
+                              slot.slotIndex ?? index + 1
+                            }`}
+                            className="max-h-full max-w-full object-contain"
+                            src={roiImage}
+                          />
+                        ) : (
+                          <div className="text-xs font-medium text-slate-400">
+                            {t("lineTest.noRoiCropImage")}
+                          </div>
+                        )}
+                      </div>
+                      <div className="grid gap-1 px-3 py-2 text-xs text-slate-700">
+                        <div>
+                          <span className="font-semibold text-slate-950">
+                            {t("dashboard.expectedText")}:
+                          </span>{" "}
+                          {slot.expectedText || "-"}
+                        </div>
+                        <div>
+                          <span className="font-semibold text-slate-950">
+                            {t("dashboard.rawText")}:
+                          </span>{" "}
+                          {slot.rawText || "-"}
+                        </div>
+                        <div>
+                          <span className="font-semibold text-slate-950">
+                            {t("lineTest.error")}:
+                          </span>{" "}
+                          {slot.errorMessage || "-"}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })
+              ) : (
+                <div className="border border-dashed border-slate-300 p-6 text-center text-sm font-medium text-slate-500 sm:col-span-2 xl:col-span-5">
+                  {t("lineTest.emptyResult")}
+                </div>
+              )}
+            </div>
+
+            <div className="overflow-x-auto border border-slate-200">
+              <table className="min-w-[760px] w-full border-collapse text-left text-sm">
+                <thead className="bg-slate-100 text-xs uppercase text-slate-500">
+                  <tr>
+                    <th className="border-b border-slate-200 px-3 py-2">
+                      {t("lineTest.roiSlot")}
+                    </th>
+                    <th className="border-b border-slate-200 px-3 py-2">
+                      {t("lineTest.result")}
+                    </th>
+                    <th className="border-b border-slate-200 px-3 py-2">
+                      {t("dashboard.expectedText")}
+                    </th>
+                    <th className="border-b border-slate-200 px-3 py-2">
+                      {t("dashboard.rawText")}
+                    </th>
+                    <th className="border-b border-slate-200 px-3 py-2">
+                      {t("lineTest.error")}
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {result.slots.length > 0 ? (
+                    result.slots.map((slot, index) => (
+                      <tr
+                        key={`${slot.slotIndex ?? "unknown"}-${index}`}
+                        className="odd:bg-white even:bg-slate-50"
+                      >
+                        <td className="border-b border-slate-100 px-3 py-2 font-semibold text-slate-950">
+                          {slot.slotLabel ??
+                            `${t("lineTest.roiSlot")} ${slot.slotIndex ?? "-"}`}
+                        </td>
+                        <td className="border-b border-slate-100 px-3 py-2">
+                          <Badge className={getResultBadgeClass(slot.result)}>
+                            {slot.result}
+                          </Badge>
+                        </td>
+                        <td className="border-b border-slate-100 px-3 py-2 text-slate-700">
+                          {slot.expectedText || "-"}
+                        </td>
+                        <td className="border-b border-slate-100 px-3 py-2 text-slate-700">
+                          {slot.rawText || "-"}
+                        </td>
+                        <td className="border-b border-slate-100 px-3 py-2 text-slate-700">
+                          {slot.errorMessage || "-"}
+                        </td>
+                      </tr>
+                    ))
+                  ) : (
+                    <tr>
+                      <td
+                        className="px-3 py-6 text-center text-slate-500"
+                        colSpan={5}
+                      >
+                        {t("lineTest.emptyResult")}
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </>
+        ) : (
+          <div className="border border-dashed border-slate-300 p-6 text-center text-sm font-medium text-slate-500">
+            {t("lineTest.emptyResult")}
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function DetailTile({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="border border-slate-200 bg-slate-50 p-4">
+      <div className="text-xs font-semibold uppercase text-slate-500">{label}</div>
+      <div className="mt-2 truncate text-lg font-bold text-slate-950">
+        {value || "-"}
+      </div>
+    </div>
+  );
+}
+
+function getResultBadgeClass(result: string) {
+  if (result === "OK") {
+    return "border-emerald-200 bg-emerald-50 text-emerald-700";
+  }
+
+  if (result === "NG" || result === "ERROR") {
+    return "border-red-200 bg-red-50 text-red-700";
+  }
+
+  return "border-slate-200 bg-slate-50 text-slate-700";
 }
 
 function OperatorMetricTile({
@@ -1793,6 +2237,18 @@ function formatMessage(
     (message, [key, value]) => message.replace(`{${key}}`, String(value)),
     template,
   );
+}
+
+function formatDateTime(value: string) {
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) {
+    return value || "-";
+  }
+
+  return date.toLocaleString("vi-VN", {
+    hour12: false,
+  });
 }
 
 async function compressImageForReport(

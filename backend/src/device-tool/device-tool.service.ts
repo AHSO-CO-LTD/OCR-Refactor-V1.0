@@ -162,7 +162,7 @@ export class DeviceToolService {
     if (this.isCameraConnected(status)) {
       if (!this.isSameRuntimeCamera(status, selectedDevice)) {
         await this.disconnectCamera();
-        await this.requestJson(
+        const response = await this.requestJson<DeviceToolActionResponse>(
           this.getToolPath('/camera/connect'),
           {
             method: 'POST',
@@ -170,10 +170,11 @@ export class DeviceToolService {
           },
           'connect camera',
         );
+        this.assertToolSuccess(response, 'connect camera');
         return;
       }
 
-      await this.requestJson(
+      const response = await this.requestJson<DeviceToolActionResponse>(
         this.getToolPath('/camera/settings'),
         {
           method: 'POST',
@@ -181,10 +182,11 @@ export class DeviceToolService {
         },
         'update camera settings',
       );
+      this.assertToolSuccess(response, 'update camera settings');
       return;
     }
 
-    await this.requestJson(
+    const response = await this.requestJson<DeviceToolActionResponse>(
       this.getToolPath('/camera/connect'),
       {
         method: 'POST',
@@ -192,6 +194,7 @@ export class DeviceToolService {
       },
       'connect camera',
     );
+    this.assertToolSuccess(response, 'connect camera');
   }
 
   async ensureCameraPreviewReady(camera: CameraProfileDto) {
@@ -216,7 +219,7 @@ export class DeviceToolService {
     if (this.isCameraConnected(status)) {
       if (!this.isSameRuntimeCamera(status, selectedDevice)) {
         await this.disconnectCamera();
-        await this.requestJson(
+        const response = await this.requestJson<DeviceToolActionResponse>(
           this.getToolPath('/camera/connect'),
           {
             method: 'POST',
@@ -224,10 +227,11 @@ export class DeviceToolService {
           },
           'connect preview camera',
         );
+        this.assertToolSuccess(response, 'connect preview camera');
         return;
       }
 
-      await this.requestJson(
+      const response = await this.requestJson<DeviceToolActionResponse>(
         this.getToolPath('/camera/settings'),
         {
           method: 'POST',
@@ -241,10 +245,11 @@ export class DeviceToolService {
         },
         'update preview camera settings',
       );
+      this.assertToolSuccess(response, 'update preview camera settings');
       return;
     }
 
-    await this.requestJson(
+    const response = await this.requestJson<DeviceToolActionResponse>(
       this.getToolPath('/camera/connect'),
       {
         method: 'POST',
@@ -252,6 +257,7 @@ export class DeviceToolService {
       },
       'connect preview camera',
     );
+    this.assertToolSuccess(response, 'connect preview camera');
   }
 
   private async resolveCameraDevice(deviceName?: string) {
@@ -298,12 +304,21 @@ export class DeviceToolService {
     );
   }
 
-  private async disconnectCamera() {
-    await this.requestJson(
+  async disconnectCamera() {
+    const status = await this.getCameraStatus();
+
+    if (!this.isCameraConnected(status)) {
+      return { success: true };
+    }
+
+    const response = await this.requestJson<DeviceToolActionResponse>(
       this.getToolPath('/camera/disconnect'),
       { method: 'POST' },
       'disconnect camera',
     );
+
+    this.assertToolSuccess(response, 'disconnect camera');
+    return response;
   }
 
   async listCameraDevices() {

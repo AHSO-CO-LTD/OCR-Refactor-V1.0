@@ -127,7 +127,7 @@ export class ServiceManager {
 
   getFrontendUrl() {
     const frontend = this.services.find((service) => service.name === "frontend");
-    return `http://127.0.0.1:${frontend?.port ?? 3000}/login`;
+    return `http://127.0.0.1:${frontend?.port ?? 3000}/`;
   }
 
   onLog(listener: (message: string) => void) {
@@ -564,11 +564,27 @@ function resolveToolPython(repoRoot: string) {
   }
 
   if (process.platform !== "win32") {
-    return { command: "python3", args: [] };
+    if (canRunToolPython("python3", [])) {
+      return { command: "python3", args: [] };
+    }
+
+    return { command: "python", args: [] };
   }
 
-  if (canRun("py", ["-3.11", "--version"])) {
-    return { command: "py", args: ["-3.11"] };
+  const launcherCandidates = [
+    { command: "py", args: ["-3.9"] },
+    { command: "py", args: ["-3.11"] },
+    ...getWindowsPythonLauncherPaths().map((pythonPath) => ({
+      command: pythonPath,
+      args: [],
+    })),
+    { command: "python", args: [] },
+  ];
+
+  for (const candidate of launcherCandidates) {
+    if (canRunToolPython(candidate.command, candidate.args)) {
+      return candidate;
+    }
   }
 
   if (canRun("uv", ["--version"])) {
@@ -585,7 +601,7 @@ function resolveToolPython(repoRoot: string) {
     };
   }
 
-  return { command: "py", args: ["-3.11"] };
+  return { command: "py", args: ["-3.9"] };
 }
 
 function canRun(command: string, args: string[]) {
@@ -595,6 +611,32 @@ function canRun(command: string, args: string[]) {
   });
 
   return result.status === 0;
+}
+
+function canRunToolPython(command: string, args: string[]) {
+  return canRun(command, [
+    ...args,
+    "-c",
+    "import fastapi, uvicorn",
+  ]);
+}
+
+function getWindowsPythonLauncherPaths() {
+  const result = spawnSync("py", ["-0p"], {
+    encoding: "utf8",
+    windowsHide: true,
+  });
+
+  if (result.status !== 0) {
+    return [];
+  }
+
+  const output = `${result.stdout ?? ""}\n${result.stderr ?? ""}`;
+
+  return output
+    .split(/\r?\n/)
+    .map((line) => line.match(/([A-Za-z]:\\.*?python\.exe)\s*$/i)?.[1])
+    .filter((pythonPath): pythonPath is string => Boolean(pythonPath));
 }
 
 async function waitForHealth(

@@ -427,6 +427,20 @@ input[type="radio"]:not(:disabled) {
   display: none;
 }
 
+.operator-camera-preview-frame {
+  border: 2px solid #009ee3;
+}
+
+.operator-line-preview-heading {
+  padding-block: 0.5rem;
+  font-size: 1.75rem;
+  line-height: 1.05;
+}
+
+.operator-line-preview-body {
+  padding: 0.75rem;
+}
+
 @media (min-aspect-ratio: 13/10) and (min-width: 1400px) {
   .operator-line-top-card .operator-line-top-content {
     grid-template-columns: 308px minmax(0, 1fr) 190px;
@@ -484,13 +498,13 @@ input[type="radio"]:not(:disabled) {
   }
 
   .operator-line-preview-heading {
-    padding-block: 0.75rem;
-    font-size: 2rem;
-    line-height: 1.1;
+    padding-block: 0.5rem;
+    font-size: 1.75rem;
+    line-height: 1.05;
   }
 
   .operator-line-preview-body {
-    padding: 0.75rem;
+    padding: 0.625rem;
   }
 }
 
@@ -535,11 +549,11 @@ input[type="radio"]:not(:disabled) {
   }
 
   .operator-line-preview-heading {
-    padding-block: 0.625rem;
-    font-size: 1.875rem;
+    padding-block: 0.4375rem;
+    font-size: 1.625rem;
   }
 
   .operator-line-preview-body {
-    padding: 0.625rem;
+    padding: 0.5rem;
   }
 }
