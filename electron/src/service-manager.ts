@@ -594,7 +594,6 @@ function resolveToolPython(repoRoot: string) {
   }
 
   const launcherCandidates = [
-    { command: "py", args: ["-3.9"] },
     { command: "py", args: ["-3.11"] },
     ...getWindowsPythonLauncherPaths().map((pythonPath) => ({
       command: pythonPath,
@@ -623,7 +622,7 @@ function resolveToolPython(repoRoot: string) {
     };
   }
 
-  return { command: "py", args: ["-3.9"] };
+  return { command: "py", args: ["-3.11"] };
 }
 
 function canRun(command: string, args: string[]) {
