@@ -228,16 +228,17 @@ class BaslerCamera(CameraTool):
             img = None
             try:
                 with self._grab_lock:
-                    if (
-                        not self._streaming
-                        or self._cam is None
-                        or not self._cam.IsGrabbing()
-                    ):
+                    if not self._streaming or self._cam is None:
                         break
-                    img = self._retrieve()
+                    if self._cam.IsGrabbing():
+                        img = self._retrieve()
             except Exception as e:
                 logger.error("[basler:%s] lỗi stream: %s", self.tool_id, e)
                 time.sleep(0.05)
+                continue
+
+            if img is None:
+                time.sleep(0.01)
                 continue
 
             if img is not None:

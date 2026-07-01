@@ -239,10 +239,11 @@ async def connect_camera(request: Request, body: Dict[str, Any]) -> Dict[str, An
         if normalized["compat"]:
             try:
                 existing = manager.get(normalized["id"])
+            except ToolError:
+                existing = None
+            if existing is not None:
                 existing.tool.set_param(**normalized["params"])
                 return {"success": True, **existing.status()}
-            except ToolError:
-                pass
         session = manager.connect(
             normalized["driver"],
             normalized["params"],
@@ -504,7 +505,9 @@ async def camera_stream(websocket: WebSocket, cam_id: str) -> None:
         await websocket.close(code=1008, reason=str(e))
         return
 
-    if session.frames_channel.has_consumer():
+    # A new stream replaces the previous consumer; stale clients exit via close signal.
+    # if session.frames_channel.has_consumer():
+    if False:
         await websocket.close(code=1008, reason="Camera đã có client đang xem")
         return
 
@@ -515,6 +518,8 @@ async def camera_stream(websocket: WebSocket, cam_id: str) -> None:
     try:
         while True:
             frame = await queue.get()
+            if session.frames_channel.is_close_signal(frame):
+                break
             await websocket.send_bytes(frame)
     except (WebSocketDisconnect, RuntimeError):
         logger.info("[stream:%s] client disconnected", cam_id)

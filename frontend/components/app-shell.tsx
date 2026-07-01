@@ -8,8 +8,8 @@ import { AccountMenu } from "@/components/account-menu";
 import { ConfirmModal } from "@/components/ui/confirm-modal";
 import type { RoleCode, SessionUser, SystemLicenseState } from "@/lib/api";
 import {
-  ApiError,
   connectCamera,
+  disconnectCamera,
   getCameraStatus,
   getCurrentSession,
   listCameraDevices,
@@ -103,12 +103,21 @@ const navGroups = [
   groupKey: NavGroupKey;
 }>;
 
+const cameraRuntimePathPrefixes = [
+  "/dashboard/line",
+  "/dashboard/line-test",
+  "/dashboard/line-animation-test",
+  "/dashboard/camera",
+  "/dashboard/camera-debug",
+  "/dashboard/products",
+  "/dashboard/roi",
+];
+
 export function AppShell({ children }: AppShellProps) {
   const router = useRouter();
   const pathname = usePathname();
-  const { apiError, t } = useI18n();
+  const { t } = useI18n();
   const adminNavRef = useRef<HTMLDivElement | null>(null);
-  const cameraPrimeToastShownRef = useRef(false);
   const [user, setUser] = useState<SessionUser | null>(null);
   const [loading, setLoading] = useState(true);
   const [selectedAdminGroup, setSelectedAdminGroup] = useState<NavGroupKey | null>(null);
@@ -119,6 +128,7 @@ export function AppShell({ children }: AppShellProps) {
   const [shutdownStatus, setShutdownStatus] = useState("");
   const handleLicenseLost = useCallback(
     (license: SystemLicenseState) => {
+      silentlyDisconnectCamera(getAccessToken());
       clearSession();
       toast.error(license.message || t("session.licenseLost"));
       router.replace("/login");
@@ -147,52 +157,16 @@ export function AppShell({ children }: AppShellProps) {
 
         if (shouldUseOperatorStartup(nextUser) && pathname === "/dashboard") {
           router.replace(getPostLoginRoute(nextUser));
+          return;
         }
 
-        if (shouldPrimeCameraRuntime(nextUser)) {
-          void primeCameraRuntime(token)
-            .then((result) => {
-              if (cameraPrimeToastShownRef.current) {
-                return;
-              }
-
-              if (result === "connected") {
-                cameraPrimeToastShownRef.current = true;
-                toast.success(t("camera.startupConnected"));
-                return;
-              }
-
-              if (result === "noProduct") {
-                cameraPrimeToastShownRef.current = true;
-                toast.warning(t("camera.startupNoProduct"));
-                return;
-              }
-
-              if (result === "notConnected") {
-                cameraPrimeToastShownRef.current = true;
-                toast.warning(t("camera.startupConnectError"));
-              }
-            })
-            .catch((cause) => {
-              if (cameraPrimeToastShownRef.current) {
-                return;
-              }
-
-              cameraPrimeToastShownRef.current = true;
-              const message =
-                cause instanceof ApiError
-                  ? apiError(cause.message, "camera.startupConnectError")
-                  : t("camera.startupConnectError");
-              toast.warning(message);
-            });
-        }
       })
       .catch(() => {
         clearSession();
         router.replace("/login");
       })
       .finally(() => setLoading(false));
-  }, [apiError, pathname, router, t]);
+  }, [pathname, router]);
 
   useEffect(() => {
     const bridge = getDesktopBridge();
@@ -206,8 +180,32 @@ export function AppShell({ children }: AppShellProps) {
     });
   }, []);
 
+  useEffect(() => {
+    if (!user) {
+      return;
+    }
+
+    const token = getAccessToken();
+
+    if (!token) {
+      return;
+    }
+
+    if (requiresCameraRuntime(pathname)) {
+      if (shouldPrimeCameraRuntime(user)) {
+        silentlyPrimeCameraRuntime(token);
+      }
+      return;
+    }
+
+    silentlyDisconnectCamera(token);
+  }, [pathname, user]);
+
   function handleLogout() {
+    const token = getAccessToken();
+
     clearOperatorStartupAutoLoginRequest();
+    silentlyDisconnectCamera(token);
     clearSession();
     router.replace("/login");
   }
@@ -623,6 +621,28 @@ function shouldPrimeCameraRuntime(user: SessionUser) {
     user.permissions.includes("camera.manage") ||
     user.permissions.includes("inspection.start")
   );
+}
+
+function requiresCameraRuntime(pathname: string) {
+  return cameraRuntimePathPrefixes.some(
+    (prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`),
+  );
+}
+
+function silentlyDisconnectCamera(accessToken: string | null | undefined) {
+  if (!accessToken) {
+    return;
+  }
+
+  void disconnectCamera(accessToken).catch(() => undefined);
+}
+
+function silentlyPrimeCameraRuntime(accessToken: string | null | undefined) {
+  if (!accessToken) {
+    return;
+  }
+
+  void primeCameraRuntime(accessToken).catch(() => undefined);
 }
 
 async function primeCameraRuntime(accessToken: string) {

@@ -685,6 +685,21 @@ export async function connectCamera(
   return (await response.json()) as CameraRuntimeStatus;
 }
 
+export async function disconnectCamera(accessToken: string) {
+  const response = await fetch(`${API_BASE_URL}/camera/disconnect`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+    },
+  });
+
+  if (!response.ok) {
+    throw new ApiError(await parseError(response), response.status);
+  }
+
+  return (await response.json()) as { success: boolean; error?: string };
+}
+
 export async function grabCameraFrame(accessToken: string) {
   const response = await fetch(`${API_BASE_URL}/camera/grab`, {
     method: "POST",

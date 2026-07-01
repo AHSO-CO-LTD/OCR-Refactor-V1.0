@@ -64,6 +64,7 @@ class FrameChannel:
     def __init__(self) -> None:
         self._loop: Optional[asyncio.AbstractEventLoop] = None
         self._queue: "Optional[asyncio.Queue[Any]]" = None
+        self._close_signal = object()
 
     def attach_loop(self, loop: asyncio.AbstractEventLoop) -> None:
         """Gắn event loop của server (gọi 1 lần lúc startup)."""
@@ -74,12 +75,19 @@ class FrameChannel:
 
     def open(self) -> "asyncio.Queue[Any]":
         """Mở kênh cho 1 client. Gọi trong WS handler (ngữ cảnh async)."""
+        self.close()
         self._queue = asyncio.Queue(maxsize=1)
         return self._queue
 
     def close(self) -> None:
         """Đóng kênh khi client rời đi."""
+        q = self._queue
         self._queue = None
+        if q is not None:
+            self._offer(q, self._close_signal)
+
+    def is_close_signal(self, item: Any) -> bool:
+        return item is self._close_signal
 
     def publish(self, item: Any) -> None:
         """Đẩy frame mới nhất cho client. An toàn gọi từ thread camera."""

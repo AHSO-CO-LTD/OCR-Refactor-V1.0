@@ -77,6 +77,13 @@ export class CameraController {
     return this.deviceToolService.getCameraStatus();
   }
 
+  @ApiOperation({ summary: 'Disconnect the active camera runtime' })
+  @Post('disconnect')
+  @RequireAnyPermission(PERMISSIONS.CAMERA_MANAGE, PERMISSIONS.INSPECTION_START)
+  disconnect() {
+    return this.deviceToolService.disconnectCamera();
+  }
+
   @ApiOperation({ summary: 'Grab one camera frame from the Device Tool' })
   @Post('grab')
   @RequireAnyPermission(PERMISSIONS.CAMERA_MANAGE, PERMISSIONS.INSPECTION_START)

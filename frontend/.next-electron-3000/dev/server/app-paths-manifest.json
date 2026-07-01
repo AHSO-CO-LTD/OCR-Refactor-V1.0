@@ -1,4 +1,7 @@
 {
+  "/dashboard/line/page": "app/dashboard/line/page.js",
+  "/dashboard/page": "app/dashboard/page.js",
   "/login/page": "app/login/page.js",
-  "/dashboard/page": "app/dashboard/page.js"
+  "/dashboard/camera-debug/page": "app/dashboard/camera-debug/page.js",
+  "/dashboard/camera/page": "app/dashboard/camera/page.js"
 }

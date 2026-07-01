@@ -11,7 +11,7 @@ import { LanguageToggle } from "@/components/language-toggle";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { useVirtualKeyboard } from "@/components/ui/virtual-keyboard";
-import { ApiError, getCurrentSession, login } from "@/lib/api";
+import { ApiError, disconnectCamera, getCurrentSession, login } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
 import {
   clearOperatorStartupAutoLoginRequest,
@@ -71,6 +71,7 @@ export default function LoginPage() {
         }
 
         if (startupAutoLoginRequested && response.data.user.role !== "operator") {
+          silentlyDisconnectCamera(token);
           clearSession();
           markSessionChecked();
           return;
@@ -88,6 +89,7 @@ export default function LoginPage() {
           return;
         }
 
+        silentlyDisconnectCamera(token);
         clearSession();
         markSessionChecked();
       });
@@ -118,6 +120,12 @@ export default function LoginPage() {
 
     login(OPERATOR_AUTO_LOGIN_USERNAME, OPERATOR_AUTO_LOGIN_PASSWORD)
       .then((response) => {
+        if (response.data.user.role !== "operator") {
+          silentlyDisconnectCamera(response.data.accessToken);
+          clearSession();
+          throw new Error("Operator auto-login returned a non-operator user");
+        }
+
         saveSession(response.data.accessToken, response.data.user);
         clearOperatorStartupAutoLoginRequest();
         toast.success(t("auth.operatorAutoLoginSuccess"));
@@ -264,4 +272,12 @@ export default function LoginPage() {
       </section>
     </main>
   );
+}
+
+function silentlyDisconnectCamera(accessToken: string | null | undefined) {
+  if (!accessToken) {
+    return;
+  }
+
+  void disconnectCamera(accessToken).catch(() => undefined);
 }

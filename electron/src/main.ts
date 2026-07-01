@@ -34,7 +34,7 @@ const defaultTestStorageSettings: DesktopTestStorageSettings = {
 };
 
 let rendererUrl =
-  process.env.ELECTRON_RENDERER_URL ?? "http://127.0.0.1:3000/login";
+  process.env.ELECTRON_RENDERER_URL ?? "http://127.0.0.1:3000/";
 
 let mainWindow: BrowserWindow | null = null;
 let terminalWindow: BrowserWindow | null = null;
