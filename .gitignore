@@ -7,8 +7,13 @@ dist/
 build/
 out/
 .next/
-release/
+/release/
+/release-runtime/
 coverage/
+
+!build/
+build/*
+!build/installer.nsh
 
 # Runtime
 logs/

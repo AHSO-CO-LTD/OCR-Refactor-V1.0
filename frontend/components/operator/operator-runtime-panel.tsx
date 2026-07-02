@@ -86,7 +86,7 @@ const demoProducts: ProductProfile[] = [
       zoomFactor: 1,
       previewPanX: 0,
       previewPanY: 0,
-      previewRotation: 0,
+      previewRotation: 90,
     },
     roiRegions: [
       { index: 1, x: 283, y: 237, width: 105, height: 161, rotation: 0 },

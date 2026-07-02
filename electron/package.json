@@ -1,19 +1,93 @@
 {
   "name": "@ocr/electron",
   "version": "0.1.0",
+  "description": "Desktop shell for the AHSO OCR local station.",
+  "author": "AHSO",
   "private": true,
   "main": "dist/main.js",
   "scripts": {
     "build": "tsc -p tsconfig.json",
+    "dist:win": "npm run build && electron-builder --win nsis --x64",
     "dev": "npm run build && node scripts/launch-electron.cjs",
     "lint": "eslint \"src/**/*.ts\"",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
+  "build": {
+    "appId": "vn.ahso.ocr-metal-core-washing",
+    "productName": "AHSO OCR Metal Core Washing",
+    "artifactName": "AHSO-OCR-Setup-${version}-${arch}.${ext}",
+    "directories": {
+      "output": "../release"
+    },
+    "files": [
+      "dist/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "../release-runtime",
+        "to": "runtime",
+        "filter": [
+          "**/*",
+          "!**/node_modules/**/*",
+          "!**/.venv/**/*",
+          "!**/__pycache__/**/*",
+          "!**/.pytest_cache/**/*",
+          "!**/.env",
+          "!**/.env.*"
+        ]
+      },
+      {
+        "from": "../scripts/release",
+        "to": "installer",
+        "filter": [
+          "**/*.ps1",
+          "**/*.md"
+        ]
+      }
+    ],
+    "asar": true,
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "requestedExecutionLevel": "requireAdministrator"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": true,
+      "allowElevation": true,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "runAfterFinish": true,
+      "include": "../build/installer.nsh"
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "AHSO-CO-LTD",
+        "repo": "OCR-Refactor-V1.0",
+        "releaseType": "release"
+      }
+    ],
+    "electronUpdaterCompatibility": ">=2.16"
+  },
   "devDependencies": {
     "@types/node": "^24.0.0",
-    "electron": "^39.2.7",
+    "electron": "39.8.10",
+    "electron-builder": "^26.15.3",
     "eslint": "^9.18.0",
     "typescript": "^5.7.3",
     "typescript-eslint": "^8.20.0"
+  },
+  "dependencies": {
+    "electron-log": "^5.4.4",
+    "electron-updater": "^6.8.9"
   }
 }

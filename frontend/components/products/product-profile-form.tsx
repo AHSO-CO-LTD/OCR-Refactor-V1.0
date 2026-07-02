@@ -105,7 +105,7 @@ const defaultDraft: ProductProfilePayload = {
     zoomFactor: 1,
     previewPanX: 0,
     previewPanY: 0,
-    previewRotation: 0,
+    previewRotation: 90,
   },
   roiRegions: [],
 };

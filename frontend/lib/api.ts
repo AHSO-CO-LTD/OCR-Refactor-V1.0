@@ -218,6 +218,24 @@ export type HealthResponse = {
   };
 };
 
+export type SetupStatusResponse = {
+  data: {
+    initialized: boolean;
+    requiresAdminSetup: boolean;
+    adminCount: number;
+    activeAdminCount: number;
+    devSupportReady: boolean;
+  };
+};
+
+export type InitialAdminPayload = {
+  username: string;
+  password: string;
+  fullName: string;
+  department?: string;
+  employeeNo?: string;
+};
+
 export type SystemLicenseState = {
   status: "licensed" | "unlicensed" | "unknown";
   licensed: boolean | null;
@@ -502,6 +520,41 @@ export async function getCurrentInspection(accessToken: string) {
   }
 
   return (await response.json()) as { data: CurrentInspectionState | null };
+}
+
+export async function getSetupStatus(options: { signal?: AbortSignal } = {}) {
+  const response = await fetch(`${API_BASE_URL}/setup/status`, {
+    signal: options.signal,
+  });
+
+  if (!response.ok) {
+    throw new ApiError(await parseError(response), response.status);
+  }
+
+  return (await response.json()) as SetupStatusResponse;
+}
+
+export async function createInitialAdmin(payload: InitialAdminPayload) {
+  const response = await fetch(`${API_BASE_URL}/setup/initial-admin`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(payload),
+  });
+
+  if (!response.ok) {
+    throw new ApiError(await parseError(response), response.status);
+  }
+
+  return (await response.json()) as {
+    data: {
+      id: string;
+      username: string;
+      fullName: string;
+      role: RoleCode;
+    };
+  };
 }
 
 export async function startInspection(

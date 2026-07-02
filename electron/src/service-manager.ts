@@ -1,12 +1,13 @@
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { existsSync } from "node:fs";
 import { createConnection } from "node:net";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 
 export type LocalServiceName = "backend" | "device-tool" | "frontend";
 
 type LocalServiceDefinition = {
   command: string;
+  env?: Record<string, string>;
   args: string[];
   cwd: string;
   healthUrl: string;
@@ -100,14 +101,10 @@ export class ServiceManager {
 
   constructor(repoRoot: string) {
     const toolPython = resolveToolPython(repoRoot);
-    const backendCommand = resolveNpmCommand([
-      "run",
-      "start",
-      "-w",
-      "@ocr/backend",
-    ]);
+    const backendCommand = resolveBackendCommand(repoRoot);
     const frontendPath = join(repoRoot, "frontend");
     const frontendCommand = resolveFrontendCommand(
+      repoRoot,
       frontendPath,
       DEFAULT_PORTS.frontend,
     );
@@ -131,8 +128,9 @@ export class ServiceManager {
       {
         name: "backend",
         command: backendCommand.command,
+        env: backendCommand.env,
         args: backendCommand.args,
-        cwd: repoRoot,
+        cwd: backendCommand.cwd,
         healthUrl: `http://127.0.0.1:${DEFAULT_PORTS.backend}/api/health`,
         port: DEFAULT_PORTS.backend,
         lastRestartAt: 0,
@@ -146,6 +144,7 @@ export class ServiceManager {
       {
         name: "frontend",
         command: frontendCommand.command,
+        env: frontendCommand.env,
         args: frontendCommand.args,
         cwd: frontendPath,
         healthUrl: `http://127.0.0.1:${DEFAULT_PORTS.frontend}/login`,
@@ -424,6 +423,7 @@ export class ServiceManager {
       cwd: service.cwd,
       env: {
         ...process.env,
+        ...service.env,
         ...this.createServiceEnv(service),
         FRONTEND_ORIGIN: FRONTEND_ORIGINS,
       },
@@ -517,8 +517,13 @@ export class ServiceManager {
     }
 
     service.healthUrl = `http://127.0.0.1:${service.port}/login`;
-    const frontendCommand = resolveFrontendCommand(service.cwd, service.port);
+    const frontendCommand = resolveFrontendCommand(
+      this.getRuntimeRoot(),
+      service.cwd,
+      service.port,
+    );
     service.command = frontendCommand.command;
+    service.env = frontendCommand.env;
     service.args = frontendCommand.args;
   }
 
@@ -544,7 +549,12 @@ export class ServiceManager {
     return {
       NEXT_DIST_DIR: `.next-electron-${service.port}`,
       NEXT_PUBLIC_API_BASE_URL: `http://127.0.0.1:${backendPort}/api`,
+      PORT: String(service.port),
     };
+  }
+
+  private getRuntimeRoot() {
+    return join(this.services[0].cwd, "..");
   }
 
   private getServicePort(serviceName: LocalServiceName) {
@@ -692,7 +702,47 @@ function resolveNpmCommand(args: string[]) {
   };
 }
 
-function resolveFrontendCommand(frontendPath: string, port: number) {
+function resolveBackendCommand(repoRoot: string) {
+  const backendMain = [
+    join(repoRoot, "backend", "dist", "main.js"),
+    join(repoRoot, "backend", "dist", "src", "main.js"),
+  ].find((candidate) => existsSync(candidate));
+
+  if (isPackagedRuntime(repoRoot) && backendMain) {
+    return {
+      command: process.execPath,
+      args: [backendMain],
+      cwd: join(repoRoot, "backend"),
+      env: { ELECTRON_RUN_AS_NODE: "1", NODE_ENV: "production" },
+    };
+  }
+
+  const command = resolveNpmCommand([
+    "run",
+    "start",
+    "-w",
+    "@ocr/backend",
+  ]);
+
+  return { ...command, cwd: repoRoot, env: undefined };
+}
+
+function resolveFrontendCommand(
+  repoRoot: string,
+  frontendPath: string,
+  port: number,
+) {
+  const standaloneServer = findStandaloneFrontendServer(repoRoot);
+
+  if (isPackagedRuntime(repoRoot) && standaloneServer) {
+    return {
+      command: process.execPath,
+      args: [standaloneServer],
+      cwd: dirname(standaloneServer),
+      env: { ELECTRON_RUN_AS_NODE: "1", NODE_ENV: "production" },
+    };
+  }
+
   const nextBin = join(
     frontendPath,
     "..",
@@ -707,10 +757,11 @@ function resolveFrontendCommand(frontendPath: string, port: number) {
     return {
       command: process.execPath,
       args: [nextBin, "dev", "--webpack", "--port", String(port)],
+      env: undefined,
     };
   }
 
-  return resolveNpmCommand([
+  const command = resolveNpmCommand([
     "run",
     "dev",
     "-w",
@@ -719,6 +770,26 @@ function resolveFrontendCommand(frontendPath: string, port: number) {
     "--port",
     String(port),
   ]);
+
+  return { ...command, env: undefined };
+}
+
+function isPackagedRuntime(repoRoot: string) {
+  return (
+    process.env.OCR_PACKAGED_RUNTIME === "true" ||
+    existsSync(join(repoRoot, "runtime-manifest.json"))
+  );
+}
+
+function findStandaloneFrontendServer(repoRoot: string) {
+  const candidates = [
+    join(repoRoot, "frontend-standalone", "server.js"),
+    join(repoRoot, "frontend-standalone", "frontend", "server.js"),
+    join(repoRoot, "frontend", ".next", "standalone", "server.js"),
+    join(repoRoot, "frontend", ".next", "standalone", "frontend", "server.js"),
+  ];
+
+  return candidates.find((candidate) => existsSync(candidate)) ?? null;
 }
 
 function resolveToolPython(repoRoot: string) {

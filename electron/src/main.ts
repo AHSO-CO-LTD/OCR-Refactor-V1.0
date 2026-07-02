@@ -2,6 +2,7 @@ import { app, BrowserWindow, dialog, ipcMain, shell, type OpenDialogOptions } fr
 import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
+import { registerAutoUpdater } from "./auto-updater";
 import { ServiceManager } from "./service-manager";
 
 type WindowPreset = "factory" | "hd" | "fullHd" | "fourThree" | "custom";
@@ -72,11 +73,16 @@ if (!hasSingleInstanceLock) {
 }
 
 async function startDesktopApp() {
-  const repoRoot = resolve(__dirname, "..", "..");
-  serviceManager = new ServiceManager(repoRoot);
+  const runtimeRoot = getRuntimeRoot();
+  loadRuntimeEnv(runtimeRoot);
+  serviceManager = new ServiceManager(runtimeRoot);
   windowSettings = loadWindowSettings();
   testStorageSettings = loadTestStorageSettings();
   registerDesktopIpc();
+  registerAutoUpdater({
+    getWindow: () => mainWindow,
+    onLog: showTerminalLog,
+  });
 
   createMainWindow();
   createTerminalWindow();
@@ -207,6 +213,72 @@ function registerDesktopIpc() {
   ipcMain.handle("desktop:restart-app", () => {
     return requestAppRestart();
   });
+}
+
+function getRuntimeRoot() {
+  if (app.isPackaged) {
+    return join(process.resourcesPath, "runtime");
+  }
+
+  return resolve(__dirname, "..", "..");
+}
+
+function loadRuntimeEnv(runtimeRoot: string) {
+  const envPaths = [
+    join(getProgramDataRoot(), ".env"),
+    join(runtimeRoot, ".env"),
+    join(runtimeRoot, "backend", ".env"),
+  ];
+
+  for (const envPath of envPaths) {
+    if (!existsSync(envPath)) {
+      continue;
+    }
+
+    const env = parseEnvFile(readFileSync(envPath, "utf8"));
+
+    for (const [key, value] of Object.entries(env)) {
+      if (process.env[key] === undefined) {
+        process.env[key] = value;
+      }
+    }
+  }
+
+  if (app.isPackaged) {
+    process.env.OCR_PACKAGED_RUNTIME = "true";
+  }
+}
+
+function parseEnvFile(content: string) {
+  const result: Record<string, string> = {};
+
+  for (const line of content.split(/\r?\n/)) {
+    const trimmed = line.trim();
+
+    if (!trimmed || trimmed.startsWith("#")) {
+      continue;
+    }
+
+    const separatorIndex = trimmed.indexOf("=");
+
+    if (separatorIndex <= 0) {
+      continue;
+    }
+
+    const key = trimmed.slice(0, separatorIndex).trim();
+    const rawValue = trimmed.slice(separatorIndex + 1).trim();
+    result[key] = rawValue.replace(/^["']|["']$/g, "");
+  }
+
+  return result;
+}
+
+function getProgramDataRoot() {
+  const basePath =
+    process.env.PROGRAMDATA ??
+    (process.platform === "win32" ? "C:\\ProgramData" : app.getPath("userData"));
+
+  return join(basePath, "AHSO OCR");
 }
 
 function applyWindowSettings(nextSettings: Partial<DesktopWindowSettings>) {

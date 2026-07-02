@@ -9,6 +9,7 @@ import { InspectionsModule } from './inspections/inspections.module';
 import { PermissionsModule } from './permissions/permissions.module';
 import { ProductsModule } from './products/products.module';
 import { RolesModule } from './roles/roles.module';
+import { SetupModule } from './setup/setup.module';
 import { SystemModule } from './system/system.module';
 import { UsersModule } from './users/users.module';
 
@@ -27,6 +28,7 @@ import { UsersModule } from './users/users.module';
     ProductsModule,
     InspectionsModule,
     SystemModule,
+    SetupModule,
   ],
   controllers: [AppController],
   providers: [AppService],

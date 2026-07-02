@@ -79,7 +79,7 @@ export function CameraLiveViewPanel() {
     zoomFactor: 1,
     previewPanX: 0,
     previewPanY: 0,
-    previewRotation: 0,
+    previewRotation: 90,
   });
   const streamSocketRef = useRef<WebSocket | null>(null);
   const aiSocketRef = useRef<WebSocket | null>(null);

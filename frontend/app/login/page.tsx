@@ -11,7 +11,13 @@ import { LanguageToggle } from "@/components/language-toggle";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { useVirtualKeyboard } from "@/components/ui/virtual-keyboard";
-import { ApiError, disconnectCamera, getCurrentSession, login } from "@/lib/api";
+import {
+  ApiError,
+  disconnectCamera,
+  getCurrentSession,
+  getSetupStatus,
+  login,
+} from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
 import { getPostLoginRoute } from "@/lib/operator-startup-preferences";
 import {
@@ -37,6 +43,15 @@ export default function LoginPage() {
 
   useEffect(() => {
     let cancelled = false;
+
+    getSetupStatus()
+      .then((response) => {
+        if (!cancelled && response.data.requiresAdminSetup) {
+          router.replace("/setup");
+        }
+      })
+      .catch(() => undefined);
+
     const token = getRememberedAccessToken();
 
     if (!token) {

@@ -25,9 +25,12 @@ export type DesktopBridge = {
   applyWindowSettings(
     settings: Partial<DesktopWindowSettings>,
   ): Promise<DesktopWindowSettings>;
+  checkForUpdates(): Promise<{ success: boolean; skipped?: boolean }>;
+  downloadUpdate(): Promise<{ success: boolean; skipped?: boolean }>;
   exitApp(): Promise<{ success: boolean }>;
   getTestStorageSettings(): Promise<DesktopTestStorageSettings>;
   getWindowSettings(): Promise<DesktopWindowSettings>;
+  installUpdate(): Promise<{ success: boolean }>;
   restartApp(): Promise<{ success: boolean }>;
   saveTestStorageSettings(
     settings: DesktopTestStorageSettings,
@@ -36,6 +39,7 @@ export type DesktopBridge = {
   selectModelFile(): Promise<{ canceled: boolean; filePath: string | null }>;
   onTerminalLog(callback: (message: string) => void): () => void;
   onShutdownStatus(callback: (message: string) => void): () => void;
+  onUpdateStatus(callback: (payload: Record<string, unknown>) => void): () => void;
   platform: string;
   versions: {
     chrome: string;
