@@ -504,6 +504,14 @@ export class ServiceManager {
       await terminateProcessOnPort(service.port);
     }
 
+    if (await isPortOpen(service.port)) {
+      this.emitLog(
+        service.name,
+        `port ${service.port} is still open; stopping listener process`,
+      );
+      await terminateProcessOnPort(service.port);
+    }
+
     const closed = await waitForPortClosed(service.port, SHUTDOWN_TIMEOUT_MS);
 
     if (closed) {
