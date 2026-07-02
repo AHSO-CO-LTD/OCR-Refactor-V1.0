@@ -1,4 +1,5 @@
 import { app, BrowserWindow, dialog, ipcMain, shell, type OpenDialogOptions } from "electron";
+import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { ServiceManager } from "./service-manager";
@@ -34,7 +35,8 @@ const defaultTestStorageSettings: DesktopTestStorageSettings = {
 };
 
 let rendererUrl =
-  process.env.ELECTRON_RENDERER_URL ?? "http://127.0.0.1:3000/";
+  process.env.ELECTRON_RENDERER_URL ??
+  `http://127.0.0.1:${process.env.FRONTEND_PORT ?? "3969"}/`;
 
 let mainWindow: BrowserWindow | null = null;
 let terminalWindow: BrowserWindow | null = null;
@@ -44,6 +46,10 @@ let shutdownPromise: Promise<{ success: boolean }> | null = null;
 let restartPromise: Promise<{ success: boolean }> | null = null;
 let windowSettings: DesktopWindowSettings = defaultWindowSettings;
 let testStorageSettings: DesktopTestStorageSettings = defaultTestStorageSettings;
+
+if (relaunchAsAdminIfNeeded()) {
+  app.exit(0);
+}
 
 const hasSingleInstanceLock = app.requestSingleInstanceLock();
 
@@ -118,6 +124,15 @@ function createMainWindow() {
   window.webContents.setWindowOpenHandler(({ url }) => {
     void shell.openExternal(url);
     return { action: "deny" };
+  });
+
+  window.on("close", (event) => {
+    if (isQuitting || !serviceManager) {
+      return;
+    }
+
+    event.preventDefault();
+    void requestAppShutdown();
   });
 
   window.on("closed", () => {
@@ -499,6 +514,7 @@ async function shutdownAndQuit() {
 
   try {
     await serviceManager?.stopOwned(reportShutdownStatus);
+    await serviceManager?.stopManagedPorts(reportShutdownStatus);
     reportShutdownStatus("Shutdown complete.");
   } finally {
     app.quit();
@@ -513,6 +529,7 @@ async function shutdownAndRestart() {
 
   try {
     await serviceManager?.stopOwned(reportShutdownStatus);
+    await serviceManager?.stopManagedPorts(reportShutdownStatus);
     reportShutdownStatus("Restarting app...");
   } finally {
     app.relaunch();
@@ -700,4 +717,67 @@ function reportShutdownStatus(message: string) {
 
 function delay(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function relaunchAsAdminIfNeeded() {
+  if (process.platform !== "win32" || isRunningAsAdministrator()) {
+    return false;
+  }
+
+  const result = spawnSync(
+    "powershell.exe",
+    [
+      "-NoProfile",
+      "-ExecutionPolicy",
+      "Bypass",
+      "-Command",
+      buildRunAsAdminCommand(),
+    ],
+    {
+      stdio: "ignore",
+      windowsHide: true,
+    },
+  );
+
+  if (result.error) {
+    console.error("Failed to request administrator privileges:", result.error);
+    return true;
+  }
+
+  if (result.status !== 0) {
+    console.error("Administrator privilege request was not completed.");
+  }
+
+  return true;
+}
+
+function isRunningAsAdministrator() {
+  const result = spawnSync("fltmc.exe", [], {
+    stdio: "ignore",
+    windowsHide: true,
+  });
+
+  return result.status === 0;
+}
+
+function buildRunAsAdminCommand() {
+  const executablePath = process.execPath;
+  const args = app.isPackaged ? [] : process.argv.slice(1);
+  const argumentList = args.length
+    ? ` -ArgumentList ${args.map(toPowerShellString).join(",")}`
+    : "";
+
+  return [
+    "Start-Process",
+    `-FilePath ${toPowerShellString(executablePath)}`,
+    argumentList.trim(),
+    `-WorkingDirectory ${toPowerShellString(process.cwd())}`,
+    "-Verb RunAs",
+  ]
+    .filter(Boolean)
+    .join(" ");
+}
+
+function toPowerShellString(value: string) {
+  return `'${value.replace(/'/g, "''")}'`;
 }

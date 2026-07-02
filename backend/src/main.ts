@@ -7,16 +7,31 @@ import { CameraStreamGateway } from './camera/camera-stream.gateway';
 
 async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
+  const frontendPort = readPortEnv('FRONTEND_PORT', 3969);
+  const frontendFallbackStart = readPortEnv(
+    'FRONTEND_FALLBACK_PORT_START',
+    frontendPort + 1,
+  );
+  const frontendFallbackEnd = readPortEnv(
+    'FRONTEND_FALLBACK_PORT_END',
+    frontendPort + 99,
+  );
   const configuredCorsOrigins = (
-    process.env.FRONTEND_ORIGIN ?? 'http://localhost:3000,http://127.0.0.1:3000'
+    process.env.FRONTEND_ORIGIN ??
+    `http://localhost:${frontendPort},http://127.0.0.1:${frontendPort}`
   )
     .split(',')
     .map((origin) => origin.trim())
     .filter(Boolean);
   const localRendererOrigins = Array.from(
-    { length: 100 },
-    (_, index) => index + 3000,
-  ).flatMap((port) => [`http://localhost:${port}`, `http://127.0.0.1:${port}`]);
+    { length: Math.max(frontendFallbackEnd - frontendFallbackStart + 1, 0) },
+    (_, index) => index + frontendFallbackStart,
+  )
+    .concat(frontendPort)
+    .flatMap((port) => [
+      `http://localhost:${port}`,
+      `http://127.0.0.1:${port}`,
+    ]);
   const corsOrigins = Array.from(
     new Set([...configuredCorsOrigins, ...localRendererOrigins]),
   );
@@ -43,7 +58,7 @@ async function bootstrap() {
   const swaggerDocument = SwaggerModule.createDocument(app, swaggerConfig);
   SwaggerModule.setup('api/docs', app, swaggerDocument);
 
-  const port = process.env.BACKEND_PORT ?? 4000;
+  const port = readPortEnv('BACKEND_PORT', 3979);
   await app.listen(port);
   app.get(CameraStreamGateway).attach(app.getHttpServer());
 }
@@ -51,3 +66,14 @@ bootstrap().catch((error) => {
   console.error('Failed to start API service', error);
   process.exit(1);
 });
+
+function readPortEnv(name: string, fallback: number) {
+  const rawValue = process.env[name];
+
+  if (!rawValue) {
+    return fallback;
+  }
+
+  const port = Number.parseInt(rawValue, 10);
+  return Number.isInteger(port) && port > 0 && port <= 65535 ? port : fallback;
+}

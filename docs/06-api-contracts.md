@@ -25,8 +25,8 @@ The frontend only talks to the NestJS backend. The backend talks to the Python/F
 Recommended local defaults:
 
 ```text
-Frontend: http://localhost:3000
-Backend:  http://localhost:4000/api
+Frontend: http://localhost:3969
+Backend:  http://localhost:3979/api
 Tool:     http://localhost:8000/tool/v1
 ```
 
