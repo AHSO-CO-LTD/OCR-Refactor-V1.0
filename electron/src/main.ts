@@ -460,6 +460,13 @@ app.on("before-quit", (event) => {
   void requestAppShutdown();
 });
 
+for (const signal of ["SIGINT", "SIGTERM"] as const) {
+  process.once(signal, () => {
+    reportShutdownStatus(`Received ${signal}; shutting down services...`);
+    void requestAppShutdown();
+  });
+}
+
 async function requestAppShutdown() {
   if (shutdownPromise) {
     return shutdownPromise;
