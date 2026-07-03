@@ -146,23 +146,39 @@ export class DongleCheckerService {
 
     if (configuredCommand) {
       const [command, ...args] = configuredCommand.split(' ').filter(Boolean);
-      return { command, args };
+      if (this.canRunDonglePython(command, args)) {
+        return { command, args };
+      }
     }
 
     if (process.platform !== 'win32') {
+      if (this.canRunDonglePython('python3.11', [])) {
+        return { command: 'python3.11', args: [] };
+      }
+
       if (this.canRunDonglePython('python3', [])) {
         return { command: 'python3', args: [] };
       }
 
-      return { command: 'python', args: [] };
+      if (this.canRunDonglePython('python', [])) {
+        return { command: 'python', args: [] };
+      }
+
+      if (this.canRun('uv', ['--version'])) {
+        return { command: 'uv', args: ['run', '--python', '3.11', 'python'] };
+      }
+
+      return { command: 'python3.11', args: [] };
     }
 
     const candidates = [
       { command: 'py', args: ['-3.11'] },
-      ...this.getWindowsPythonLauncherPaths().map((pythonPath) => ({
-        command: pythonPath,
-        args: [] as string[],
-      })),
+      ...this.getWindowsPythonLauncherPaths()
+        .filter((pythonPath) => this.isPython311Path(pythonPath))
+        .map((pythonPath) => ({
+          command: pythonPath,
+          args: [] as string[],
+        })),
       { command: 'python', args: [] },
     ];
 
@@ -189,7 +205,15 @@ export class DongleCheckerService {
   }
 
   private canRunDonglePython(command: string, args: string[]) {
-    return this.canRun(command, [...args, '-c', 'import ctypes']);
+    return this.canRun(command, [
+      ...args,
+      '-c',
+      'import sys, ctypes; raise SystemExit(0 if sys.version_info[:2] == (3, 11) else 1)',
+    ]);
+  }
+
+  private isPython311Path(pythonPath: string) {
+    return /(?:Python311|cpython-3\.11|\\3\.11\\)/i.test(pythonPath);
   }
 
   private getWindowsPythonLauncherPaths() {

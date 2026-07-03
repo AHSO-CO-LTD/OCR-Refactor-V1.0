@@ -29,7 +29,7 @@ const defaultCamera: CameraProfileDto = {
   zoomFactor: 0.4,
   previewPanX: 0,
   previewPanY: 0,
-  previewRotation: 0,
+  previewRotation: 90,
 };
 
 const productInclude = {

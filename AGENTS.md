@@ -169,16 +169,16 @@ Run backend:
 npm run dev -w @ocr/backend
 ```
 
-Before running backend, check port `4000`:
+Before running backend, check port `3979`:
 
 ```powershell
-Get-NetTCPConnection -LocalPort 4000 -ErrorAction SilentlyContinue
+Get-NetTCPConnection -LocalPort 3979 -ErrorAction SilentlyContinue
 ```
 
 Swagger:
 
 ```text
-http://localhost:4000/api/docs
+http://localhost:3979/api/docs
 ```
 
 Run frontend:
@@ -187,10 +187,10 @@ Run frontend:
 npm run dev -w @ocr/frontend
 ```
 
-Before running frontend, check port `3000`:
+Before running frontend, check port `3969`:
 
 ```powershell
-Get-NetTCPConnection -LocalPort 3000 -ErrorAction SilentlyContinue
+Get-NetTCPConnection -LocalPort 3969 -ErrorAction SilentlyContinue
 ```
 
 If a server is only needed for testing, stop the process immediately after the test finishes.

@@ -39,7 +39,7 @@ This foundation lets the frontend render one shared UI with different features d
 Backend API documentation is available through Swagger when the backend is running:
 
 ```text
-http://localhost:4000/api/docs
+http://localhost:3979/api/docs
 ```
 
 ## Current Handoff
@@ -86,8 +86,8 @@ npm run dev:desktop
 Agents must never take over a port already being used by the user. Before starting local servers, check the target port first:
 
 ```powershell
-Get-NetTCPConnection -LocalPort 4000 -ErrorAction SilentlyContinue
-Get-NetTCPConnection -LocalPort 3000 -ErrorAction SilentlyContinue
+Get-NetTCPConnection -LocalPort 3979 -ErrorAction SilentlyContinue
+Get-NetTCPConnection -LocalPort 3969 -ErrorAction SilentlyContinue
 ```
 
 If an agent starts a backend/frontend server only for testing, it must stop that process immediately after verification.

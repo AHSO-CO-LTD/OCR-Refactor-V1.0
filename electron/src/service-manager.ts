@@ -1,12 +1,13 @@
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { existsSync } from "node:fs";
 import { createConnection } from "node:net";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 
 export type LocalServiceName = "backend" | "device-tool" | "frontend";
 
 type LocalServiceDefinition = {
   command: string;
+  env?: Record<string, string>;
   args: string[];
   cwd: string;
   healthUrl: string;
@@ -20,34 +21,85 @@ type ManagedService = LocalServiceDefinition & {
   owned: boolean;
   process: ChildProcess | null;
   restartInProgress: boolean;
+  reusedExistingService: boolean;
   startedByApp: boolean;
+};
+
+type ServiceCommand = {
+  command: string;
+  env?: Record<string, string>;
+  args: string[];
+  cwd: string;
 };
 
 const STARTUP_TIMEOUT_MS = 120_000;
 const EXISTING_SERVICE_TIMEOUT_MS = 10_000;
 const HEALTH_POLL_MS = 500;
-const SHUTDOWN_TIMEOUT_MS = 15_000;
+const SHUTDOWN_TIMEOUT_MS = 45_000;
 const WATCHDOG_INTERVAL_MS = 5_000;
 const WATCHDOG_FAILURE_THRESHOLD = 3;
 const WATCHDOG_RESTART_COOLDOWN_MS = 20_000;
 const DEVICE_TOOL_API_PREFIX = "/tool/v1";
 const DEVICE_TOOL_HEALTH_PATH = "/";
 const DEFAULT_PORTS: Record<LocalServiceName, number> = {
-  backend: 4000,
-  "device-tool": 8000,
-  frontend: 3000,
+  backend: readPortEnv("BACKEND_PORT", 3979),
+  "device-tool": readPortEnv("DEVICE_TOOL_PORT", 8000),
+  frontend: readPortEnv("FRONTEND_PORT", 3969),
 };
 const FALLBACK_PORTS: Record<LocalServiceName, { end: number; start: number }> = {
-  backend: { start: 4001, end: 4099 },
-  "device-tool": { start: 8001, end: 8099 },
-  frontend: { start: 3001, end: 3099 },
+  backend: readFallbackRange("BACKEND", DEFAULT_PORTS.backend),
+  "device-tool": readFallbackRange("DEVICE_TOOL", DEFAULT_PORTS["device-tool"]),
+  frontend: readFallbackRange("FRONTEND", DEFAULT_PORTS.frontend),
 };
-const FRONTEND_ORIGINS = Array.from({ length: 100 }, (_, index) => index + 3000)
+const FRONTEND_ORIGINS = buildFrontendOrigins()
   .flatMap((port) => [
     `http://127.0.0.1:${port}`,
     `http://localhost:${port}`,
   ])
   .join(",");
+
+function readPortEnv(name: string, fallback: number) {
+  const rawValue = process.env[name];
+
+  if (!rawValue) {
+    return fallback;
+  }
+
+  const port = Number.parseInt(rawValue, 10);
+  return isValidPort(port) ? port : fallback;
+}
+
+function readFallbackRange(
+  namePrefix: string,
+  defaultPort: number,
+): { end: number; start: number } {
+  const start = readPortEnv(`${namePrefix}_FALLBACK_PORT_START`, defaultPort + 1);
+  const end = readPortEnv(`${namePrefix}_FALLBACK_PORT_END`, defaultPort + 99);
+
+  if (start > end) {
+    return { start: defaultPort + 1, end: defaultPort + 99 };
+  }
+
+  return { start, end };
+}
+
+function buildFrontendOrigins() {
+  const ports = new Set<number>([DEFAULT_PORTS.frontend]);
+
+  for (
+    let port = FALLBACK_PORTS.frontend.start;
+    port <= FALLBACK_PORTS.frontend.end;
+    port += 1
+  ) {
+    ports.add(port);
+  }
+
+  return [...ports];
+}
+
+function isValidPort(port: number) {
+  return Number.isInteger(port) && port > 0 && port <= 65535;
+}
 
 export class ServiceManager {
   private readonly services: ManagedService[];
@@ -56,21 +108,13 @@ export class ServiceManager {
 
   constructor(repoRoot: string) {
     const toolPython = resolveToolPython(repoRoot);
-    const backendCommand = resolveNpmCommand([
-      "run",
-      "dev",
-      "-w",
-      "@ocr/backend",
-    ]);
-    const frontendCommand = resolveNpmCommand([
-      "run",
-      "dev",
-      "-w",
-      "@ocr/frontend",
-      "--",
-      "--port",
-      "3000",
-    ]);
+    const backendCommand = resolveBackendCommand(repoRoot);
+    const frontendPath = join(repoRoot, "frontend");
+    const frontendCommand = resolveFrontendCommand(
+      repoRoot,
+      frontendPath,
+      DEFAULT_PORTS.frontend,
+    );
 
     this.services = [
       {
@@ -78,41 +122,46 @@ export class ServiceManager {
         command: toolPython.command,
         args: [...toolPython.args, "main.py"],
         cwd: join(repoRoot, "tool"),
-        healthUrl: `http://127.0.0.1:8000${DEVICE_TOOL_HEALTH_PATH}`,
-        port: 8000,
+        healthUrl: `http://127.0.0.1:${DEFAULT_PORTS["device-tool"]}${DEVICE_TOOL_HEALTH_PATH}`,
+        port: DEFAULT_PORTS["device-tool"],
         lastRestartAt: 0,
         missedHealthChecks: 0,
         owned: false,
         process: null,
         restartInProgress: false,
+        reusedExistingService: false,
         startedByApp: false,
       },
       {
         name: "backend",
         command: backendCommand.command,
+        env: backendCommand.env,
         args: backendCommand.args,
-        cwd: repoRoot,
-        healthUrl: "http://127.0.0.1:4000/api/health",
-        port: 4000,
+        cwd: backendCommand.cwd,
+        healthUrl: `http://127.0.0.1:${DEFAULT_PORTS.backend}/api/health`,
+        port: DEFAULT_PORTS.backend,
         lastRestartAt: 0,
         missedHealthChecks: 0,
         owned: false,
         process: null,
         restartInProgress: false,
+        reusedExistingService: false,
         startedByApp: false,
       },
       {
         name: "frontend",
         command: frontendCommand.command,
+        env: frontendCommand.env,
         args: frontendCommand.args,
-        cwd: repoRoot,
-        healthUrl: "http://127.0.0.1:3000/login",
-        port: 3000,
+        cwd: frontendCommand.cwd,
+        healthUrl: `http://127.0.0.1:${DEFAULT_PORTS.frontend}/login`,
+        port: DEFAULT_PORTS.frontend,
         lastRestartAt: 0,
         missedHealthChecks: 0,
         owned: false,
         process: null,
         restartInProgress: false,
+        reusedExistingService: false,
         startedByApp: false,
       },
     ];
@@ -128,7 +177,7 @@ export class ServiceManager {
 
   getFrontendUrl() {
     const frontend = this.services.find((service) => service.name === "frontend");
-    return `http://127.0.0.1:${frontend?.port ?? 3000}/`;
+    return `http://127.0.0.1:${frontend?.port ?? DEFAULT_PORTS.frontend}/`;
   }
 
   onLog(listener: (message: string) => void) {
@@ -137,12 +186,38 @@ export class ServiceManager {
 
   async stopOwned(onStatus: (message: string) => void = () => undefined) {
     this.stopWatchdog();
-    const ownedServices = [...this.services].reverse().filter(
-      (service) => service.startedByApp,
-    );
+    const ownedServices = [...this.services]
+      .reverse()
+      .filter((service) => service.startedByApp || service.reusedExistingService);
 
     for (const service of ownedServices) {
       await this.stopOwnedService(service, onStatus);
+    }
+  }
+
+  async stopManagedPorts(onStatus: (message: string) => void = () => undefined) {
+    this.stopWatchdog();
+
+    for (const service of [...this.services].reverse()) {
+      if (!(await isPortOpen(service.port))) {
+        continue;
+      }
+
+      onStatus(`${service.name}: forcing port ${service.port} cleanup`);
+      this.emitLog(service.name, `forcing port ${service.port} cleanup`);
+      await terminateProcessOnPort(service.port);
+
+      const closed = await waitForPortClosed(service.port, 5_000, () =>
+        terminateProcessOnPort(service.port),
+      );
+
+      if (closed) {
+        onStatus(`${service.name}: port ${service.port} released`);
+        this.emitLog(service.name, `port ${service.port} released`);
+      } else {
+        onStatus(`${service.name}: port ${service.port} is still open`);
+        this.emitLog(service.name, `port ${service.port} is still open after force cleanup`);
+      }
     }
   }
 
@@ -259,8 +334,14 @@ export class ServiceManager {
         onStatus(`${service.name}: port ${service.port} is occupied`);
         this.emitLog(
           service.name,
-          `port ${service.port} is occupied; looking for fallback`,
+          `port ${service.port} is occupied; trying to reclaim default port`,
         );
+        if (await this.reclaimDefaultPort(service, onStatus)) {
+          await this.startOwnedService(service, onStatus);
+          return;
+        }
+
+        this.emitLog(service.name, `port ${service.port} is still occupied; looking for fallback`);
         await this.prepareFallbackPort(service, onStatus);
         await this.startOwnedService(service, onStatus);
         return;
@@ -277,6 +358,13 @@ export class ServiceManager {
           },
         );
         onStatus(`${service.name}: ready`);
+        service.reusedExistingService = service.port === DEFAULT_PORTS[service.name];
+        if (service.reusedExistingService) {
+          this.emitLog(
+            service.name,
+            `adopted existing service on port ${service.port} for shutdown cleanup`,
+          );
+        }
         this.emitLog(service.name, "ready");
         return;
       } catch {
@@ -285,13 +373,42 @@ export class ServiceManager {
         );
         this.emitLog(
           service.name,
-          `existing port ${service.port} is not responding; starting fallback`,
+          `existing port ${service.port} is not responding; trying to reclaim default port`,
         );
+        if (await this.reclaimDefaultPort(service, onStatus)) {
+          await this.startOwnedService(service, onStatus);
+          return;
+        }
+
+        this.emitLog(service.name, `port ${service.port} is still occupied; starting fallback`);
         await this.prepareFallbackPort(service, onStatus);
       }
     }
 
     await this.startOwnedService(service, onStatus);
+  }
+
+  private async reclaimDefaultPort(
+    service: ManagedService,
+    onStatus: (message: string) => void,
+  ) {
+    if (service.port !== DEFAULT_PORTS[service.name]) {
+      return false;
+    }
+
+    onStatus(`${service.name}: stopping stale listener on port ${service.port}`);
+    await terminateProcessOnPort(service.port);
+
+    const closed = await waitForPortClosed(service.port, SHUTDOWN_TIMEOUT_MS, () =>
+      terminateProcessOnPort(service.port),
+    );
+
+    if (closed) {
+      onStatus(`${service.name}: reclaimed port ${service.port}`);
+      this.emitLog(service.name, `reclaimed port ${service.port}`);
+    }
+
+    return closed;
   }
 
   private async startOwnedService(
@@ -313,6 +430,7 @@ export class ServiceManager {
       cwd: service.cwd,
       env: {
         ...process.env,
+        ...service.env,
         ...this.createServiceEnv(service),
         FRONTEND_ORIGIN: FRONTEND_ORIGINS,
       },
@@ -322,6 +440,7 @@ export class ServiceManager {
 
     service.process = child;
     service.owned = true;
+    service.reusedExistingService = false;
     service.startedByApp = true;
     let spawnError: Error | null = null;
     this.attachProcessLogs(service, child);
@@ -405,17 +524,15 @@ export class ServiceManager {
     }
 
     service.healthUrl = `http://127.0.0.1:${service.port}/login`;
-    const frontendCommand = resolveNpmCommand([
-      "run",
-      "dev",
-      "-w",
-      "@ocr/frontend",
-      "--",
-      "--port",
-      String(service.port),
-    ]);
+    const frontendCommand = resolveFrontendCommand(
+      this.getRuntimeRoot(),
+      service.cwd,
+      service.port,
+    );
     service.command = frontendCommand.command;
+    service.env = frontendCommand.env;
     service.args = frontendCommand.args;
+    service.cwd = frontendCommand.cwd;
   }
 
   private createServiceEnv(service: ManagedService) {
@@ -440,7 +557,12 @@ export class ServiceManager {
     return {
       NEXT_DIST_DIR: `.next-electron-${service.port}`,
       NEXT_PUBLIC_API_BASE_URL: `http://127.0.0.1:${backendPort}/api`,
+      PORT: String(service.port),
     };
+  }
+
+  private getRuntimeRoot() {
+    return join(this.services[0].cwd, "..");
   }
 
   private getServicePort(serviceName: LocalServiceName) {
@@ -499,7 +621,15 @@ export class ServiceManager {
     service.owned = false;
 
     if (child && !child.killed && child.exitCode === null) {
-      await terminateProcessTree(child.pid);
+      child.kill("SIGTERM");
+      await waitForChildExit(child, 5_000);
+
+      if (await isPortOpen(service.port)) {
+        await terminateProcessTree(child.pid);
+        await waitForChildExit(child, 5_000);
+      }
+
+      closeChildPipes(child);
     } else {
       await terminateProcessOnPort(service.port);
     }
@@ -512,7 +642,9 @@ export class ServiceManager {
       await terminateProcessOnPort(service.port);
     }
 
-    const closed = await waitForPortClosed(service.port, SHUTDOWN_TIMEOUT_MS);
+    const closed = await waitForPortClosed(service.port, SHUTDOWN_TIMEOUT_MS, () =>
+      terminateProcessOnPort(service.port),
+    );
 
     if (closed) {
       onStatus(`${service.name}: stopped`);
@@ -523,6 +655,7 @@ export class ServiceManager {
     }
 
     service.startedByApp = false;
+    service.reusedExistingService = false;
   }
 
   private async stopDeviceToolRuntime(service: ManagedService) {
@@ -577,10 +710,97 @@ function resolveNpmCommand(args: string[]) {
   };
 }
 
+function resolveBackendCommand(repoRoot: string): ServiceCommand {
+  const backendPath = join(repoRoot, "backend");
+  const backendMain = [
+    join(backendPath, "dist", "main.js"),
+    join(backendPath, "dist", "src", "main.js"),
+  ].find((candidate) => existsSync(candidate));
+
+  if (isPackagedRuntime(repoRoot) && backendMain) {
+    return {
+      command: process.execPath,
+      args: [backendMain],
+      cwd: backendPath,
+      env: { ELECTRON_RUN_AS_NODE: "1", NODE_ENV: "production" },
+    };
+  }
+
+  const command = resolveNpmCommand(["run", "start"]);
+
+  return { ...command, cwd: backendPath, env: undefined };
+}
+
+function resolveFrontendCommand(
+  repoRoot: string,
+  frontendPath: string,
+  port: number,
+): ServiceCommand {
+  const standaloneServer = findStandaloneFrontendServer(repoRoot);
+
+  if (isPackagedRuntime(repoRoot) && standaloneServer) {
+    return {
+      command: process.execPath,
+      args: [standaloneServer],
+      cwd: dirname(standaloneServer),
+      env: { ELECTRON_RUN_AS_NODE: "1", NODE_ENV: "production" },
+    };
+  }
+
+  const nextBin = join(
+    frontendPath,
+    "..",
+    "node_modules",
+    "next",
+    "dist",
+    "bin",
+    "next",
+  );
+
+  if (existsSync(nextBin)) {
+    return {
+      command: process.execPath,
+      args: [nextBin, "dev", "--webpack", "--port", String(port)],
+      env: undefined,
+      cwd: frontendPath,
+    };
+  }
+
+  const command = resolveNpmCommand([
+    "run",
+    "dev",
+    "-w",
+    "@ocr/frontend",
+    "--",
+    "--port",
+    String(port),
+  ]);
+
+  return { ...command, cwd: repoRoot, env: undefined };
+}
+
+function isPackagedRuntime(repoRoot: string) {
+  return (
+    process.env.OCR_PACKAGED_RUNTIME === "true" ||
+    existsSync(join(repoRoot, "runtime-manifest.json"))
+  );
+}
+
+function findStandaloneFrontendServer(repoRoot: string) {
+  const candidates = [
+    join(repoRoot, "frontend-standalone", "server.js"),
+    join(repoRoot, "frontend-standalone", "frontend", "server.js"),
+    join(repoRoot, "frontend", ".next", "standalone", "server.js"),
+    join(repoRoot, "frontend", ".next", "standalone", "frontend", "server.js"),
+  ];
+
+  return candidates.find((candidate) => existsSync(candidate)) ?? null;
+}
+
 function resolveToolPython(repoRoot: string) {
   const configured = process.env.DEVICE_TOOL_PYTHON;
 
-  if (configured) {
+  if (configured && canRunToolPython(configured, [])) {
     return { command: configured, args: [] };
   }
 
@@ -589,24 +809,48 @@ function resolveToolPython(repoRoot: string) {
       ? join(repoRoot, "tool", ".venv", "Scripts", "python.exe")
       : join(repoRoot, "tool", ".venv", "bin", "python");
 
-  if (existsSync(venvPython)) {
+  if (existsSync(venvPython) && canRunToolPython(venvPython, [])) {
     return { command: venvPython, args: [] };
   }
 
   if (process.platform !== "win32") {
+    if (canRunToolPython("python3.11", [])) {
+      return { command: "python3.11", args: [] };
+    }
+
     if (canRunToolPython("python3", [])) {
       return { command: "python3", args: [] };
     }
 
-    return { command: "python", args: [] };
+    if (canRunToolPython("python", [])) {
+      return { command: "python", args: [] };
+    }
+
+    if (canRun("uv", ["--version"])) {
+      return {
+        command: "uv",
+        args: [
+          "run",
+          "--python",
+          "3.11",
+          "--with-requirements",
+          "requirements.txt",
+          "python",
+        ],
+      };
+    }
+
+    return { command: "python3.11", args: [] };
   }
 
   const launcherCandidates = [
     { command: "py", args: ["-3.11"] },
-    ...getWindowsPythonLauncherPaths().map((pythonPath) => ({
-      command: pythonPath,
-      args: [],
-    })),
+    ...getWindowsPythonLauncherPaths()
+      .filter(isPython311Path)
+      .map((pythonPath) => ({
+        command: pythonPath,
+        args: [],
+      })),
     { command: "python", args: [] },
   ];
 
@@ -646,8 +890,12 @@ function canRunToolPython(command: string, args: string[]) {
   return canRun(command, [
     ...args,
     "-c",
-    "import fastapi, uvicorn",
+    "import sys, fastapi, uvicorn; raise SystemExit(0 if sys.version_info[:2] == (3, 11) else 1)",
   ]);
+}
+
+function isPython311Path(pythonPath: string) {
+  return /(?:Python311|cpython-3\.11|\\3\.11\\)/i.test(pythonPath);
 }
 
 function getWindowsPythonLauncherPaths() {
@@ -733,6 +981,26 @@ function delay(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function waitForChildExit(child: ChildProcess, timeoutMs: number) {
+  if (child.exitCode !== null || child.signalCode !== null) {
+    return Promise.resolve();
+  }
+
+  return new Promise<void>((resolve) => {
+    const timeout = setTimeout(resolve, timeoutMs);
+
+    child.once("exit", () => {
+      clearTimeout(timeout);
+      resolve();
+    });
+  });
+}
+
+function closeChildPipes(child: ChildProcess) {
+  child.stdout?.destroy();
+  child.stderr?.destroy();
+}
+
 async function findAvailablePort(startPort: number, endPort: number) {
   for (let port = startPort; port <= endPort; port += 1) {
     if (!(await isPortOpen(port))) {
@@ -743,7 +1011,11 @@ async function findAvailablePort(startPort: number, endPort: number) {
   return null;
 }
 
-async function waitForPortClosed(port: number, timeoutMs: number) {
+async function waitForPortClosed(
+  port: number,
+  timeoutMs: number,
+  onStillOpen?: () => Promise<void>,
+) {
   const startedAt = Date.now();
 
   while (Date.now() - startedAt < timeoutMs) {
@@ -751,6 +1023,7 @@ async function waitForPortClosed(port: number, timeoutMs: number) {
       return true;
     }
 
+    await onStillOpen?.();
     await delay(HEALTH_POLL_MS);
   }
 
@@ -792,27 +1065,59 @@ function terminateWindowsProcessTree(pid: number) {
       stdio: "ignore",
       windowsHide: true,
     });
-    taskkill.once("exit", () => resolve());
-    taskkill.once("error", () => resolve());
+    taskkill.once("exit", async () => {
+      await terminateWindowsDescendants(pid);
+      resolve();
+    });
+    taskkill.once("error", async () => {
+      await terminateWindowsDescendants(pid);
+      resolve();
+    });
+  });
+}
+
+function terminateWindowsDescendants(pid: number) {
+  return new Promise<void>((resolve) => {
+    const script = [
+      "$ErrorActionPreference='SilentlyContinue';",
+      `$root=${pid};`,
+      "$all=Get-CimInstance Win32_Process;",
+      "$targets=@();",
+      "$front=@($root);",
+      "while($front.Count -gt 0){",
+      "  $next=@();",
+      "  foreach($parent in $front){",
+      "    $children=$all | Where-Object { $_.ParentProcessId -eq $parent };",
+      "    foreach($child in $children){",
+      "      $targets += [int]$child.ProcessId;",
+      "      $next += [int]$child.ProcessId;",
+      "    }",
+      "  }",
+      "  $front=$next;",
+      "}",
+      "$targets | Sort-Object -Descending -Unique | ForEach-Object { Stop-Process -Id $_ -Force };",
+      "Stop-Process -Id $root -Force;",
+    ].join(" ");
+    const powershell = spawn(
+      "powershell.exe",
+      ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script],
+      {
+        stdio: "ignore",
+        windowsHide: true,
+      },
+    );
+
+    powershell.once("exit", () => resolve());
+    powershell.once("error", () => resolve());
   });
 }
 
 function findWindowsPidsByPort(port: number) {
   return new Promise<number[]>((resolve) => {
-    const script = [
-      "$ErrorActionPreference='SilentlyContinue';",
-      `Get-NetTCPConnection -LocalPort ${port} |`,
-      "Where-Object { $_.State -eq 'Listen' } |",
-      "Select-Object -ExpandProperty OwningProcess -Unique",
-    ].join(" ");
-    const child = spawn(
-      "powershell.exe",
-      ["-NoProfile", "-Command", script],
-      {
-        stdio: ["ignore", "pipe", "ignore"],
-        windowsHide: true,
-      },
-    );
+    const child = spawn("netstat.exe", ["-ano", "-p", "tcp"], {
+      stdio: ["ignore", "pipe", "ignore"],
+      windowsHide: true,
+    });
     let output = "";
 
     child.stdout?.setEncoding("utf8");
@@ -822,10 +1127,28 @@ function findWindowsPidsByPort(port: number) {
     child.once("exit", () => {
       const pids = output
         .split(/\r?\n/)
-        .map((line) => Number.parseInt(line.trim(), 10))
+        .map((line) => parseWindowsNetstatPid(line, port))
         .filter((pid) => Number.isInteger(pid) && pid > 0);
       resolve(Array.from(new Set(pids)));
     });
     child.once("error", () => resolve([]));
   });
+}
+
+function parseWindowsNetstatPid(line: string, port: number) {
+  const columns = line.trim().split(/\s+/);
+
+  if (columns.length < 5 || columns[0].toUpperCase() !== "TCP") {
+    return Number.NaN;
+  }
+
+  const localAddress = columns[1];
+  const state = columns[3]?.toUpperCase();
+  const pid = Number.parseInt(columns[4] ?? "", 10);
+
+  if (state !== "LISTENING" || !localAddress.endsWith(`:${port}`)) {
+    return Number.NaN;
+  }
+
+  return pid;
 }

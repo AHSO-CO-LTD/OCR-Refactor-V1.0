@@ -7,6 +7,15 @@ contextBridge.exposeInMainWorld("ocrDesktop", {
   exitApp() {
     return ipcRenderer.invoke("desktop:exit-app");
   },
+  checkForUpdates() {
+    return ipcRenderer.invoke("desktop:check-for-updates");
+  },
+  downloadUpdate() {
+    return ipcRenderer.invoke("desktop:download-update");
+  },
+  installUpdate() {
+    return ipcRenderer.invoke("desktop:install-update");
+  },
   restartApp() {
     return ipcRenderer.invoke("desktop:restart-app");
   },
@@ -39,6 +48,15 @@ contextBridge.exposeInMainWorld("ocrDesktop", {
 
     return () => {
       ipcRenderer.removeListener("desktop-shutdown-status", listener);
+    };
+  },
+  onUpdateStatus(callback: (payload: Record<string, unknown>) => void) {
+    const listener = (_event: unknown, payload: Record<string, unknown>) =>
+      callback(payload);
+    ipcRenderer.on("desktop-update-status", listener);
+
+    return () => {
+      ipcRenderer.removeListener("desktop-update-status", listener);
     };
   },
   platform: process.platform,

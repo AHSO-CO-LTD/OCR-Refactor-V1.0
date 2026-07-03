@@ -1498,6 +1498,30 @@ const translations = {
 
 const translationOverrides: Record<Language, Record<string, string>> = {
   en: {
+    "setup.title": "First-time setup",
+    "setup.description":
+      "Create the customer administrator account for this local OCR station.",
+    "setup.adminTitle": "Create administrator",
+    "setup.adminDescription":
+      "The developer support account is prepared silently by the installer. This account is for the factory administrator.",
+    "setup.checking": "Checking setup status...",
+    "setup.username": "Username",
+    "setup.fullName": "Full name",
+    "setup.department": "Department",
+    "setup.employeeNo": "Employee number",
+    "setup.password": "Password",
+    "setup.confirmPassword": "Confirm password",
+    "setup.createAdmin": "Create administrator",
+    "setup.creating": "Creating administrator...",
+    "setup.adminCreated": "Administrator account created.",
+    "setup.passwordMismatch": "Password confirmation does not match.",
+    "setup.passwordTooShort": "Password must be at least 8 characters.",
+    "setup.loadError": "Cannot load setup status.",
+    "setup.saveError": "Cannot create administrator account.",
+    "apiError.Initial admin is already configured":
+      "The first administrator has already been configured.",
+    "apiError.System roles are not initialized":
+      "System roles are not initialized. Run installer bootstrap again.",
     "lineTabs.line": "Line",
     "lineTabs.test": "Test",
     "settings.tabAi": "AI OCR",
@@ -1781,6 +1805,30 @@ const translationOverrides: Record<Language, Record<string, string>> = {
     "lineTest.debugImageOffset": "offset",
   },
   vi: {
+    "setup.title": "Thiết lập lần đầu",
+    "setup.description":
+      "Tạo tài khoản quản trị của khách hàng cho trạm OCR local này.",
+    "setup.adminTitle": "Tạo tài khoản quản trị",
+    "setup.adminDescription":
+      "Tài khoản hỗ trợ của nhà phát triển được installer chuẩn bị âm thầm. Tài khoản này dành cho quản trị viên nhà máy.",
+    "setup.checking": "Đang kiểm tra trạng thái thiết lập...",
+    "setup.username": "Tên đăng nhập",
+    "setup.fullName": "Họ tên",
+    "setup.department": "Bộ phận",
+    "setup.employeeNo": "Mã nhân viên",
+    "setup.password": "Mật khẩu",
+    "setup.confirmPassword": "Nhập lại mật khẩu",
+    "setup.createAdmin": "Tạo tài khoản quản trị",
+    "setup.creating": "Đang tạo tài khoản quản trị...",
+    "setup.adminCreated": "Đã tạo tài khoản quản trị.",
+    "setup.passwordMismatch": "Mật khẩu nhập lại không khớp.",
+    "setup.passwordTooShort": "Mật khẩu phải có ít nhất 8 ký tự.",
+    "setup.loadError": "Không thể tải trạng thái thiết lập.",
+    "setup.saveError": "Không thể tạo tài khoản quản trị.",
+    "apiError.Initial admin is already configured":
+      "Tài khoản quản trị đầu tiên đã được thiết lập.",
+    "apiError.System roles are not initialized":
+      "Vai trò hệ thống chưa được khởi tạo. Vui lòng chạy lại bootstrap installer.",
     "lineTabs.line": "Line",
     "lineTabs.test": "Test",
     "settings.tabAi": "AI OCR",

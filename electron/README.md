@@ -4,9 +4,12 @@ MVP desktop shell for the local OCR system.
 
 Current responsibilities:
 
+- require administrator privileges on Windows through the UAC prompt
 - enforce a single desktop instance
 - connect to existing local services when their ports are already active
 - start Device Tool, NestJS backend, and Next.js frontend when missing
+- run the backend without Nest watch mode so runtime restarts do not trigger
+  Windows `taskkill` failures from the Nest CLI watcher
 - fall back to the next free Device Tool, backend, or frontend port when the default port is occupied or not healthy
 - wait for service health checks before opening the renderer
 - open a separate terminal window to stream service logs
@@ -19,12 +22,18 @@ Run from the repository root:
 npm run dev:desktop
 ```
 
+Packaged Windows builds require administrator privileges. The development
+launcher skips the UAC relaunch by default so `npm run dev:desktop` can be
+started and stopped from a normal terminal. Set
+`AHSO_ELECTRON_SKIP_ADMIN_RELAUNCH=0` before launching Electron manually if a
+dev session must test the UAC path.
+
 Default local services:
 
 ```text
 Device Tool  http://127.0.0.1:8000
-Backend      http://127.0.0.1:4000
-Frontend     http://localhost:3000
+Backend      http://127.0.0.1:3979
+Frontend     http://localhost:3969
 ```
 
 Electron checks the Device Tool at `/` and passes
@@ -35,8 +44,8 @@ Fallback ranges:
 
 ```text
 Device Tool  8001-8099
-Backend      4001-4099
-Frontend     3001-3099
+Backend      3980-4078
+Frontend     3970-4068
 ```
 
 When Electron starts, it also opens an `OCR Terminal` window that shows

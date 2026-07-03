@@ -3,6 +3,7 @@ const electronPath = require("electron");
 
 const env = { ...process.env };
 delete env.ELECTRON_RUN_AS_NODE;
+env.AHSO_ELECTRON_SKIP_ADMIN_RELAUNCH ??= "1";
 
 const child = spawn(electronPath, ["."], {
   cwd: require("node:path").resolve(__dirname, ".."),

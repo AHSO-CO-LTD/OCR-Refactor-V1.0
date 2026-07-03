@@ -208,16 +208,16 @@ Run backend:
 npm run dev -w @ocr/backend
 ```
 
-Before starting backend, check whether port `4000` is already owned by a user process:
+Before starting backend, check whether port `3979` is already owned by a user process:
 
 ```powershell
-Get-NetTCPConnection -LocalPort 4000 -ErrorAction SilentlyContinue
+Get-NetTCPConnection -LocalPort 3979 -ErrorAction SilentlyContinue
 ```
 
 Swagger:
 
 ```text
-http://localhost:4000/api/docs
+http://localhost:3979/api/docs
 ```
 
 Run frontend:
@@ -226,10 +226,10 @@ Run frontend:
 npm run dev -w @ocr/frontend
 ```
 
-Before starting frontend, check whether port `3000` is already owned by a user process:
+Before starting frontend, check whether port `3969` is already owned by a user process:
 
 ```powershell
-Get-NetTCPConnection -LocalPort 3000 -ErrorAction SilentlyContinue
+Get-NetTCPConnection -LocalPort 3969 -ErrorAction SilentlyContinue
 ```
 
 Agent-started dev servers must be stopped immediately after testing. Never leave a backend/frontend server running after verification unless the user explicitly asked for it.
@@ -269,7 +269,7 @@ frontend/.env.example
 Frontend env key:
 
 ```text
-NEXT_PUBLIC_API_BASE_URL=http://localhost:4000/api
+NEXT_PUBLIC_API_BASE_URL=http://localhost:3979/api
 ```
 
 ## Non-Negotiable Rules

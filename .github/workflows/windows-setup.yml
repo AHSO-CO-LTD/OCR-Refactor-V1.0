@@ -1,0 +1,50 @@
+name: Windows Setup
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows-setup:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Prepare runtime
+        shell: powershell
+        run: powershell -ExecutionPolicy Bypass -File ./scripts/release/prepare-runtime.ps1
+
+      - name: Build setup artifact
+        if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
+        run: npm run dist:win -w @ocr/electron
+
+      - name: Build and publish release
+        if: ${{ startsWith(github.ref, 'refs/tags/v') }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: npm run dist:win -w @ocr/electron -- --publish always
+
+      - name: Upload setup artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ahso-ocr-windows-setup
+          path: |
+            release/*.exe
+            release/*.yml
+            release/*.blockmap

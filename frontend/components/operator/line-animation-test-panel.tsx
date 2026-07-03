@@ -175,7 +175,7 @@ function createSampleProduct({
       zoomFactor: 1,
       previewPanX: 0,
       previewPanY: 0,
-      previewRotation: 0,
+      previewRotation: 90,
     },
     roiRegions,
     createdAt: "2026-01-01T00:00:00.000Z",
@@ -1440,7 +1440,7 @@ export function LineAnimationTestPanel({
                     disabled={loadingProducts || isBusy}
                     className="h-11 border-[#9db7d8] bg-white text-base"
                     onChange={(event) => handleProductChange(event.target.value)}
-                  >
+                    >
                     {products.map((item) => (
                       <option key={item.id} value={item.id}>
                         {item.code} - {item.name}

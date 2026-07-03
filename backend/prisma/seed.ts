@@ -76,6 +76,34 @@ async function seed() {
     });
   }
 
+  const seedMode = process.env.OCR_SEED_MODE ?? 'development';
+
+  if (seedMode === 'production') {
+    const supportPassword = readRequiredEnv('DEV_SUPPORT_PASSWORD');
+    const passwordHash = await bcrypt.hash(supportPassword, 12);
+
+    await prisma.user.upsert({
+      where: { username: 'dev' },
+      update: {
+        passwordHash,
+        fullName: 'Developer Support',
+        roleCode: RoleCode.dev,
+        active: true,
+        failedAttempts: 0,
+      },
+      create: {
+        username: 'dev',
+        fullName: 'Developer Support',
+        roleCode: RoleCode.dev,
+        passwordHash,
+        active: true,
+        failedAttempts: 0,
+      },
+    });
+
+    return;
+  }
+
   const passwordHash = await bcrypt.hash('admin123', 12);
 
   for (const user of [
@@ -128,3 +156,13 @@ seed()
     await prisma.$disconnect();
     process.exit(1);
   });
+
+function readRequiredEnv(name: string) {
+  const value = process.env[name];
+
+  if (!value) {
+    throw new Error(`${name} is required for production seed`);
+  }
+
+  return value;
+}

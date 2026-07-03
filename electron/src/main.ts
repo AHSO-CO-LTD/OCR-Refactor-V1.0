@@ -1,6 +1,8 @@
 import { app, BrowserWindow, dialog, ipcMain, shell, type OpenDialogOptions } from "electron";
+import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
+import { registerAutoUpdater } from "./auto-updater";
 import { ServiceManager } from "./service-manager";
 
 type WindowPreset = "factory" | "hd" | "fullHd" | "fourThree" | "custom";
@@ -34,7 +36,8 @@ const defaultTestStorageSettings: DesktopTestStorageSettings = {
 };
 
 let rendererUrl =
-  process.env.ELECTRON_RENDERER_URL ?? "http://127.0.0.1:3000/";
+  process.env.ELECTRON_RENDERER_URL ??
+  `http://127.0.0.1:${process.env.FRONTEND_PORT ?? "3969"}/`;
 
 let mainWindow: BrowserWindow | null = null;
 let terminalWindow: BrowserWindow | null = null;
@@ -44,6 +47,10 @@ let shutdownPromise: Promise<{ success: boolean }> | null = null;
 let restartPromise: Promise<{ success: boolean }> | null = null;
 let windowSettings: DesktopWindowSettings = defaultWindowSettings;
 let testStorageSettings: DesktopTestStorageSettings = defaultTestStorageSettings;
+
+if (relaunchAsAdminIfNeeded()) {
+  app.exit(0);
+}
 
 const hasSingleInstanceLock = app.requestSingleInstanceLock();
 
@@ -66,11 +73,16 @@ if (!hasSingleInstanceLock) {
 }
 
 async function startDesktopApp() {
-  const repoRoot = resolve(__dirname, "..", "..");
-  serviceManager = new ServiceManager(repoRoot);
+  const runtimeRoot = getRuntimeRoot();
+  loadRuntimeEnv(runtimeRoot);
+  serviceManager = new ServiceManager(runtimeRoot);
   windowSettings = loadWindowSettings();
   testStorageSettings = loadTestStorageSettings();
   registerDesktopIpc();
+  registerAutoUpdater({
+    getWindow: () => mainWindow,
+    onLog: showTerminalLog,
+  });
 
   createMainWindow();
   createTerminalWindow();
@@ -118,6 +130,15 @@ function createMainWindow() {
   window.webContents.setWindowOpenHandler(({ url }) => {
     void shell.openExternal(url);
     return { action: "deny" };
+  });
+
+  window.on("close", (event) => {
+    if (isQuitting || !serviceManager) {
+      return;
+    }
+
+    event.preventDefault();
+    void requestAppShutdown();
   });
 
   window.on("closed", () => {
@@ -192,6 +213,116 @@ function registerDesktopIpc() {
   ipcMain.handle("desktop:restart-app", () => {
     return requestAppRestart();
   });
+}
+
+function getRuntimeRoot() {
+  if (app.isPackaged) {
+    return join(process.resourcesPath, "runtime");
+  }
+
+  return resolve(__dirname, "..", "..");
+}
+
+function loadRuntimeEnv(runtimeRoot: string) {
+  const envPaths = app.isPackaged
+    ? [
+        join(getProgramDataRoot(), ".env"),
+        join(runtimeRoot, ".env"),
+        join(runtimeRoot, "backend", ".env"),
+      ]
+    : [join(runtimeRoot, ".env"), join(runtimeRoot, "backend", ".env")];
+
+  for (const envPath of envPaths) {
+    if (!existsSync(envPath)) {
+      continue;
+    }
+
+    const envContent = readRuntimeEnvFile(envPath, app.isPackaged);
+    if (!envContent) {
+      continue;
+    }
+
+    const env = parseEnvFile(envContent);
+
+    for (const [key, value] of Object.entries(env)) {
+      if (process.env[key] === undefined) {
+        process.env[key] = value;
+      }
+    }
+  }
+
+  if (app.isPackaged) {
+    process.env.OCR_PACKAGED_RUNTIME = "true";
+  }
+}
+
+function readRuntimeEnvFile(envPath: string, isRequired: boolean) {
+  try {
+    return readFileSync(envPath, "utf8");
+  } catch (error) {
+    if (isRequired) {
+      throw createRuntimeEnvReadError(envPath, error);
+    }
+
+    console.warn(`Could not read development env file ${envPath}:`, error);
+    return null;
+  }
+}
+
+function createRuntimeEnvReadError(envPath: string, error: unknown) {
+  const message =
+    error instanceof Error
+      ? error.message
+      : "Unknown error while reading runtime environment file.";
+  const code =
+    typeof error === "object" && error !== null && "code" in error
+      ? String((error as { code?: unknown }).code)
+      : null;
+
+  if (code === "EACCES" || code === "EPERM") {
+    return new Error(
+      [
+        `Cannot read runtime environment file: ${envPath}`,
+        "The file exists, but Windows denied access to the desktop app.",
+        "Run the installer bootstrap again or repair the file ACL so the signed-in app user can read this .env file.",
+        `Original error: ${message}`,
+      ].join(" "),
+    );
+  }
+
+  return new Error(`Cannot read runtime environment file ${envPath}: ${message}`);
+}
+
+function parseEnvFile(content: string) {
+  const result: Record<string, string> = {};
+
+  for (const line of content.split(/\r?\n/)) {
+    const trimmed = line.trim();
+
+    if (!trimmed || trimmed.startsWith("#")) {
+      continue;
+    }
+
+    const separatorIndex = trimmed.indexOf("=");
+
+    if (separatorIndex <= 0) {
+      continue;
+    }
+
+    const key = trimmed.slice(0, separatorIndex).trim();
+    const rawValue = trimmed.slice(separatorIndex + 1).trim();
+    result[key] = rawValue.replace(/^["']|["']$/g, "");
+  }
+
+  return result;
+}
+
+function getProgramDataRoot() {
+  const basePath =
+    process.env.PROGRAMDATA ??
+    (process.platform === "win32" ? "C:\\ProgramData" : app.getPath("userData"));
+
+  return join(basePath, "AHSO OCR");
 }
 
 function applyWindowSettings(nextSettings: Partial<DesktopWindowSettings>) {
@@ -499,6 +630,7 @@ async function shutdownAndQuit() {
 
   try {
     await serviceManager?.stopOwned(reportShutdownStatus);
+    await serviceManager?.stopManagedPorts(reportShutdownStatus);
     reportShutdownStatus("Shutdown complete.");
   } finally {
     app.quit();
@@ -513,6 +645,7 @@ async function shutdownAndRestart() {
 
   try {
     await serviceManager?.stopOwned(reportShutdownStatus);
+    await serviceManager?.stopManagedPorts(reportShutdownStatus);
     reportShutdownStatus("Restarting app...");
   } finally {
     app.relaunch();
@@ -700,4 +833,71 @@ function reportShutdownStatus(message: string) {
 
 function delay(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function relaunchAsAdminIfNeeded() {
+  if (
+    process.env.AHSO_ELECTRON_SKIP_ADMIN_RELAUNCH === "1" ||
+    process.platform !== "win32" ||
+    isRunningAsAdministrator()
+  ) {
+    return false;
+  }
+
+  const result = spawnSync(
+    "powershell.exe",
+    [
+      "-NoProfile",
+      "-ExecutionPolicy",
+      "Bypass",
+      "-Command",
+      buildRunAsAdminCommand(),
+    ],
+    {
+      stdio: "ignore",
+      windowsHide: true,
+    },
+  );
+
+  if (result.error) {
+    console.error("Failed to request administrator privileges:", result.error);
+    return true;
+  }
+
+  if (result.status !== 0) {
+    console.error("Administrator privilege request was not completed.");
+  }
+
+  return true;
+}
+
+function isRunningAsAdministrator() {
+  const result = spawnSync("fltmc.exe", [], {
+    stdio: "ignore",
+    windowsHide: true,
+  });
+
+  return result.status === 0;
+}
+
+function buildRunAsAdminCommand() {
+  const executablePath = process.execPath;
+  const args = app.isPackaged ? [] : process.argv.slice(1);
+  const argumentList = args.length
+    ? ` -ArgumentList ${args.map(toPowerShellString).join(",")}`
+    : "";
+
+  return [
+    "Start-Process",
+    `-FilePath ${toPowerShellString(executablePath)}`,
+    argumentList.trim(),
+    `-WorkingDirectory ${toPowerShellString(process.cwd())}`,
+    "-Verb RunAs",
+  ]
+    .filter(Boolean)
+    .join(" ");
+}
+
+function toPowerShellString(value: string) {
+  return `'${value.replace(/'/g, "''")}'`;
 }
