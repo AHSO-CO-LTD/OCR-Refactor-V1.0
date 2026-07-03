@@ -22,9 +22,11 @@ Run from the repository root:
 npm run dev:desktop
 ```
 
-On Windows, if this command is started without administrator privileges, the
-Electron entry point relaunches itself with UAC and exits the non-elevated
-instance.
+Packaged Windows builds require administrator privileges. The development
+launcher skips the UAC relaunch by default so `npm run dev:desktop` can be
+started and stopped from a normal terminal. Set
+`AHSO_ELECTRON_SKIP_ADMIN_RELAUNCH=0` before launching Electron manually if a
+dev session must test the UAC path.
 
 Default local services:
 

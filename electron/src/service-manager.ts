@@ -25,6 +25,13 @@ type ManagedService = LocalServiceDefinition & {
   startedByApp: boolean;
 };
 
+type ServiceCommand = {
+  command: string;
+  env?: Record<string, string>;
+  args: string[];
+  cwd: string;
+};
+
 const STARTUP_TIMEOUT_MS = 120_000;
 const EXISTING_SERVICE_TIMEOUT_MS = 10_000;
 const HEALTH_POLL_MS = 500;
@@ -146,7 +153,7 @@ export class ServiceManager {
         command: frontendCommand.command,
         env: frontendCommand.env,
         args: frontendCommand.args,
-        cwd: frontendPath,
+        cwd: frontendCommand.cwd,
         healthUrl: `http://127.0.0.1:${DEFAULT_PORTS.frontend}/login`,
         port: DEFAULT_PORTS.frontend,
         lastRestartAt: 0,
@@ -525,6 +532,7 @@ export class ServiceManager {
     service.command = frontendCommand.command;
     service.env = frontendCommand.env;
     service.args = frontendCommand.args;
+    service.cwd = frontendCommand.cwd;
   }
 
   private createServiceEnv(service: ManagedService) {
@@ -702,36 +710,32 @@ function resolveNpmCommand(args: string[]) {
   };
 }
 
-function resolveBackendCommand(repoRoot: string) {
+function resolveBackendCommand(repoRoot: string): ServiceCommand {
+  const backendPath = join(repoRoot, "backend");
   const backendMain = [
-    join(repoRoot, "backend", "dist", "main.js"),
-    join(repoRoot, "backend", "dist", "src", "main.js"),
+    join(backendPath, "dist", "main.js"),
+    join(backendPath, "dist", "src", "main.js"),
   ].find((candidate) => existsSync(candidate));
 
   if (isPackagedRuntime(repoRoot) && backendMain) {
     return {
       command: process.execPath,
       args: [backendMain],
-      cwd: join(repoRoot, "backend"),
+      cwd: backendPath,
       env: { ELECTRON_RUN_AS_NODE: "1", NODE_ENV: "production" },
     };
   }
 
-  const command = resolveNpmCommand([
-    "run",
-    "start",
-    "-w",
-    "@ocr/backend",
-  ]);
+  const command = resolveNpmCommand(["run", "start"]);
 
-  return { ...command, cwd: repoRoot, env: undefined };
+  return { ...command, cwd: backendPath, env: undefined };
 }
 
 function resolveFrontendCommand(
   repoRoot: string,
   frontendPath: string,
   port: number,
-) {
+): ServiceCommand {
   const standaloneServer = findStandaloneFrontendServer(repoRoot);
 
   if (isPackagedRuntime(repoRoot) && standaloneServer) {
@@ -758,6 +762,7 @@ function resolveFrontendCommand(
       command: process.execPath,
       args: [nextBin, "dev", "--webpack", "--port", String(port)],
       env: undefined,
+      cwd: frontendPath,
     };
   }
 
@@ -771,7 +776,7 @@ function resolveFrontendCommand(
     String(port),
   ]);
 
-  return { ...command, env: undefined };
+  return { ...command, cwd: repoRoot, env: undefined };
 }
 
 function isPackagedRuntime(repoRoot: string) {
@@ -795,7 +800,7 @@ function findStandaloneFrontendServer(repoRoot: string) {
 function resolveToolPython(repoRoot: string) {
   const configured = process.env.DEVICE_TOOL_PYTHON;
 
-  if (configured) {
+  if (configured && canRunToolPython(configured, [])) {
     return { command: configured, args: [] };
   }
 
@@ -804,24 +809,48 @@ function resolveToolPython(repoRoot: string) {
       ? join(repoRoot, "tool", ".venv", "Scripts", "python.exe")
       : join(repoRoot, "tool", ".venv", "bin", "python");
 
-  if (existsSync(venvPython)) {
+  if (existsSync(venvPython) && canRunToolPython(venvPython, [])) {
     return { command: venvPython, args: [] };
   }
 
   if (process.platform !== "win32") {
+    if (canRunToolPython("python3.11", [])) {
+      return { command: "python3.11", args: [] };
+    }
+
     if (canRunToolPython("python3", [])) {
       return { command: "python3", args: [] };
     }
 
-    return { command: "python", args: [] };
+    if (canRunToolPython("python", [])) {
+      return { command: "python", args: [] };
+    }
+
+    if (canRun("uv", ["--version"])) {
+      return {
+        command: "uv",
+        args: [
+          "run",
+          "--python",
+          "3.11",
+          "--with-requirements",
+          "requirements.txt",
+          "python",
+        ],
+      };
+    }
+
+    return { command: "python3.11", args: [] };
   }
 
   const launcherCandidates = [
     { command: "py", args: ["-3.11"] },
-    ...getWindowsPythonLauncherPaths().map((pythonPath) => ({
-      command: pythonPath,
-      args: [],
-    })),
+    ...getWindowsPythonLauncherPaths()
+      .filter(isPython311Path)
+      .map((pythonPath) => ({
+        command: pythonPath,
+        args: [],
+      })),
     { command: "python", args: [] },
   ];
 
@@ -861,8 +890,12 @@ function canRunToolPython(command: string, args: string[]) {
   return canRun(command, [
     ...args,
     "-c",
-    "import fastapi, uvicorn",
+    "import sys, fastapi, uvicorn; raise SystemExit(0 if sys.version_info[:2] == (3, 11) else 1)",
   ]);
+}
+
+function isPython311Path(pythonPath: string) {
+  return /(?:Python311|cpython-3\.11|\\3\.11\\)/i.test(pythonPath);
 }
 
 function getWindowsPythonLauncherPaths() {

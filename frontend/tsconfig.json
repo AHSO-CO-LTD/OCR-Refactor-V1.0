@@ -38,7 +38,8 @@
     ".next-electron-*/types/**/*.ts",
     ".next-electron-*/dev/types/**/*.ts",
     ".next-electron-3969/types/**/*.ts",
-    ".next-electron-3969/dev/types/**/*.ts"
+    ".next-electron-3969/dev/types/**/*.ts",
+    ".next-electron-3969/dev/dev/types/**/*.ts"
   ],
   "exclude": [
     "node_modules"

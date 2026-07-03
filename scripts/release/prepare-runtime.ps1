@@ -44,10 +44,18 @@ Copy-Item -LiteralPath (Join-Path $repoRoot "backend\dist") -Destination $backen
 Copy-Item -LiteralPath (Join-Path $repoRoot "backend\prisma") -Destination $backendRuntime -Recurse
 Copy-Item -LiteralPath (Join-Path $repoRoot "backend\package.json") -Destination $backendRuntime
 Copy-Item -LiteralPath (Join-Path $repoRoot "backend\native") -Destination $backendRuntime -Recurse
+Copy-Item -LiteralPath (Join-Path $repoRoot "backend\scripts") -Destination $backendRuntime -Recurse
+
+$dongleHelperRuntime = Join-Path $backendRuntime "scripts\check-dongle.py"
+if (-not (Test-Path $dongleHelperRuntime)) {
+  throw "Dongle helper was not staged at $dongleHelperRuntime"
+}
 
 $frontendStandalone = Join-Path $repoRoot "frontend\.next\standalone"
 if (Test-Path $frontendStandalone) {
-  Copy-Item -LiteralPath $frontendStandalone -Destination (Join-Path $runtimeRoot "frontend-standalone") -Recurse
+  $frontendStandaloneRuntime = Join-Path $runtimeRoot "frontend-standalone"
+  Copy-Item -LiteralPath $frontendStandalone -Destination $frontendStandaloneRuntime -Recurse
+  Copy-Item -LiteralPath (Join-Path $repoRoot "frontend\package.json") -Destination $frontendStandaloneRuntime
 }
 
 $frontendStatic = Join-Path $repoRoot "frontend\.next\static"

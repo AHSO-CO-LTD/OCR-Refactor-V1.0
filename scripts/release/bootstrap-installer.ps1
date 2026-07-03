@@ -53,14 +53,22 @@ function Write-Status {
 }
 
 function Protect-ProgramDataFile {
-  param([string]$Path)
+  param(
+    [string]$Path,
+    [switch]$AllowAuthenticatedRead
+  )
 
   if (-not (Test-Path $Path)) {
     return
   }
 
   try {
-    icacls.exe $Path /inheritance:r /grant:r "Administrators:F" "SYSTEM:F" | Out-Null
+    $grants = @("*S-1-5-32-544:F", "*S-1-5-18:F")
+    if ($AllowAuthenticatedRead) {
+      $grants += "*S-1-5-11:R"
+    }
+
+    icacls.exe $Path /inheritance:r /grant:r @grants | Out-Null
   } catch {
     Write-Status -State "warning" -Message "Could not lock file ACL." -Details @{ path = $Path; error = $_.Exception.Message }
   }
@@ -185,6 +193,21 @@ function Get-ValueOrDefault {
   return $DefaultValue
 }
 
+function Get-BooleanConfig {
+  param(
+    [hashtable]$Values,
+    [string]$Key
+  )
+
+  if (-not $Values.ContainsKey($Key)) {
+    return $false
+  }
+
+  $rawValue = [string]$Values[$Key]
+  $normalized = $rawValue.Trim().ToLowerInvariant()
+  return @("1", "true", "yes", "recreate", "reset") -contains $normalized
+}
+
 function Get-DatabaseConfig {
   $envValues = Read-EnvFile -Path $envPath
   $existingDb = Read-DatabaseUrlConfig -DatabaseUrl $envValues["DATABASE_URL"]
@@ -210,6 +233,7 @@ function Get-DatabaseConfig {
     password = $password
     adminUser = Get-ValueOrDefault -Values $installerDb -Key "adminUser" -DefaultValue "postgres"
     adminPassword = Get-ValueOrDefault -Values $installerDb -Key "adminPassword" -DefaultValue $env:OCR_POSTGRES_SUPERPASSWORD
+    resetExisting = Get-BooleanConfig -Values $installerDb -Key "resetExisting"
   }
 }
 
@@ -230,20 +254,37 @@ function Assert-PostgresIdentifier {
   }
 }
 
+function Assert-ResettableDatabase {
+  param([string]$Name)
+
+  $normalized = $Name.ToLowerInvariant()
+  if (@("postgres", "template0", "template1") -contains $normalized) {
+    throw "Database '$Name' is a system database and cannot be deleted by setup."
+  }
+}
+
 function Find-Psql {
+  $postgresRoot = "C:\Program Files\PostgreSQL"
+  if (Test-Path $postgresRoot) {
+    $candidates = Get-ChildItem -LiteralPath $postgresRoot -Filter "psql.exe" -Recurse -ErrorAction SilentlyContinue |
+      Sort-Object FullName
+    $binCandidate = $candidates |
+      Where-Object { $_.FullName -match "\\bin\\psql\.exe$" } |
+      Sort-Object FullName -Descending |
+      Select-Object -First 1
+    if ($binCandidate) {
+      return $binCandidate.FullName
+    }
+
+    $fallbackCandidate = $candidates | Select-Object -First 1
+    if ($fallbackCandidate) {
+      return $fallbackCandidate.FullName
+    }
+  }
+
   $fromPath = Find-CommandPath "psql.exe"
   if ($fromPath) {
     return $fromPath
-  }
-
-  $postgresRoot = "C:\Program Files\PostgreSQL"
-  if (Test-Path $postgresRoot) {
-    $candidate = Get-ChildItem -LiteralPath $postgresRoot -Filter "psql.exe" -Recurse -ErrorAction SilentlyContinue |
-      Sort-Object FullName -Descending |
-      Select-Object -First 1
-    if ($candidate) {
-      return $candidate.FullName
-    }
   }
 
   return $null
@@ -299,9 +340,11 @@ function Invoke-Psql {
   )
 
   $previousPassword = $env:PGPASSWORD
+  $previousTimeout = $env:PGCONNECT_TIMEOUT
   try {
     $env:PGPASSWORD = $Password
-    $arguments = @("-h", $HostName, "-p", $Port, "-U", $User, "-d", $Database, "-v", "ON_ERROR_STOP=1")
+    $env:PGCONNECT_TIMEOUT = "5"
+    $arguments = @("-w", "-h", $HostName, "-p", $Port, "-U", $User, "-d", $Database, "-v", "ON_ERROR_STOP=1")
     if ($Scalar) {
       $arguments += @("-tA")
     }
@@ -321,6 +364,11 @@ function Invoke-Psql {
       Remove-Item Env:PGPASSWORD -ErrorAction SilentlyContinue
     } else {
       $env:PGPASSWORD = $previousPassword
+    }
+    if ($null -eq $previousTimeout) {
+      Remove-Item Env:PGCONNECT_TIMEOUT -ErrorAction SilentlyContinue
+    } else {
+      $env:PGCONNECT_TIMEOUT = $previousTimeout
     }
   }
 }
@@ -346,6 +394,44 @@ function Test-AppDatabaseConnection {
   } catch {
     Write-BootstrapLog "App database connection is not ready yet: $($_.Exception.Message)"
     return $false
+  }
+}
+
+function Test-DatabaseExistsWithAdmin {
+  param(
+    [string]$PsqlPath,
+    [hashtable]$Config
+  )
+
+  if (-not $Config.adminUser) {
+    return $null
+  }
+
+  try {
+    $databaseName = Escape-SqlLiteral -Value $Config.name
+    $result = Invoke-Psql `
+      -PsqlPath $PsqlPath `
+      -HostName $Config.host `
+      -Port $Config.port `
+      -Database "postgres" `
+      -User $Config.adminUser `
+      -Password $Config.adminPassword `
+      -Sql "SELECT CASE WHEN EXISTS (SELECT FROM pg_database WHERE datname = '$databaseName') THEN 'exists' ELSE 'missing' END;" `
+      -Scalar
+
+    $state = (($result -join "").Trim())
+    if ($state -eq "exists") {
+      return $true
+    }
+    if ($state -eq "missing") {
+      return $false
+    }
+
+    Write-BootstrapLog "Database existence probe returned unexpected output: $state"
+    return $null
+  } catch {
+    Write-BootstrapLog "Could not probe database existence with admin credentials: $($_.Exception.Message)"
+    return $null
   }
 }
 
@@ -428,6 +514,54 @@ function Ensure-DatabaseWithAdmin {
   }
 }
 
+function Reset-DatabaseWithAdmin {
+  param(
+    [string]$PsqlPath,
+    [hashtable]$Config
+  )
+
+  if (-not $Config.adminPassword) {
+    throw "PostgreSQL admin password is required to delete and recreate database '$($Config.name)'."
+  }
+
+  Assert-ResettableDatabase -Name $Config.name
+
+  Remove-DatabaseWithAdmin -PsqlPath $PsqlPath -Config $Config
+  Ensure-DatabaseWithAdmin -PsqlPath $PsqlPath -Config $Config
+}
+
+function Remove-DatabaseWithAdmin {
+  param(
+    [string]$PsqlPath,
+    [hashtable]$Config
+  )
+
+  if (-not $Config.adminPassword) {
+    throw "PostgreSQL admin password is required to delete database '$($Config.name)'."
+  }
+
+  Assert-ResettableDatabase -Name $Config.name
+
+  $databaseName = Escape-SqlLiteral -Value $Config.name
+  Invoke-Psql `
+    -PsqlPath $PsqlPath `
+    -HostName $Config.host `
+    -Port $Config.port `
+    -Database "postgres" `
+    -User $Config.adminUser `
+    -Password $Config.adminPassword `
+    -Sql "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '$databaseName' AND pid <> pg_backend_pid();" | Out-Null
+
+  Invoke-Psql `
+    -PsqlPath $PsqlPath `
+    -HostName $Config.host `
+    -Port $Config.port `
+    -Database "postgres" `
+    -User $Config.adminUser `
+    -Password $Config.adminPassword `
+    -Sql "DROP DATABASE IF EXISTS $($Config.name);" | Out-Null
+}
+
 function Install-NodeIfBundled {
   $npm = Get-Command "npm.cmd" -ErrorAction SilentlyContinue
   if ($npm) {
@@ -459,6 +593,11 @@ function Install-NodeDependencies {
 
   Install-NodeIfBundled
 
+  $packageJsonPath = Join-Path $Path "package.json"
+  if (-not (Test-Path $packageJsonPath)) {
+    throw "Cannot install Node dependencies because package.json was not found in $Path"
+  }
+
   Push-Location $Path
   $previousWorkspace = $env:npm_config_workspace
   $previousWorkspaces = $env:npm_config_workspaces
@@ -488,21 +627,91 @@ function Install-NodeDependencies {
 
 function Find-Python {
   $venvPython = Join-Path $runtimeRoot "tool\.venv\Scripts\python.exe"
-  if (Test-Path $venvPython) {
+  if ((Test-Path $venvPython) -and (Test-PythonCommand -Command $venvPython -Args @())) {
     return @{ command = $venvPython; args = @() }
   }
 
+  $configuredPython = $env:DEVICE_TOOL_PYTHON
+  if ($configuredPython -and (Test-PythonCommand -Command $configuredPython -Args @())) {
+    return @{ command = $configuredPython; args = @() }
+  }
+
+  $launcherPaths = Get-WindowsPythonLauncherPaths
+  $preferredLauncherPython = $launcherPaths |
+    Where-Object { $_ -match "3\.11|Python311|cpython-3\.11" } |
+    Select-Object -First 1
+  if ($preferredLauncherPython -and (Test-PythonCommand -Command $preferredLauncherPython -Args @())) {
+    return @{ command = $preferredLauncherPython; args = @() }
+  }
+
   $py = Get-Command "py.exe" -ErrorAction SilentlyContinue
-  if ($py) {
+  if ($py -and (Test-PythonCommand -Command $py.Source -Args @("-3.11"))) {
     return @{ command = $py.Source; args = @("-3.11") }
   }
 
   $python = Get-Command "python.exe" -ErrorAction SilentlyContinue
-  if ($python) {
+  if ($python -and (Test-PythonCommand -Command $python.Source -Args @())) {
     return @{ command = $python.Source; args = @() }
   }
 
   return $null
+}
+
+function Test-PythonCommand {
+  param(
+    [string]$Command,
+    [array]$Args = @()
+  )
+
+  try {
+    & $Command @Args -c "import sys, venv; raise SystemExit(0 if sys.version_info[:2] == (3, 11) else 1)" | Out-Null
+    return $LASTEXITCODE -eq 0
+  } catch {
+    return $false
+  }
+}
+
+function Get-WindowsPythonLauncherPaths {
+  try {
+    $output = & py -0p 2>&1
+  } catch {
+    return @()
+  }
+
+  return ($output | ForEach-Object { $_.ToString() }) |
+    ForEach-Object { [regex]::Match($_, "([A-Za-z]:\\.*?python\.exe)") } |
+    Where-Object { $_.Success } |
+    ForEach-Object { $_.Groups[1].Value } |
+    Where-Object { Test-Path $_ }
+}
+
+function Invoke-BootstrapCommand {
+  param(
+    [string]$Command,
+    [array]$Arguments,
+    [string]$ErrorMessage
+  )
+
+  Write-BootstrapLog "Running: $Command $($Arguments -join ' ')"
+  $previousErrorActionPreference = $ErrorActionPreference
+  try {
+    # Native commands often write warnings to stderr even when they exit with 0.
+    # Capture that output without letting PowerShell turn it into a bootstrap failure.
+    $ErrorActionPreference = "Continue"
+    $output = & $Command @Arguments 2>&1
+    $exitCode = $LASTEXITCODE
+  } finally {
+    $ErrorActionPreference = $previousErrorActionPreference
+  }
+
+  if ($output) {
+    $joinedOutput = ($output | ForEach-Object { $_.ToString() }) -join "`n"
+    Write-BootstrapLog $joinedOutput
+  }
+
+  if ($exitCode -ne 0) {
+    throw "$ErrorMessage. See $bootstrapLogPath for details."
+  }
 }
 
 function Install-PythonIfBundled {
@@ -523,7 +732,7 @@ function Install-PythonIfBundled {
 
   $python = Find-Python
   if (-not $python) {
-    throw "Python installer completed but Python was not found"
+    throw "Python installer completed but Python 3.11 was not found"
   }
 
   return $python
@@ -540,25 +749,29 @@ function Install-ToolPythonDependencies {
   $venvPath = Join-Path $toolPath ".venv"
   $venvPython = Join-Path $venvPath "Scripts\python.exe"
 
+  if ((Test-Path $venvPython) -and -not (Test-PythonCommand -Command $venvPython -Args @())) {
+    Write-BootstrapLog "Existing Tool Python venv is not Python 3.11. Recreating $venvPath"
+    Remove-Item -LiteralPath $venvPath -Recurse -Force
+  }
+
   if (-not (Test-Path $venvPython)) {
     $pythonCommand = $python.command
     $pythonArgs = @($python.args) + @("-m", "venv", $venvPath)
-    & $pythonCommand @pythonArgs
-    if ($LASTEXITCODE -ne 0) {
-      throw "Could not create Tool Python venv"
-    }
+    Invoke-BootstrapCommand -Command $pythonCommand -Arguments $pythonArgs -ErrorMessage "Could not create Tool Python venv"
   }
 
-  & $venvPython -m pip install --upgrade pip
-  if ($LASTEXITCODE -ne 0) {
-    throw "Could not upgrade pip in Tool venv"
+  if (-not (Test-PythonCommand -Command $venvPython -Args @())) {
+    throw "Tool Python venv was created, but it is not Python 3.11"
   }
 
-  & $venvPython -m pip install -r $requirementsPath
-  if ($LASTEXITCODE -ne 0) {
-    throw "Could not install Tool Python requirements"
-  }
+  Invoke-BootstrapCommand -Command $venvPython -Arguments @("-m", "pip", "install", "--upgrade", "pip") -ErrorMessage "Could not upgrade pip in Tool venv"
+
+  Invoke-BootstrapCommand -Command $venvPython -Arguments @("-m", "pip", "install", "-r", $requirementsPath) -ErrorMessage "Could not install Tool Python requirements"
 }
+
+$rollbackDatabaseOnFailure = $false
+$dbConfig = $null
+$psql = $null
 
 try {
   New-Item -ItemType Directory -Force -Path $programDataRoot | Out-Null
@@ -574,21 +787,60 @@ try {
   $postgresSuperPassword = if ($dbConfig.adminPassword) { $dbConfig.adminPassword } else { New-Secret 24 }
   $supportPassword = New-Secret 24
 
-  if (-not $dbPassword) {
-    if ($dbConfig.adminPassword) {
+  $psql = Install-PostgreSqlIfBundled -SuperPassword $postgresSuperPassword -Port $dbConfig.port
+  $dbExists = Test-DatabaseExistsWithAdmin -PsqlPath $psql -Config $dbConfig
+
+  if ($true -eq $dbExists) {
+    if ($dbConfig.resetExisting) {
+      if (-not $dbPassword) {
+        $dbPassword = New-Secret 24
+        $dbConfig.password = $dbPassword
+      }
+
+      $rollbackDatabaseOnFailure = $true
+      Reset-DatabaseWithAdmin -PsqlPath $psql -Config $dbConfig
+      Write-BootstrapLog "Database $dbName was deleted and recreated on $($dbConfig.host):$($dbConfig.port)."
+    } else {
+      if (-not $dbPassword) {
+        throw "Database '$dbName' already exists. Choose another database name or allow setup to delete and recreate it."
+      }
+
+      if (-not (Test-AppDatabaseConnection -PsqlPath $psql -Config $dbConfig)) {
+        throw "Database '$dbName' already exists, but app DB user '$dbUser' could not connect. Choose another database name or delete and recreate the existing database."
+      }
+
+      Write-BootstrapLog "Using existing database $dbName on $($dbConfig.host):$($dbConfig.port)."
+    }
+  } elseif ($false -eq $dbExists) {
+    if (-not $dbConfig.adminPassword) {
+      throw "Database '$dbName' does not exist. Enter PostgreSQL admin password so setup can create it."
+    }
+
+    if (-not $dbPassword) {
       $dbPassword = New-Secret 24
       $dbConfig.password = $dbPassword
-    } else {
-      throw "Database password is required unless PostgreSQL admin password is provided."
     }
-  }
 
-  $psql = Install-PostgreSqlIfBundled -SuperPassword $postgresSuperPassword -Port $dbConfig.port
-  if (Test-AppDatabaseConnection -PsqlPath $psql -Config $dbConfig) {
-    Write-BootstrapLog "Using existing database $dbName on $($dbConfig.host):$($dbConfig.port)."
-  } else {
+    $rollbackDatabaseOnFailure = $true
     Ensure-DatabaseWithAdmin -PsqlPath $psql -Config $dbConfig
-    Write-BootstrapLog "Database $dbName was created or updated on $($dbConfig.host):$($dbConfig.port)."
+    Write-BootstrapLog "Database $dbName was created on $($dbConfig.host):$($dbConfig.port)."
+  } else {
+    if ($dbPassword -and (Test-AppDatabaseConnection -PsqlPath $psql -Config $dbConfig)) {
+      Write-BootstrapLog "Database probe was inconclusive, but app DB connection works. Reusing $dbName."
+    } else {
+      if (-not $dbConfig.adminPassword) {
+        throw "Could not scan database '$dbName'. Enter PostgreSQL admin password so setup can check and create it if needed."
+      }
+
+      if (-not $dbPassword) {
+        $dbPassword = New-Secret 24
+        $dbConfig.password = $dbPassword
+      }
+
+      $rollbackDatabaseOnFailure = $true
+      Ensure-DatabaseWithAdmin -PsqlPath $psql -Config $dbConfig
+      Write-BootstrapLog "Database $dbName was created or updated after inconclusive probe."
+    }
   }
 
   $databasePasswordUrl = [System.Uri]::EscapeDataString($dbPassword)
@@ -604,14 +856,15 @@ DATABASE_URL=$databaseUrl
 JWT_SECRET=$jwtSecret
 DEVICE_TOOL_BASE_URL=http://127.0.0.1:8000
 DEVICE_TOOL_API_PREFIX=/tool/v1
+DEVICE_TOOL_PYTHON=$runtimeRoot\tool\.venv\Scripts\python.exe
 DONGLE_MOCK_MODE=false
 DONGLE_DLL_PATH=$runtimeRoot\backend\native\System8.dll
-DONGLE_PYTHON_COMMAND=py -3.11
+DONGLE_PYTHON_COMMAND=$runtimeRoot\tool\.venv\Scripts\python.exe
 DONGLE_RETRY_COUNT=3
 DONGLE_RETRY_INTERVAL_MS=1000
 DONGLE_CHECK_TIMEOUT_MS=7000
 "@
-  Protect-ProgramDataFile -Path $envPath
+  Protect-ProgramDataFile -Path $envPath -AllowAuthenticatedRead
 
   [ordered]@{
     username = "dev"
@@ -632,15 +885,9 @@ DONGLE_CHECK_TIMEOUT_MS=7000
 
   Push-Location (Join-Path $runtimeRoot "backend")
   try {
-    npm.cmd exec -- prisma migrate deploy
-    if ($LASTEXITCODE -ne 0) {
-      throw "Prisma migrate deploy failed"
-    }
-
-    npm.cmd run prisma:seed
-    if ($LASTEXITCODE -ne 0) {
-      throw "Production seed failed"
-    }
+    Invoke-BootstrapCommand -Command "npm.cmd" -Arguments @("exec", "--", "prisma", "generate") -ErrorMessage "Prisma client generation failed"
+    Invoke-BootstrapCommand -Command "npm.cmd" -Arguments @("exec", "--", "prisma", "migrate", "deploy") -ErrorMessage "Prisma migrate deploy failed"
+    Invoke-BootstrapCommand -Command "node.exe" -Arguments @("dist/prisma/seed.js") -ErrorMessage "Production seed failed"
   } finally {
     Pop-Location
   }
@@ -655,6 +902,16 @@ DONGLE_CHECK_TIMEOUT_MS=7000
   }
 } catch {
   Write-BootstrapLog "Bootstrap failed: $($_.Exception.Message)"
+  if ($rollbackDatabaseOnFailure -and $psql -and $dbConfig) {
+    try {
+      Remove-DatabaseWithAdmin -PsqlPath $psql -Config $dbConfig
+      Write-BootstrapLog "Rolled back database $($dbConfig.name) after bootstrap failure."
+    } catch {
+      Write-BootstrapLog "Could not roll back database after bootstrap failure: $($_.Exception.Message)"
+    }
+  }
+  Remove-Item -LiteralPath $envPath -Force -ErrorAction SilentlyContinue
+  Remove-Item -LiteralPath $credentialPath -Force -ErrorAction SilentlyContinue
   Write-Status -State "failed" -Message $_.Exception.Message -Details @{
     installDir = $InstallDir
     runtimeRoot = $runtimeRoot

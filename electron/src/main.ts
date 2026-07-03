@@ -224,18 +224,25 @@ function getRuntimeRoot() {
 }
 
 function loadRuntimeEnv(runtimeRoot: string) {
-  const envPaths = [
-    join(getProgramDataRoot(), ".env"),
-    join(runtimeRoot, ".env"),
-    join(runtimeRoot, "backend", ".env"),
-  ];
+  const envPaths = app.isPackaged
+    ? [
+        join(getProgramDataRoot(), ".env"),
+        join(runtimeRoot, ".env"),
+        join(runtimeRoot, "backend", ".env"),
+      ]
+    : [join(runtimeRoot, ".env"), join(runtimeRoot, "backend", ".env")];
 
   for (const envPath of envPaths) {
     if (!existsSync(envPath)) {
       continue;
     }
 
-    const env = parseEnvFile(readFileSync(envPath, "utf8"));
+    const envContent = readRuntimeEnvFile(envPath, app.isPackaged);
+    if (!envContent) {
+      continue;
+    }
+
+    const env = parseEnvFile(envContent);
 
     for (const [key, value] of Object.entries(env)) {
       if (process.env[key] === undefined) {
@@ -247,6 +254,43 @@ function loadRuntimeEnv(runtimeRoot: string) {
   if (app.isPackaged) {
     process.env.OCR_PACKAGED_RUNTIME = "true";
   }
+}
+
+function readRuntimeEnvFile(envPath: string, isRequired: boolean) {
+  try {
+    return readFileSync(envPath, "utf8");
+  } catch (error) {
+    if (isRequired) {
+      throw createRuntimeEnvReadError(envPath, error);
+    }
+
+    console.warn(`Could not read development env file ${envPath}:`, error);
+    return null;
+  }
+}
+
+function createRuntimeEnvReadError(envPath: string, error: unknown) {
+  const message =
+    error instanceof Error
+      ? error.message
+      : "Unknown error while reading runtime environment file.";
+  const code =
+    typeof error === "object" && error !== null && "code" in error
+      ? String((error as { code?: unknown }).code)
+      : null;
+
+  if (code === "EACCES" || code === "EPERM") {
+    return new Error(
+      [
+        `Cannot read runtime environment file: ${envPath}`,
+        "The file exists, but Windows denied access to the desktop app.",
+        "Run the installer bootstrap again or repair the file ACL so the signed-in app user can read this .env file.",
+        `Original error: ${message}`,
+      ].join(" "),
+    );
+  }
+
+  return new Error(`Cannot read runtime environment file ${envPath}: ${message}`);
 }
 
 function parseEnvFile(content: string) {
@@ -792,7 +836,11 @@ function delay(ms: number) {
 }
 
 function relaunchAsAdminIfNeeded() {
-  if (process.platform !== "win32" || isRunningAsAdministrator()) {
+  if (
+    process.env.AHSO_ELECTRON_SKIP_ADMIN_RELAUNCH === "1" ||
+    process.platform !== "win32" ||
+    isRunningAsAdministrator()
+  ) {
     return false;
   }
 

@@ -1440,7 +1440,7 @@ export function LineAnimationTestPanel({
                     disabled={loadingProducts || isBusy}
                     className="h-11 border-[#9db7d8] bg-white text-base"
                     onChange={(event) => handleProductChange(event.target.value)}
-                  >
+                    >
                     {products.map((item) => (
                       <option key={item.id} value={item.id}>
                         {item.code} - {item.name}

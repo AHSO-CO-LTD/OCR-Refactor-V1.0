@@ -12,14 +12,15 @@ still call the backend only; the backend calls the Tool through `/tool/v1`.
 
 1. User runs `AHSO-OCR-Setup-<version>-x64.exe`.
 2. NSIS requests administrator permission.
-3. User confirms database settings on the Database setup page.
-4. Installer copies Electron and `resources/runtime`.
-5. Installer runs `resources/installer/bootstrap-installer.ps1`.
-6. Bootstrap creates `C:\ProgramData\AHSO OCR\.env`.
-7. Bootstrap connects to the configured PostgreSQL instance.
-8. If the configured database/user/password already works, bootstrap reuses it.
-9. If it does not work, bootstrap uses the optional PostgreSQL admin password
-   from the setup page to create or update the DB user and database.
+3. User enters PostgreSQL host, port, database name, and app DB user.
+4. Installer probes PostgreSQL to check whether that database already exists.
+5. If the database exists, setup asks the user to either enter a different
+   database name or delete the existing database and recreate it cleanly.
+6. If the database does not exist, setup asks for PostgreSQL admin credentials
+   and creates the database.
+7. Installer copies Electron and `resources/runtime`.
+8. Installer runs `resources/installer/bootstrap-installer.ps1`.
+9. Bootstrap creates `C:\ProgramData\AHSO OCR\.env`.
 10. Bootstrap installs Node.js/npm if missing, then installs Node dependencies.
 11. Bootstrap creates the Tool Python venv and installs `tool/requirements.txt`.
 12. Bootstrap runs Prisma migrations.
@@ -27,6 +28,12 @@ still call the backend only; the backend calls the Tool through `/tool/v1`.
 14. User opens the app and sees first-run admin creation when no active admin exists.
 15. Customer admin creates their own administrator account.
 16. Future logins use normal dongle/license gating.
+
+If bootstrap fails after files are copied, setup removes the copied app files,
+shortcuts, and installer registry entry so Windows does not show a half-installed
+desktop app. When setup created a new database or deleted and recreated an
+existing database for this attempt, bootstrap also drops that database during
+failure rollback.
 
 ## GitHub Build Flow
 
@@ -68,10 +75,19 @@ Database: ocr_metal_core_washing
 App user: ahso_ocr
 ```
 
-If the database already exists and the app user/password can connect, setup uses
-it directly and does not recreate it. If the connection fails, the PostgreSQL
-admin user/password entered on the setup page is used to create or update the
-app DB user and database.
+Setup probes PostgreSQL before asking for database credentials. If the selected
+database already exists, setup gives two choices:
+
+1. enter a different database name, then setup scans that new name and creates
+   it if it is available.
+2. delete the existing database and create a clean database with the same name.
+
+The delete-and-recreate option requires PostgreSQL admin credentials and is
+destructive. The app DB password can be left empty so setup generates one. If
+the database does not exist, setup requires PostgreSQL admin credentials and
+creates the app DB/user. If the installer cannot probe without admin access, it
+asks for PostgreSQL admin credentials first, then continues based on the probe
+result.
 
 ## Developer Support Account
 
@@ -83,6 +99,18 @@ C:\ProgramData\AHSO OCR\support-dev-credential.json
 ```
 
 Normal admin screens still hide and protect `dev`.
+
+## Uninstall Rule
+
+The uninstaller asks whether to keep the local PostgreSQL database.
+
+- Keep database: app files are removed, but the database and runtime config are
+  preserved for reinstall/update recovery.
+- Delete database: setup reads `C:\ProgramData\AHSO OCR\.env`, uses the app DB
+  owner from `DATABASE_URL`, terminates active connections, drops the selected
+  database, and removes local runtime credentials.
+
+Silent uninstall keeps the database by default.
 
 ## Customer Admin Account
 
@@ -101,7 +129,8 @@ __pycache__/
 ```
 
 The installer bootstrap installs Node packages and Python requirements on the
-target PC during setup.
+target PC during setup. The Device Tool runtime is Python 3.11 only; setup does
+not use any other Python version.
 
 ## Product Rotation Default
 

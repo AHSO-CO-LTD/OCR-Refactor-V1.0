@@ -29,19 +29,24 @@ DELETE FROM "Permission"
 WHERE "key" IN ('roi.edit', 'history.view', 'inspection.override');
 
 INSERT INTO "RolePermission" ("roleCode", "permissionKey")
-VALUES
-  ('dev'::"RoleCode", 'camera.identity.manage'),
-  ('dev'::"RoleCode", 'camera.debug.view'),
-  ('dev'::"RoleCode", 'inspection.test'),
-  ('admin'::"RoleCode", 'camera.identity.manage'),
-  ('admin'::"RoleCode", 'camera.debug.view'),
-  ('admin'::"RoleCode", 'inspection.test'),
-  ('engineer'::"RoleCode", 'product.manage'),
-  ('engineer'::"RoleCode", 'camera.manage'),
-  ('engineer'::"RoleCode", 'camera.identity.manage'),
-  ('engineer'::"RoleCode", 'camera.debug.view'),
-  ('engineer'::"RoleCode", 'inspection.test'),
-  ('engineer'::"RoleCode", 'report.view'),
-  ('operator'::"RoleCode", 'inspection.start'),
-  ('operator'::"RoleCode", 'inspection.stop')
+SELECT desired."roleCode", desired."permissionKey"
+FROM (
+  VALUES
+    ('dev'::"RoleCode", 'camera.identity.manage'),
+    ('dev'::"RoleCode", 'camera.debug.view'),
+    ('dev'::"RoleCode", 'inspection.test'),
+    ('admin'::"RoleCode", 'camera.identity.manage'),
+    ('admin'::"RoleCode", 'camera.debug.view'),
+    ('admin'::"RoleCode", 'inspection.test'),
+    ('engineer'::"RoleCode", 'product.manage'),
+    ('engineer'::"RoleCode", 'camera.manage'),
+    ('engineer'::"RoleCode", 'camera.identity.manage'),
+    ('engineer'::"RoleCode", 'camera.debug.view'),
+    ('engineer'::"RoleCode", 'inspection.test'),
+    ('engineer'::"RoleCode", 'report.view'),
+    ('operator'::"RoleCode", 'inspection.start'),
+    ('operator'::"RoleCode", 'inspection.stop')
+) AS desired("roleCode", "permissionKey")
+JOIN "Role" ON "Role"."code" = desired."roleCode"
+JOIN "Permission" ON "Permission"."key" = desired."permissionKey"
 ON CONFLICT ("roleCode", "permissionKey") DO NOTHING;

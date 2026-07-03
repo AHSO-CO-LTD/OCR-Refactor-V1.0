@@ -14,7 +14,17 @@ secrets; the installer creates them on the target PC.
 
 The setup does not bundle generated dependency folders such as `node_modules`
 or `tool/.venv`. During installation, `bootstrap-installer.ps1` installs Node
-dependencies and Python requirements on the target PC.
+dependencies, generates the Prisma Client, runs migrations, seeds production
+data, and installs Python requirements on the target PC. The Device Tool runtime
+requires Python 3.11 only.
+
+The staged `frontend-standalone` folder must contain its own `package.json` so
+the installer can install production Next.js dependencies beside the standalone
+server.
+
+The staged backend runtime must include `scripts/check-dongle.py`; the backend
+license service loads that helper from its working directory before calling
+`System8.dll`.
 
 For a fully offline setup, place required vendor installers and package caches
 in `release-runtime/vendor` before running `npm run release:win`:
