@@ -16,6 +16,7 @@ import {
   deleteProductProfile,
   listProductProfiles,
   updateProductProfile,
+  updateProductProfileStatus,
 } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
 import { getAccessToken } from "@/lib/session";
@@ -31,10 +32,14 @@ export function ProductProfilesPanel() {
   const [createOpen, setCreateOpen] = useState(false);
   const [deletingProduct, setDeletingProduct] =
     useState<ProductProfile | null>(null);
+  const [statusProduct, setStatusProduct] = useState<ProductProfile | null>(
+    null,
+  );
   const [pendingApply, setPendingApply] = useState(false);
   const [applyToAll, setApplyToAll] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [statusSaving, setStatusSaving] = useState(false);
   const [applying, setApplying] = useState(false);
   const [error, setError] = useState("");
 
@@ -147,6 +152,65 @@ export function ProductProfilesPanel() {
     }
   }
 
+  async function handleToggleProductStatus() {
+    const token = getAccessToken();
+
+    if (!statusProduct) {
+      return;
+    }
+
+    if (!token) {
+      toast.error(t("users.missingSession"));
+      return;
+    }
+
+    const nextActive = !statusProduct.active;
+    const toastId = toast.loading(
+      nextActive ? t("products.activating") : t("products.inactivating"),
+    );
+
+    setStatusSaving(true);
+
+    try {
+      const response = await updateProductProfileStatus(
+        token,
+        statusProduct.id,
+        nextActive,
+      );
+
+      setProducts((current) =>
+        current.map((product) =>
+          product.id === response.data.id ? response.data : product,
+        ),
+      );
+      setEditingProduct((current) =>
+        current?.id === response.data.id ? response.data : current,
+      );
+      toast.success(
+        nextActive
+          ? t("products.activateSuccess")
+          : t("products.inactivateSuccess"),
+        { id: toastId },
+      );
+      setStatusProduct(null);
+    } catch (cause) {
+      const message =
+        cause instanceof ApiError
+          ? apiError(
+              cause.message,
+              nextActive
+                ? "products.activateError"
+                : "products.inactivateError",
+            )
+          : nextActive
+            ? t("products.activateError")
+            : t("products.inactivateError");
+      toast.error(message, { id: toastId });
+    } finally {
+      setStatusSaving(false);
+    }
+  }
+
   async function handleApplyProfile() {
     const token = getAccessToken();
 
@@ -190,6 +254,13 @@ export function ProductProfilesPanel() {
         : [...current, productId],
     );
   }
+
+  const busyProductId =
+    saving && deletingProduct
+      ? deletingProduct.id
+      : statusSaving && statusProduct
+        ? statusProduct.id
+        : undefined;
 
   return (
     <div className="min-w-0 space-y-4">
@@ -239,12 +310,13 @@ export function ProductProfilesPanel() {
         loading={loading}
         products={products}
         selectedIds={selectedTargetIds}
-        busyProductId={saving ? deletingProduct?.id : undefined}
+        busyProductId={busyProductId}
         onToggleSelected={toggleSelected}
         onEdit={(product) => {
           setCreateOpen(false);
           setEditingProduct(product);
         }}
+        onToggleStatus={setStatusProduct}
         onDelete={setDeletingProduct}
       />
 
@@ -267,6 +339,34 @@ export function ProductProfilesPanel() {
       />
 
       <ConfirmModal
+        open={statusProduct !== null}
+        title={t("products.confirmStatusTitle")}
+        description={
+          statusProduct
+            ? formatProductMessage(
+                statusProduct.active
+                  ? t("products.confirmInactivateDescription")
+                  : t("products.confirmActivateDescription"),
+                statusProduct.code,
+              )
+            : t("products.confirmStatusTitle")
+        }
+        confirmLabel={
+          statusSaving
+            ? statusProduct?.active
+              ? t("products.inactivating")
+              : t("products.activating")
+            : statusProduct?.active
+              ? t("products.confirmInactivate")
+              : t("products.confirmActivate")
+        }
+        cancelLabel={t("common.cancel")}
+        loading={statusSaving}
+        onConfirm={handleToggleProductStatus}
+        onCancel={() => setStatusProduct(null)}
+      />
+
+      <ConfirmModal
         open={pendingApply}
         title={t("products.confirmApplyTitle")}
         description={t("products.confirmApplyDescription")}
@@ -280,4 +380,8 @@ export function ProductProfilesPanel() {
       />
     </div>
   );
+}
+
+function formatProductMessage(template: string, productCode: string) {
+  return template.replace("{code}", productCode);
 }

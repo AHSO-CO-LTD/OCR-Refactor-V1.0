@@ -332,7 +332,7 @@ Response:
       "thresholdAccept": 0.5,
       "thresholdMns": 0.5,
       "modelPath": "models/SL-40_150_0.998.pt",
-      "rotateTestImageClockwise": false,
+      "rotateTestImageClockwise": true,
       "active": true,
       "camera": {
         "sourceType": "usb",
@@ -372,7 +372,7 @@ Request:
   "thresholdAccept": 0.5,
   "thresholdMns": 0.5,
   "modelPath": "models/SL-40_150_0.998.pt",
-  "rotateTestImageClockwise": false,
+  "rotateTestImageClockwise": true,
   "active": true,
   "camera": {
     "sourceType": "usb",
@@ -398,9 +398,9 @@ Request:
 PATCH /products/:id
 ```
 
-### Update OCR Test Settings
+### Update Line OCR Crop Rotation Settings
 
-Only `dev` can update these test-only OCR settings.
+Only `dev` can update this OCR crop rotation setting. It is applied to the real line inspection flow, Camera AI flow, and line validation tools. New product profiles default `rotateTestImageClockwise` to `true`, so future products rotate the ROI crop before OCR unless explicitly changed.
 
 ```http
 PATCH /products/:id/ocr-test-settings

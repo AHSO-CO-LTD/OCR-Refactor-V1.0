@@ -29,8 +29,10 @@ export type DesktopBridge = {
   downloadUpdate(): Promise<{ success: boolean; skipped?: boolean }>;
   exitApp(): Promise<{ success: boolean }>;
   getTestStorageSettings(): Promise<DesktopTestStorageSettings>;
+  getTerminalLogs(): Promise<string[]>;
   getWindowSettings(): Promise<DesktopWindowSettings>;
   installUpdate(): Promise<{ success: boolean }>;
+  openTerminalWindow(): Promise<{ success: boolean }>;
   restartApp(): Promise<{ success: boolean }>;
   saveTestStorageSettings(
     settings: DesktopTestStorageSettings,

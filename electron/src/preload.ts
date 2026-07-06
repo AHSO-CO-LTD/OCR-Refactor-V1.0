@@ -25,6 +25,12 @@ contextBridge.exposeInMainWorld("ocrDesktop", {
   getWindowSettings() {
     return ipcRenderer.invoke("desktop:get-window-settings");
   },
+  getTerminalLogs() {
+    return ipcRenderer.invoke("desktop:get-terminal-logs");
+  },
+  openTerminalWindow() {
+    return ipcRenderer.invoke("desktop:open-terminal-window");
+  },
   saveTestStorageSettings(settings: Record<string, unknown>) {
     return ipcRenderer.invoke("desktop:save-test-storage-settings", settings);
   },

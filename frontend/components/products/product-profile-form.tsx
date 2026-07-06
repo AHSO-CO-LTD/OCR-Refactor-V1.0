@@ -29,6 +29,7 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
+import { ProductStatusControl } from "@/components/products/product-status-control";
 import {
   ApiError,
   listCameraDevices,
@@ -91,7 +92,7 @@ const defaultDraft: ProductProfilePayload = {
   thresholdMns: 0.5,
   rowThreshold: 20,
   modelPath: "",
-  rotateTestImageClockwise: false,
+  rotateTestImageClockwise: true,
   active: true,
   camera: {
     sourceType: "usb",
@@ -105,7 +106,7 @@ const defaultDraft: ProductProfilePayload = {
     zoomFactor: 1,
     previewPanX: 0,
     previewPanY: 0,
-    previewRotation: 90,
+    previewRotation: 0,
   },
   roiRegions: [],
 };
@@ -1656,6 +1657,17 @@ export function ProductProfileForm({
           </div>
         ) : null}
 
+        <ProductStatusControl
+          active={draft.active}
+          disabled={saving}
+          onChange={(active) =>
+            setDraft((current) => ({
+              ...current,
+              active,
+            }))
+          }
+        />
+
         <section className="border border-slate-200 p-4">
           <div className="mb-3 text-sm font-semibold text-slate-950">
             {t("products.groupBasic")}
@@ -2369,27 +2381,6 @@ export function ProductProfileForm({
               </div>
             </section>
 
-            <section className="border border-slate-200 p-4">
-              <div className="mb-3 font-semibold">
-                {t("products.groupStatus")}
-              </div>
-              <label className="block max-w-xs text-sm font-medium text-slate-700">
-                {t("products.status")}
-                <Select
-                  value={draft.active ? "active" : "inactive"}
-                  onChange={(event) =>
-                    setDraft((current) => ({
-                      ...current,
-                      active: event.target.value === "active",
-                    }))
-                  }
-                  className="mt-2 flex h-12 w-full border border-slate-300 bg-white px-4 py-2 text-base text-slate-950 outline-none transition focus:border-cyan-600 focus:ring-2 focus:ring-cyan-100"
-                >
-                  <option value="active">{t("products.active")}</option>
-                  <option value="inactive">{t("products.inactive")}</option>
-                </Select>
-              </label>
-            </section>
           </div>
         ) : null}
       </form>

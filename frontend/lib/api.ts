@@ -1126,6 +1126,27 @@ export async function updateProductProfile(
   return (await response.json()) as { data: ProductProfile };
 }
 
+export async function updateProductProfileStatus(
+  accessToken: string,
+  productId: string,
+  active: boolean,
+) {
+  const response = await fetch(`${API_BASE_URL}/products/${productId}`, {
+    method: "PATCH",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ active }),
+  });
+
+  if (!response.ok) {
+    throw new ApiError(await parseError(response), response.status);
+  }
+
+  return (await response.json()) as { data: ProductProfile };
+}
+
 export async function updateProductBatchSize(
   accessToken: string,
   productId: string,

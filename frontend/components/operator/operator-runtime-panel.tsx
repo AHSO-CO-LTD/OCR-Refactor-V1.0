@@ -73,7 +73,7 @@ const demoProducts: ProductProfile[] = [
     thresholdMns: 70,
     rowThreshold: 20,
     modelPath: "models/sl-37.onnx",
-    rotateTestImageClockwise: false,
+    rotateTestImageClockwise: true,
     active: true,
     camera: {
       sourceType: "demo",
@@ -86,7 +86,7 @@ const demoProducts: ProductProfile[] = [
       zoomFactor: 1,
       previewPanX: 0,
       previewPanY: 0,
-      previewRotation: 90,
+      previewRotation: 0,
     },
     roiRegions: [
       { index: 1, x: 283, y: 237, width: 105, height: 161, rotation: 0 },

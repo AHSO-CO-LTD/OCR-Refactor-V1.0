@@ -1,4 +1,11 @@
-import { app, BrowserWindow, dialog, ipcMain, shell, type OpenDialogOptions } from "electron";
+import {
+  app,
+  BrowserWindow,
+  dialog,
+  ipcMain,
+  shell,
+  type OpenDialogOptions,
+} from "electron";
 import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
@@ -35,6 +42,10 @@ const defaultTestStorageSettings: DesktopTestStorageSettings = {
   testImageSaveFolderPath: null,
 };
 
+const terminalLogLimit = 1200;
+const terminalShortcutPresses = 5;
+const terminalShortcutWindowMs = 4_000;
+
 let rendererUrl =
   process.env.ELECTRON_RENDERER_URL ??
   `http://127.0.0.1:${process.env.FRONTEND_PORT ?? "3969"}/`;
@@ -47,6 +58,9 @@ let shutdownPromise: Promise<{ success: boolean }> | null = null;
 let restartPromise: Promise<{ success: boolean }> | null = null;
 let windowSettings: DesktopWindowSettings = defaultWindowSettings;
 let testStorageSettings: DesktopTestStorageSettings = defaultTestStorageSettings;
+let terminalShortcutCount = 0;
+let terminalShortcutLastAt = 0;
+const terminalLogs: string[] = [];
 
 if (relaunchAsAdminIfNeeded()) {
   app.exit(0);
@@ -85,7 +99,6 @@ async function startDesktopApp() {
   });
 
   createMainWindow();
-  createTerminalWindow();
   showStartupPage("Starting local services...");
   serviceManager.onLog((message) => {
     showTerminalLog(message);
@@ -131,6 +144,7 @@ function createMainWindow() {
     void shell.openExternal(url);
     return { action: "deny" };
   });
+  bindTerminalShortcut(window);
 
   window.on("close", (event) => {
     if (isQuitting || !serviceManager) {
@@ -153,6 +167,12 @@ function createMainWindow() {
 function registerDesktopIpc() {
   ipcMain.handle("desktop:get-test-storage-settings", () => testStorageSettings);
   ipcMain.handle("desktop:get-window-settings", () => windowSettings);
+  ipcMain.handle("desktop:get-terminal-logs", () => [...terminalLogs]);
+  ipcMain.handle("desktop:open-terminal-window", () => {
+    createTerminalWindow();
+    showTerminalLog("[terminal] Opened from dev settings.");
+    return { success: true };
+  });
   ipcMain.handle(
     "desktop:apply-window-settings",
     (_event, nextSettings: Partial<DesktopWindowSettings>) => {
@@ -456,6 +476,16 @@ function clamp(value: number, min: number, max: number) {
 }
 
 function createTerminalWindow() {
+  if (terminalWindow && !terminalWindow.isDestroyed()) {
+    if (terminalWindow.isMinimized()) {
+      terminalWindow.restore();
+    }
+
+    terminalWindow.show();
+    terminalWindow.focus();
+    return terminalWindow;
+  }
+
   const window = new BrowserWindow({
     width: 980,
     height: 520,
@@ -665,17 +695,61 @@ function escapeHtml(value: string) {
 }
 
 function showTerminalLog(message: string) {
-  if (!terminalWindow || terminalWindow.isDestroyed()) {
+  terminalLogs.push(message);
+
+  if (terminalLogs.length > terminalLogLimit) {
+    terminalLogs.splice(0, terminalLogs.length - terminalLogLimit);
+  }
+
+  sendTerminalLog(mainWindow, message);
+  sendTerminalLog(terminalWindow, message);
+}
+
+function sendTerminalLog(window: BrowserWindow | null, message: string) {
+  if (!window || window.isDestroyed()) {
     return;
   }
 
   try {
-    if (!terminalWindow.webContents.isDestroyed()) {
-      terminalWindow.webContents.send("terminal-log", message);
+    if (!window.webContents.isDestroyed()) {
+      window.webContents.send("terminal-log", message);
     }
   } catch (e) {
     console.error("Error sending terminal log:", e);
   }
+}
+
+function bindTerminalShortcut(window: BrowserWindow) {
+  window.webContents.on("before-input-event", (event, input) => {
+    const isF12 =
+      input.type === "keyDown" && (input.key === "F12" || input.code === "F12");
+
+    if (!isF12) {
+      return;
+    }
+
+    event.preventDefault();
+    handleTerminalShortcutPress();
+  });
+}
+
+function handleTerminalShortcutPress() {
+  const now = Date.now();
+
+  if (now - terminalShortcutLastAt > terminalShortcutWindowMs) {
+    terminalShortcutCount = 0;
+  }
+
+  terminalShortcutLastAt = now;
+  terminalShortcutCount += 1;
+
+  if (terminalShortcutCount < terminalShortcutPresses) {
+    return;
+  }
+
+  terminalShortcutCount = 0;
+  createTerminalWindow();
+  showTerminalLog("[terminal] Opened by F12 shortcut.");
 }
 
 function createTerminalDocument() {
@@ -742,19 +816,30 @@ function createTerminalDocument() {
       const clear = document.getElementById("clear");
       let isFirstLine = true;
 
+      function appendLine(message) {
+        if (isFirstLine) {
+          log.textContent = "";
+          isFirstLine = false;
+        }
+
+        log.textContent += message + "\\n";
+        log.scrollTop = log.scrollHeight;
+      }
+
       clear.addEventListener("click", () => {
         log.textContent = "";
         isFirstLine = true;
       });
 
-      window.ocrDesktop.onTerminalLog((message) => {
-        if (isFirstLine) {
-          log.textContent = "";
-          isFirstLine = false;
+      window.ocrDesktop.getTerminalLogs().then((messages) => {
+        if (messages.length === 0) {
+          return;
         }
-        log.textContent += message + "\\n";
-        log.scrollTop = log.scrollHeight;
+
+        messages.forEach(appendLine);
       });
+
+      window.ocrDesktop.onTerminalLog(appendLine);
     </script>
   </body>
 </html>`;

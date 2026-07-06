@@ -6,6 +6,7 @@ import { DesktopSettingsPanel } from "@/components/settings/desktop-settings-pan
 import { LanguageSettingsPanel } from "@/components/settings/language-settings-panel";
 import { OcrTestSettingsPanel } from "@/components/settings/ocr-test-settings-panel";
 import { RuntimeTestSettingsPanel } from "@/components/settings/runtime-test-settings-panel";
+import { TerminalSettingsPanel } from "@/components/settings/terminal-settings-panel";
 import { VolumeSettingsPanel } from "@/components/settings/volume-settings-panel";
 import { useI18n } from "@/lib/i18n";
 import { getStoredUser } from "@/lib/session";
@@ -16,7 +17,8 @@ type SettingsTab =
   | "volume"
   | "ai"
   | "ocr-test"
-  | "runtime-test";
+  | "runtime-test"
+  | "terminal";
 
 export function SettingsTabsPanel() {
   const { t } = useI18n();
@@ -28,6 +30,7 @@ export function SettingsTabsPanel() {
     currentRole === "engineer";
   const canManageOcrTestSettings = currentRole === "dev";
   const canManageRuntimeTestSettings = currentRole === "dev";
+  const canManageTerminalSettings = currentRole === "dev";
   const [activeTab, setActiveTab] = useState<SettingsTab>("desktop");
 
   return (
@@ -69,6 +72,13 @@ export function SettingsTabsPanel() {
             onClick={() => setActiveTab("runtime-test")}
           />
         ) : null}
+        {canManageTerminalSettings ? (
+          <TabButton
+            active={activeTab === "terminal"}
+            label={t("settings.tabTerminal")}
+            onClick={() => setActiveTab("terminal")}
+          />
+        ) : null}
       </div>
 
       {activeTab === "desktop" ? <DesktopSettingsPanel /> : null}
@@ -80,6 +90,9 @@ export function SettingsTabsPanel() {
       ) : null}
       {canManageRuntimeTestSettings && activeTab === "runtime-test" ? (
         <RuntimeTestSettingsPanel />
+      ) : null}
+      {canManageTerminalSettings && activeTab === "terminal" ? (
+        <TerminalSettingsPanel />
       ) : null}
     </div>
   );

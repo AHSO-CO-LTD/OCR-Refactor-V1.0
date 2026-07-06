@@ -7,7 +7,8 @@
   "main": "dist/main.js",
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "dist:win": "npm run build && electron-builder --win nsis --x64",
+    "dist:win": "npm run build && electron-builder --win nsis --x64 --publish never",
+    "dist:win:publish": "npm run build && electron-builder --win nsis --x64 --publish always",
     "dev": "powershell -ExecutionPolicy Bypass -File ../scripts/dev/ensure-tool-python.ps1 && npm run build && node scripts/launch-electron.cjs",
     "lint": "eslint \"src/**/*.ts\"",
     "typecheck": "tsc -p tsconfig.json --noEmit"

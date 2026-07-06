@@ -132,7 +132,10 @@ The installer bootstrap installs Node packages and Python requirements on the
 target PC during setup. The Device Tool runtime is Python 3.11 only; setup does
 not use any other Python version.
 
-## Product Rotation Default
+## Product Preview Rotation Default
 
-New product camera profiles default `previewRotation` to `90`. ROI data remains
-stored in image coordinates; the rotation is a view transform.
+New product camera profiles default `previewRotation` to `0`. ROI data remains
+stored in image coordinates. Line OCR crop rotation is controlled separately by
+the per-product `rotateTestImageClockwise` setting and new products default it
+to `true`, so the app crops ROI first, rotates that crop 90 degrees clockwise,
+then sends the rotated crop to OCR.

@@ -29,7 +29,7 @@ const defaultCamera: CameraProfileDto = {
   zoomFactor: 0.4,
   previewPanX: 0,
   previewPanY: 0,
-  previewRotation: 90,
+  previewRotation: 0,
 };
 
 const productInclude = {
@@ -69,7 +69,7 @@ export class ProductsService {
         thresholdMns: dto.thresholdMns,
         rowThreshold: dto.rowThreshold ?? 20,
         modelPath: dto.modelPath || null,
-        rotateTestImageClockwise: dto.rotateTestImageClockwise ?? false,
+        rotateTestImageClockwise: dto.rotateTestImageClockwise ?? true,
         active: dto.active,
         cameraConfig: { create: this.toCameraData(dto.camera) },
         roiRegions: {

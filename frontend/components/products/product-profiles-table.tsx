@@ -1,6 +1,6 @@
 "use client";
 
-import { Pencil, Trash2 } from "lucide-react";
+import { CheckCircle2, CircleOff, Pencil, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import type { ProductProfile } from "@/lib/api";
@@ -13,6 +13,7 @@ type ProductProfilesTableProps = {
   busyProductId?: string;
   onToggleSelected: (productId: string) => void;
   onEdit: (product: ProductProfile) => void;
+  onToggleStatus: (product: ProductProfile) => void;
   onDelete: (product: ProductProfile) => void;
 };
 
@@ -23,6 +24,7 @@ export function ProductProfilesTable({
   busyProductId,
   onToggleSelected,
   onEdit,
+  onToggleStatus,
   onDelete,
 }: ProductProfilesTableProps) {
   const { t } = useI18n();
@@ -37,31 +39,31 @@ export function ProductProfilesTable({
       </div>
 
       <div className="max-w-full overflow-x-auto">
-        <table className="w-full min-w-[940px] table-fixed border-collapse text-sm">
+        <table className="w-full min-w-[1180px] table-fixed border-collapse text-sm">
           <thead className="bg-slate-50 text-left text-xs font-semibold uppercase tracking-[0.08em] text-slate-500">
             <tr>
               <th className="w-12 border-b border-slate-200 px-3 py-3">
                 <span className="sr-only">{t("products.select")}</span>
               </th>
-              <th className="w-[18%] border-b border-slate-200 px-3 py-3">
+              <th className="w-[15%] border-b border-slate-200 px-3 py-3">
                 {t("products.code")}
               </th>
-              <th className="w-[19%] border-b border-slate-200 px-3 py-3">
+              <th className="w-[17%] border-b border-slate-200 px-3 py-3">
                 {t("products.name")}
               </th>
-              <th className="w-[16%] border-b border-slate-200 px-3 py-3">
+              <th className="w-[13%] border-b border-slate-200 px-3 py-3">
                 {t("products.camera")}
               </th>
-              <th className="w-[14%] border-b border-slate-200 px-3 py-3">
+              <th className="w-[10%] border-b border-slate-200 px-3 py-3">
                 {t("products.batchSize")}
               </th>
-              <th className="w-[8%] border-b border-slate-200 px-3 py-3">
+              <th className="w-[7%] border-b border-slate-200 px-3 py-3">
                 {t("products.roi")}
               </th>
-              <th className="w-[13%] border-b border-slate-200 px-3 py-3">
+              <th className="w-[12%] border-b border-slate-200 px-3 py-3">
                 {t("products.status")}
               </th>
-              <th className="w-[12%] border-b border-slate-200 px-3 py-3 text-right">
+              <th className="w-[26%] border-b border-slate-200 px-3 py-3 text-right">
                 {t("products.actions")}
               </th>
             </tr>
@@ -141,6 +143,33 @@ export function ProductProfilesTable({
                     </td>
                     <td className="border-b border-slate-100 px-3 py-3">
                       <div className="flex justify-end gap-2">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={() => onToggleStatus(product)}
+                          disabled={busyProductId === product.id}
+                          className={
+                            product.active
+                              ? "h-10 min-w-[104px] border-amber-200 px-3 text-amber-800 hover:bg-amber-50"
+                              : "h-10 min-w-[96px] border-emerald-200 px-3 text-emerald-700 hover:bg-emerald-50"
+                          }
+                          aria-label={`${product.active ? t("products.setInactive") : t("products.setActive")} ${product.code}`}
+                        >
+                          {product.active ? (
+                            <CircleOff className="h-4 w-4" aria-hidden="true" />
+                          ) : (
+                            <CheckCircle2
+                              className="h-4 w-4"
+                              aria-hidden="true"
+                            />
+                          )}
+                          <span>
+                            {product.active
+                              ? t("products.setInactive")
+                              : t("products.setActive")}
+                          </span>
+                        </Button>
                         <Button
                           type="button"
                           variant="outline"

@@ -76,7 +76,7 @@ export class ProductsController {
   }
 
   @ApiOperation({
-    summary: 'Bulk update OCR test settings for product profiles',
+    summary: 'Bulk update line OCR crop rotation settings for product profiles',
   })
   @Patch('ocr-test-settings/apply')
   @RequirePermissions(PERMISSIONS.SYSTEM_DEBUG)
@@ -85,7 +85,9 @@ export class ProductsController {
     @CurrentUser() user: AuthenticatedRequest['user'],
   ) {
     if (user.role !== 'dev') {
-      throw new ForbiddenException('Only dev can update OCR test settings');
+      throw new ForbiddenException(
+        'Only dev can update line OCR rotation settings',
+      );
     }
 
     return this.productsService.bulkUpdateProductOcrTestSettings(dto);
@@ -100,7 +102,9 @@ export class ProductsController {
     return this.productsService.bulkUpdateProductAiSettings(dto);
   }
 
-  @ApiOperation({ summary: 'Update OCR test settings for a product profile' })
+  @ApiOperation({
+    summary: 'Update line OCR crop rotation settings for a product profile',
+  })
   @Patch(':id/ocr-test-settings')
   @RequirePermissions(PERMISSIONS.SYSTEM_DEBUG)
   updateProductOcrTestSettings(
@@ -109,7 +113,9 @@ export class ProductsController {
     @CurrentUser() user: AuthenticatedRequest['user'],
   ) {
     if (user.role !== 'dev') {
-      throw new ForbiddenException('Only dev can update OCR test settings');
+      throw new ForbiddenException(
+        'Only dev can update line OCR rotation settings',
+      );
     }
 
     return this.productsService.updateProductOcrTestSettings(

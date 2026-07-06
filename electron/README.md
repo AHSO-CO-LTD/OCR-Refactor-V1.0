@@ -12,7 +12,7 @@ Current responsibilities:
   Windows `taskkill` failures from the Nest CLI watcher
 - fall back to the next free Device Tool, backend, or frontend port when the default port is occupied or not healthy
 - wait for service health checks before opening the renderer
-- open a separate terminal window to stream service logs
+- keep service logs in a background buffer and open the terminal window only on demand
 - stop only child processes started by Electron
 - expose a minimal context-isolated preload bridge
 
@@ -48,9 +48,10 @@ Backend      3980-4078
 Frontend     3970-4068
 ```
 
-When Electron starts, it also opens an `OCR Terminal` window that shows
-stdout/stderr from the Device Tool, backend, and frontend processes started by
-Electron.
+Electron keeps stdout/stderr from the Device Tool, backend, and frontend in a
+background log buffer. It does not open the `OCR Terminal` window at startup.
+Open it from the dev Settings terminal tab, or press `F12` five times while the
+app window is focused.
 
 The Device Tool interpreter defaults to:
 
