@@ -1,6 +1,6 @@
 {
   "name": "@ocr/electron",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "Desktop shell for the AHSO OCR local station.",
   "author": "AHSO",
   "private": true,
@@ -46,10 +46,15 @@
           "**/*.json",
           "**/*.md"
         ]
+      },
+      {
+        "from": "../shared/logo/applogo.ico",
+        "to": "logo/applogo.ico"
       }
     ],
     "asar": true,
     "win": {
+      "icon": "../shared/logo/applogo.ico",
       "target": [
         {
           "target": "nsis",
@@ -68,6 +73,8 @@
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
       "runAfterFinish": true,
+      "installerIcon": "../shared/logo/applogo.ico",
+      "uninstallerIcon": "../shared/logo/applogo.ico",
       "include": "../build/installer.nsh"
     },
     "publish": [

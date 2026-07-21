@@ -1,5 +1,7 @@
 "use client";
 
+import { ArrowLeft } from "lucide-react";
+import Link from "next/link";
 import { useState } from "react";
 import { AiSettingsPanel } from "@/components/settings/ai-settings-panel";
 import { DesktopSettingsPanel } from "@/components/settings/desktop-settings-panel";
@@ -8,14 +10,13 @@ import { LineResultSettingsPanel } from "@/components/settings/line-result-setti
 import { OcrTestSettingsPanel } from "@/components/settings/ocr-test-settings-panel";
 import { RuntimeTestSettingsPanel } from "@/components/settings/runtime-test-settings-panel";
 import { TerminalSettingsPanel } from "@/components/settings/terminal-settings-panel";
-import { VolumeSettingsPanel } from "@/components/settings/volume-settings-panel";
+import { Button } from "@/components/ui/button";
 import { useI18n } from "@/lib/i18n";
 import { getStoredUser } from "@/lib/session";
 
 type SettingsTab =
   | "desktop"
   | "language"
-  | "volume"
   | "ai"
   | "line-result"
   | "ocr-test"
@@ -38,6 +39,13 @@ export function SettingsTabsPanel() {
 
   return (
     <div className="space-y-5">
+      <Button asChild variant="outline" className="h-11">
+        <Link href="/dashboard/line">
+          <ArrowLeft className="h-4 w-4" aria-hidden="true" />
+          {t("settings.backToOperation")}
+        </Link>
+      </Button>
+
       <div className="flex flex-wrap gap-2 border-b border-slate-200 pb-3">
         <TabButton
           active={activeTab === "desktop"}
@@ -48,11 +56,6 @@ export function SettingsTabsPanel() {
           active={activeTab === "language"}
           label={t("settings.tabLanguage")}
           onClick={() => setActiveTab("language")}
-        />
-        <TabButton
-          active={activeTab === "volume"}
-          label={t("settings.tabVolume")}
-          onClick={() => setActiveTab("volume")}
         />
         {canManageAiSettings ? (
           <TabButton
@@ -93,7 +96,6 @@ export function SettingsTabsPanel() {
 
       {activeTab === "desktop" ? <DesktopSettingsPanel /> : null}
       {activeTab === "language" ? <LanguageSettingsPanel /> : null}
-      {activeTab === "volume" ? <VolumeSettingsPanel /> : null}
       {canManageAiSettings && activeTab === "ai" ? <AiSettingsPanel /> : null}
       {canManageLineResultSettings && activeTab === "line-result" ? (
         <LineResultSettingsPanel />

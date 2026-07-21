@@ -7,6 +7,7 @@ import {
   Post,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { DeviceToolService } from '../device-tool/device-tool.service';
 import { InspectionsService } from '../inspections/inspections.service';
 import { StartupCameraDto } from './dto/startup-camera.dto';
 import { PlcRuntimeService } from './plc-runtime.service';
@@ -16,6 +17,7 @@ import { MachineRuntimeService } from './machine-runtime.service';
 export class PlcInternalController {
   constructor(
     private readonly configService: ConfigService,
+    private readonly deviceToolService: DeviceToolService,
     private readonly inspectionsService: InspectionsService,
     private readonly machineRuntime: MachineRuntimeService,
     private readonly plcRuntime: PlcRuntimeService,
@@ -68,6 +70,35 @@ export class PlcInternalController {
       dto.productId,
     );
     return { data: { status: 'done' as const, ...result.data } };
+  }
+
+  @Post('startup/plc-signals')
+  async checkStartupPlcSignals(
+    @Headers('x-desktop-internal-token') providedToken?: string,
+  ) {
+    this.assertInternalToken(providedToken);
+    const config = await this.plcRuntime.getConfig();
+    if (!config.data)
+      return { data: { status: 'skipped' as const, checks: [] } };
+    return this.plcRuntime.testStartupSignals();
+  }
+
+  @Post('startup/abort')
+  @HttpCode(204)
+  async abortStartup(
+    @Headers('x-desktop-internal-token') providedToken?: string,
+  ) {
+    this.assertInternalToken(providedToken);
+
+    const cleanup = await Promise.allSettled([
+      this.machineRuntime.shutdownApplication(),
+      this.deviceToolService.disconnectCamera(),
+      this.plcRuntime.shutdownOutputsAndDisconnect(),
+    ]);
+    const failure = cleanup.find(
+      (result): result is PromiseRejectedResult => result.status === 'rejected',
+    );
+    if (failure) throw failure.reason;
   }
 
   @Post('shutdown')

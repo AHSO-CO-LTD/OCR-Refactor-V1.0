@@ -1,4 +1,5 @@
 export const PERMISSIONS = {
+  DASHBOARD_VIEW: 'dashboard.view',
   USER_MANAGE: 'user.manage',
   ROLE_MANAGE: 'role.manage',
   PERMISSION_MANAGE: 'permission.manage',

@@ -12,6 +12,8 @@
     "sha256": ""
   },
   "python": {
+    "required": false,
+    "bundled": true,
     "requiredMajor": 3,
     "requiredMinor": 11,
     "url": "https://www.python.org/ftp/python/3.11.9/python-3.11.9-amd64.exe",

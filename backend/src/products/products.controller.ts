@@ -49,6 +49,7 @@ export class ProductsController {
   @ApiOperation({ summary: 'List product profiles' })
   @Get()
   @RequireAnyPermission(
+    PERMISSIONS.DASHBOARD_VIEW,
     PERMISSIONS.PRODUCT_MANAGE,
     PERMISSIONS.ROI_EDIT,
     PERMISSIONS.INSPECTION_START,

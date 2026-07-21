@@ -50,6 +50,7 @@ type PlcFormState = {
   okResultAddress: string;
   waitingCheckingAddress: string;
   errorPulseDurationMs: string;
+  okPulseDurationMs: string;
   sleepTimeSeconds: string;
   customKeys: CustomKeyDraft[];
 };
@@ -93,7 +94,7 @@ export function PlcConfigForm({ config, loading, onSave }: PlcConfigFormProps) {
         <CardHeader className="border-b border-slate-200">
           <CardTitle className="text-lg">{t("plc.connection")}</CardTitle>
         </CardHeader>
-        <CardContent className="grid gap-4 pt-5 md:grid-cols-[minmax(260px,1fr)_160px_minmax(240px,1fr)]">
+        <CardContent className="grid gap-4 pt-5 lg:grid-cols-[minmax(260px,1fr)_160px_minmax(240px,1fr)]">
           <label className="grid gap-2 text-sm font-medium text-slate-700">
             <span>{t("plc.ipAddress")} *</span>
             <Input
@@ -203,15 +204,30 @@ export function PlcConfigForm({ config, loading, onSave }: PlcConfigFormProps) {
             </table>
           </div>
 
-          <div className="mt-4 grid gap-4 md:grid-cols-2">
+          <div className="mt-4 grid gap-4 md:grid-cols-3">
             <label className="grid gap-2 text-sm font-medium text-slate-700">
-              <span>{t("plc.pulseDuration")}</span>
+              <span>{t("plc.ngPulseDuration")}</span>
               <Input
                 value={form.errorPulseDurationMs}
                 onChange={(event) =>
                   setForm((current) => ({
                     ...current,
                     errorPulseDurationMs: numericText(event.target.value),
+                  }))
+                }
+                inputMode="numeric"
+                disabled={loading}
+                className="h-11"
+              />
+            </label>
+            <label className="grid gap-2 text-sm font-medium text-slate-700">
+              <span>{t("plc.okPulseDuration")}</span>
+              <Input
+                value={form.okPulseDurationMs}
+                onChange={(event) =>
+                  setForm((current) => ({
+                    ...current,
+                    okPulseDurationMs: numericText(event.target.value),
                   }))
                 }
                 inputMode="numeric"
@@ -440,7 +456,7 @@ function fixedSignals(t: (key: string) => string) {
     {
       field: "okResultAddress" as const,
       label: t("plc.okResult"),
-      direction: t("plc.appToPlcWrite"),
+      direction: t("plc.appToPlcPulse"),
     },
     {
       field: "waitingCheckingAddress" as const,
@@ -466,6 +482,7 @@ function toFormState(config: PlcConfiguration | null): PlcFormState {
     okResultAddress: valueText(config?.okResultAddress),
     waitingCheckingAddress: valueText(config?.waitingCheckingAddress),
     errorPulseDurationMs: valueText(config?.errorPulseDurationMs ?? 500),
+    okPulseDurationMs: valueText(config?.okPulseDurationMs ?? 500),
     sleepTimeSeconds: valueText(config?.sleepTimeSeconds ?? 300),
     customKeys: (config?.customKeys ?? []).map((key) => ({
       clientId: key.id ?? createClientId(),
@@ -554,9 +571,15 @@ function validateForm(
     return t("plc.validationAddress");
   }
 
-  const duration = Number(form.errorPulseDurationMs);
-  if (!Number.isSafeInteger(duration) || duration < 50 || duration > 10000) {
-    return t("plc.validationAddress");
+  const errorPulseDurationMs = Number(form.errorPulseDurationMs);
+  const okPulseDurationMs = Number(form.okPulseDurationMs);
+  if (
+    [errorPulseDurationMs, okPulseDurationMs].some(
+      (duration) =>
+        !Number.isSafeInteger(duration) || duration < 50 || duration > 10000,
+    )
+  ) {
+    return t("plc.validationPulseDuration");
   }
 
   const sleepTimeSeconds = Number(form.sleepTimeSeconds);
@@ -580,7 +603,8 @@ function validateForm(
     errorPulseAddress: addresses[5],
     okResultAddress: addresses[6],
     waitingCheckingAddress: addresses[7],
-    errorPulseDurationMs: duration,
+    errorPulseDurationMs,
+    okPulseDurationMs,
     sleepTimeSeconds,
     customKeys: form.customKeys.map(
       ({ name, address, operation, enabled }) => ({

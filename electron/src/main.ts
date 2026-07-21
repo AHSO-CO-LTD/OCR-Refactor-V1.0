@@ -10,10 +10,17 @@ import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { registerAutoUpdater } from "./auto-updater";
+import { ServiceManager } from "./service-manager";
+import { createStartupDocument } from "./startup-page";
 import {
-  ServiceManager,
+  createPendingStartupStages,
   type StartupHardwareStageUpdate,
-} from "./service-manager";
+  type StartupPhase,
+  type StartupServiceStageUpdate,
+  type StartupSnapshot,
+  type StartupStageId,
+  type StartupStageUpdate,
+} from "./startup-types";
 
 type WindowPreset = "factory" | "hd" | "fullHd" | "fourThree" | "custom";
 
@@ -29,6 +36,13 @@ type DesktopWindowSettings = {
 
 type DesktopTestStorageSettings = {
   testImageSaveFolderPath: string | null;
+};
+
+type DesktopLanguage = "en" | "vi";
+
+type StartupLogContext = {
+  error?: string | null;
+  stages?: StartupStageUpdate[];
 };
 
 const defaultWindowSettings: DesktopWindowSettings = {
@@ -57,13 +71,20 @@ let mainWindow: BrowserWindow | null = null;
 let terminalWindow: BrowserWindow | null = null;
 let serviceManager: ServiceManager | null = null;
 let isQuitting = false;
+let closeConfirmationReady = false;
 let shutdownPromise: Promise<{ success: boolean }> | null = null;
 let restartPromise: Promise<{ success: boolean }> | null = null;
 let windowSettings: DesktopWindowSettings = defaultWindowSettings;
 let testStorageSettings: DesktopTestStorageSettings = defaultTestStorageSettings;
+let desktopLanguage: DesktopLanguage = "vi";
 let terminalShortcutCount = 0;
 let terminalShortcutLastAt = 0;
 const terminalLogs: string[] = [];
+let startupError: string | null = null;
+let startupPhase: StartupPhase = "running";
+let startupStages = new Map<StartupStageId, StartupStageUpdate>(
+  createPendingStartupStages().map((stage) => [stage.id, stage]),
+);
 
 if (relaunchAsAdminIfNeeded()) {
   app.exit(0);
@@ -95,6 +116,8 @@ async function startDesktopApp() {
   serviceManager = new ServiceManager(runtimeRoot);
   windowSettings = loadWindowSettings();
   testStorageSettings = loadTestStorageSettings();
+  desktopLanguage = loadDesktopLanguage();
+  resetStartupState();
   registerDesktopIpc();
   registerAutoUpdater({
     getWindow: () => mainWindow,
@@ -102,16 +125,30 @@ async function startDesktopApp() {
   });
 
   createMainWindow();
-  showStartupPage("Starting local services...");
+  showStartupPage();
   serviceManager.onLog((message) => {
     showTerminalLog(message);
   });
 
-  await serviceManager.startAll((message) => {
-    showStartupPage(message);
-    showTerminalLog(`[status] ${message}`);
-  });
-  rendererUrl = process.env.ELECTRON_RENDERER_URL ?? serviceManager.getFrontendUrl();
+  const startupResult = await serviceManager.startAll(
+    (message) => {
+      showTerminalLog(`[status] ${message}`);
+    },
+    emitStartupServiceStage,
+    runRemainingStartupChecks,
+  );
+  const frontendUrl = process.env.ELECTRON_RENDERER_URL ?? serviceManager.getFrontendUrl();
+
+  if (!startupResult) {
+    return;
+  }
+
+  startupPhase = startupResult.hardwareWarning ? "warning" : "finished";
+  broadcastStartupSnapshot();
+  rendererUrl = new URL(
+    startupResult.requiresAdminSetup ? "setup" : "login",
+    frontendUrl,
+  ).toString();
 
   await loadRendererUrl();
 }
@@ -129,6 +166,7 @@ function createMainWindow() {
     alwaysOnTop: settings.alwaysOnTop,
     backgroundColor: "#f1f5f9",
     autoHideMenuBar: true,
+    icon: getApplicationIconPath(),
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
@@ -149,12 +187,26 @@ function createMainWindow() {
   });
   bindTerminalShortcut(window);
 
+  window.webContents.on(
+    "did-start-navigation",
+    (_event, _url, isInPlace, isMainFrame) => {
+      if (isMainFrame && !isInPlace) {
+        closeConfirmationReady = false;
+      }
+    },
+  );
+
   window.on("close", (event) => {
     if (isQuitting || !serviceManager) {
       return;
     }
 
     event.preventDefault();
+
+    if (requestRendererCloseConfirmation(window)) {
+      return;
+    }
+
     void requestAppShutdown();
   });
 
@@ -171,17 +223,36 @@ function registerDesktopIpc() {
   ipcMain.handle("desktop:get-test-storage-settings", () => testStorageSettings);
   ipcMain.handle("desktop:get-window-settings", () => windowSettings);
   ipcMain.handle("desktop:get-terminal-logs", () => [...terminalLogs]);
+  ipcMain.handle("desktop:get-startup-snapshot", () => getStartupSnapshot());
+  ipcMain.handle("desktop:get-language-preference", () => desktopLanguage);
   ipcMain.handle(
-    "desktop:prepare-startup-hardware",
-    (_event, preferredProductId?: string) => {
-      if (!serviceManager) {
-        return { stages: [] };
+    "desktop:set-close-confirmation-ready",
+    (event, ready: boolean) => {
+      if (
+        !mainWindow ||
+        mainWindow.isDestroyed() ||
+        event.sender !== mainWindow.webContents
+      ) {
+        return { success: false };
       }
-      return serviceManager.prepareStartupHardware(
-        preferredProductId,
-        emitStartupHardwareStage,
-      );
+
+      closeConfirmationReady = ready === true;
+      return { success: true };
     },
+  );
+  ipcMain.handle(
+    "desktop:set-language-preference",
+    (_event, language: DesktopLanguage) => {
+      if (language !== "en" && language !== "vi") return desktopLanguage;
+      desktopLanguage = language;
+      saveDesktopLanguage(language);
+      broadcastStartupSnapshot();
+      return desktopLanguage;
+    },
+  );
+  ipcMain.handle(
+    "desktop:export-startup-log",
+    (_event, context?: StartupLogContext) => exportStartupLog(context),
   );
   ipcMain.handle("desktop:open-terminal-window", () => {
     createTerminalWindow();
@@ -251,8 +322,199 @@ function registerDesktopIpc() {
 }
 
 function emitStartupHardwareStage(stage: StartupHardwareStageUpdate) {
+  updateStartupStage(stage);
+}
+
+function emitStartupServiceStage(stage: StartupServiceStageUpdate) {
+  updateStartupStage(stage);
+}
+
+function resetStartupState() {
+  startupError = null;
+  startupPhase = "running";
+  startupStages = new Map(
+    createPendingStartupStages().map((stage) => [stage.id, stage]),
+  );
+}
+
+function updateStartupStage(stage: StartupStageUpdate) {
+  startupStages.set(stage.id, {
+    ...startupStages.get(stage.id),
+    ...stage,
+  });
+  broadcastStartupSnapshot();
+}
+
+function getStartupSnapshot(): StartupSnapshot {
+  return {
+    error: startupError,
+    language: desktopLanguage,
+    phase: startupPhase,
+    stages: [...startupStages.values()],
+  };
+}
+
+function broadcastStartupSnapshot() {
   if (!mainWindow || mainWindow.isDestroyed()) return;
-  mainWindow.webContents.send("desktop-startup-hardware-status", stage);
+  mainWindow.webContents.send("desktop-startup-snapshot", getStartupSnapshot());
+}
+
+async function runRemainingStartupChecks() {
+  if (!serviceManager) {
+    blockStartup("backend", "Service manager is unavailable");
+    return null;
+  }
+
+  const backendUrl = serviceManager.getBackendUrl();
+  updateStartupStage({ id: "license", status: "running" });
+
+  const setupPromise = requestStartupJson<{
+    data?: { requiresAdminSetup?: boolean };
+  }>(new URL("setup/status", backendUrl).toString());
+  const licensePromise = requestStartupJson<{
+    data?: {
+      code?: string | null;
+      donglePresent?: boolean | null;
+      licensed?: boolean | null;
+      message?: string | null;
+      status?: string;
+    };
+  }>(new URL("system/license/public", backendUrl).toString()).then(
+    (license) => {
+      const valid =
+        license.data?.licensed === true &&
+        license.data?.donglePresent === true;
+      updateStartupStage({
+        id: "license",
+        status: valid ? "done" : "failed",
+      });
+      return license;
+    },
+    (error: unknown) => {
+      updateStartupStage({ id: "license", status: "failed" });
+      throw error;
+    },
+  );
+  const hardwarePromise = serviceManager.prepareStartupHardware(
+    undefined,
+    emitStartupHardwareStage,
+  );
+
+  const [setupResult, licenseResult, hardwareResult] =
+    await Promise.allSettled([
+      setupPromise,
+      licensePromise,
+      hardwarePromise,
+    ]);
+
+  if (setupResult.status === "rejected") {
+    await cleanupBlockedStartupHardware();
+    blockStartup("database", errorMessage(setupResult.reason));
+    return null;
+  }
+
+  if (licenseResult.status === "rejected") {
+    await cleanupBlockedStartupHardware();
+    blockStartup("license", errorMessage(licenseResult.reason));
+    return null;
+  }
+
+  const license = licenseResult.value;
+  if (
+    license.data?.licensed !== true ||
+    license.data?.donglePresent !== true
+  ) {
+    const reason = [license.data?.code, license.data?.message]
+      .filter(Boolean)
+      .join(": ");
+    await cleanupBlockedStartupHardware();
+    blockStartup("license", reason || "License dongle is unavailable");
+    return null;
+  }
+
+  const requiresAdminSetup =
+    setupResult.value.data?.requiresAdminSetup === true;
+  if (hardwareResult.status === "rejected") {
+    showTerminalLog(
+      `[startup] hardware preparation failed: ${errorMessage(hardwareResult.reason)}`,
+    );
+    return { hardwareWarning: true, requiresAdminSetup };
+  }
+
+  const hardwareWarning = hardwareResult.value.stages.some(
+    (stage) => stage.status === "failed" || stage.status === "warning",
+  );
+  return { hardwareWarning, requiresAdminSetup };
+}
+
+async function cleanupBlockedStartupHardware() {
+  if (!serviceManager) return;
+  try {
+    await serviceManager.abortStartupHardware();
+    showTerminalLog("[startup] blocked hardware cleanup completed");
+  } catch (error) {
+    showTerminalLog(
+      `[startup] blocked hardware cleanup failed: ${errorMessage(error)}`,
+    );
+  }
+}
+
+function blockStartup(id: StartupStageId, error: string) {
+  startupError = error;
+  startupPhase = "blocked";
+  updateStartupStage({ id, status: "failed" });
+  showTerminalLog(`[startup] blocked at ${id}: ${error}`);
+}
+
+async function requestStartupJson<T>(url: string): Promise<T> {
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error((await response.text()) || `${response.status}`);
+  }
+  return (await response.json()) as T;
+}
+
+function errorMessage(error: unknown) {
+  return error instanceof Error ? error.message : String(error);
+}
+
+async function exportStartupLog(context?: StartupLogContext) {
+  const timestamp = new Date().toISOString().replaceAll(":", "-").replace(".", "-");
+  const options = {
+    title:
+      desktopLanguage === "vi"
+        ? "Lưu nhật ký khởi động"
+        : "Save startup log",
+    defaultPath: join(
+      app.getPath("documents"),
+      `AHSO-OCR-startup-${timestamp}.log`,
+    ),
+    filters: [{ name: "Log", extensions: ["log", "txt"] }],
+  };
+  const result =
+    mainWindow && !mainWindow.isDestroyed()
+      ? await dialog.showSaveDialog(mainWindow, options)
+      : await dialog.showSaveDialog(options);
+
+  if (result.canceled || !result.filePath) {
+    return { canceled: true, filePath: null };
+  }
+
+  const stageSnapshot = context?.stages ?? getStartupSnapshot().stages;
+  const content = [
+    "AHSO OCR startup diagnostic log",
+    `Exported at: ${new Date().toISOString()}`,
+    `Platform: ${process.platform}`,
+    `Electron: ${process.versions.electron}`,
+    `Node: ${process.versions.node}`,
+    `Startup stages: ${JSON.stringify(stageSnapshot)}`,
+    `Blocking error: ${context?.error ?? startupError ?? "none"}`,
+    "",
+    ...terminalLogs,
+    "",
+  ].join("\r\n");
+  writeFileSync(result.filePath, content, "utf8");
+  return { canceled: false, filePath: result.filePath };
 }
 
 function getRuntimeRoot() {
@@ -261,6 +523,14 @@ function getRuntimeRoot() {
   }
 
   return resolve(__dirname, "..", "..");
+}
+
+function getApplicationIconPath() {
+  const iconPath = app.isPackaged
+    ? join(process.resourcesPath, "logo", "applogo.ico")
+    : resolve(__dirname, "../../shared/logo/applogo.ico");
+
+  return existsSync(iconPath) ? iconPath : undefined;
 }
 
 function loadRuntimeEnv(runtimeRoot: string) {
@@ -396,6 +666,35 @@ function getTestStorageSettingsPath() {
   return join(app.getPath("userData"), "test-storage-settings.json");
 }
 
+function getLanguageSettingsPath() {
+  return join(app.getPath("userData"), "language-settings.json");
+}
+
+function loadDesktopLanguage(): DesktopLanguage {
+  const settingsPath = getLanguageSettingsPath();
+  if (existsSync(settingsPath)) {
+    try {
+      const parsed = JSON.parse(readFileSync(settingsPath, "utf8")) as {
+        language?: unknown;
+      };
+      if (parsed.language === "en" || parsed.language === "vi") {
+        return parsed.language;
+      }
+    } catch {
+      // Fall back to the operating system locale.
+    }
+  }
+  return app.getLocale().toLowerCase().startsWith("vi") ? "vi" : "en";
+}
+
+function saveDesktopLanguage(language: DesktopLanguage) {
+  writeFileSync(
+    getLanguageSettingsPath(),
+    JSON.stringify({ language }, null, 2),
+    "utf8",
+  );
+}
+
 function loadWindowSettings() {
   const settingsPath = getWindowSettingsPath();
 
@@ -514,6 +813,7 @@ function createTerminalWindow() {
     show: false,
     backgroundColor: "#020617",
     autoHideMenuBar: true,
+    icon: getApplicationIconPath(),
     title: "OCR Terminal",
     webPreferences: {
       contextIsolation: true,
@@ -542,80 +842,28 @@ function createTerminalWindow() {
   return window;
 }
 
-function showStartupPage(message: string) {
-  if (!mainWindow || mainWindow.isDestroyed()) {
-    return;
-  }
+function showStartupPage() {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
 
-  const document = `<!doctype html>
-<html>
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Metalcore Washing</title>
-    <style>
-      body {
-        margin: 0;
-        min-height: 100vh;
-        display: grid;
-        place-items: center;
-        background: #f1f5f9;
-        color: #0f172a;
-        font-family: Arial, sans-serif;
-      }
-      main {
-        width: min(520px, calc(100vw - 48px));
-        border: 1px solid #cbd5e1;
-        background: #ffffff;
-        padding: 28px;
-      }
-      h1 { margin: 0 0 8px; font-size: 22px; }
-      p { margin: 0; color: #475569; line-height: 1.5; }
-      .bar {
-        height: 4px;
-        margin-top: 24px;
-        overflow: hidden;
-        background: #e2e8f0;
-      }
-      .bar::after {
-        content: "";
-        display: block;
-        width: 40%;
-        height: 100%;
-        background: #0891b2;
-        animation: loading 1.1s linear infinite;
-      }
-      @keyframes loading {
-        from { transform: translateX(-100%); }
-        to { transform: translateX(350%); }
-      }
-    </style>
-  </head>
-  <body>
-    <main>
-      <h1>Metalcore Washing</h1>
-      <p>${escapeHtml(message)}</p>
-      <div class="bar"></div>
-    </main>
-  </body>
-</html>`;
-
-  try {
-    if (!mainWindow.webContents.isDestroyed()) {
-      void loadWindowUrl(
-        mainWindow,
-        `data:text/html;charset=utf-8,${encodeURIComponent(document)}`,
-      );
-    }
-  } catch (e) {
-    console.error("Error loading startup page:", e);
-  }
+  const document = createStartupDocument(getStartupSnapshot());
+  void loadWindowUrl(
+    mainWindow,
+    `data:text/html;charset=utf-8,${encodeURIComponent(document)}`,
+  );
 }
 
 function showFatalStartupError(error: unknown) {
   const message = error instanceof Error ? error.message : String(error);
   console.error("Fatal startup error:", error);
-  showStartupPage(`Startup failed: ${message}`);
+  const runningStage = [...startupStages.values()].find(
+    (stage) => stage.status === "running",
+  );
+  startupError = message;
+  startupPhase = "blocked";
+  if (runningStage) {
+    startupStages.set(runningStage.id, { ...runningStage, status: "failed" });
+  }
+  showStartupPage();
   showTerminalLog(`[fatal] ${message}`);
 }
 
@@ -674,6 +922,30 @@ async function requestAppRestart() {
   return restartPromise;
 }
 
+function requestRendererCloseConfirmation(window: BrowserWindow) {
+  if (
+    !closeConfirmationReady ||
+    window.isDestroyed() ||
+    window.webContents.isDestroyed()
+  ) {
+    return false;
+  }
+
+  try {
+    if (window.isMinimized()) {
+      window.restore();
+    }
+
+    window.show();
+    window.focus();
+    window.webContents.send("desktop-close-requested");
+    return true;
+  } catch (error) {
+    console.error("Error requesting close confirmation:", error);
+    return false;
+  }
+}
+
 async function shutdownAndQuit() {
   isQuitting = true;
   reportShutdownStatus("Preparing shutdown...");
@@ -703,15 +975,6 @@ async function shutdownAndRestart() {
   }
 
   return { success: true };
-}
-
-function escapeHtml(value: string) {
-  return value
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#039;");
 }
 
 function showTerminalLog(message: string) {
@@ -845,7 +1108,6 @@ function createTerminalDocument() {
         log.textContent += message + "\\n";
         log.scrollTop = log.scrollHeight;
       }
-
       clear.addEventListener("click", () => {
         log.textContent = "";
         isFirstLine = true;
@@ -877,7 +1139,7 @@ async function loadRendererUrl() {
       return;
     }
 
-    showStartupPage(`frontend: opening login (${attempt}/${attempts})`);
+    showTerminalLog(`[startup] renderer navigation retry ${attempt}/${attempts}`);
     await delay(1_000);
   }
 

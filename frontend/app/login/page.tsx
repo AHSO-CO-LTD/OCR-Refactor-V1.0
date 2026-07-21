@@ -2,15 +2,17 @@
 
 import { FormEvent, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import { Eye, EyeOff } from "lucide-react";
 import { toast } from "sonner";
 import {
   LoginSystemStatus,
   type LoginGateStatus,
 } from "@/components/auth/login-system-status";
-import { LoginStartupHardwareStatus } from "@/components/auth/login-startup-hardware-status";
+import { BrandLogo } from "@/components/brand/brand-logo";
 import { LanguageToggle } from "@/components/language-toggle";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
 import { useVirtualKeyboard } from "@/components/ui/virtual-keyboard";
 import {
   ApiError,
@@ -21,13 +23,8 @@ import {
 } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
 import {
-  getOperatorStartupPreferences,
   getPostLoginRoute,
 } from "@/lib/operator-startup-preferences";
-import {
-  getDesktopBridge,
-  type DesktopStartupHardwareStage,
-} from "@/lib/desktop";
 import {
   clearSession,
   getRememberedAccessToken,
@@ -40,6 +37,7 @@ export default function LoginPage() {
   const { isKeyboardOpen } = useVirtualKeyboard();
   const [username, setUsername] = useState("admin");
   const [password, setPassword] = useState("admin123");
+  const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [rememberLogin, setRememberLogin] = useState(false);
@@ -52,11 +50,8 @@ export default function LoginPage() {
     licenseReady: false,
   });
   const [startupMode, setStartupMode] = useState<
-    "system" | "autoLogin" | "hardware" | "manual"
+    "system" | "autoLogin" | "manual"
   >("system");
-  const [startupHardwareStages, setStartupHardwareStages] = useState(
-    createPendingStartupHardwareStages,
-  );
   const startupAttemptedRef = useRef(false);
 
   useEffect(() => {
@@ -118,45 +113,7 @@ export default function LoginPage() {
       }
 
       if (cancelled) return;
-      const bridge = getDesktopBridge();
-      if (!bridge) {
-        setStartupMode("manual");
-        return;
-      }
-
-      setStartupMode("hardware");
-      setStartupHardwareStages(createPendingStartupHardwareStages());
-      const unsubscribe = bridge.onStartupHardwareStatus((nextStage) => {
-        if (cancelled) return;
-        setStartupHardwareStages((current) =>
-          current.map((stage) =>
-            stage.id === nextStage.id ? nextStage : stage,
-          ),
-        );
-      });
-
-      try {
-        const preferences = getOperatorStartupPreferences();
-        const result = await bridge.prepareStartupHardware(
-          preferences?.productId,
-        );
-        if (!cancelled) setStartupHardwareStages(result.stages);
-      } catch {
-        if (!cancelled) {
-          setStartupHardwareStages((current) =>
-            current.map((stage) =>
-              stage.status === "running"
-                ? { ...stage, status: "failed" }
-                : stage.status === "pending"
-                  ? { ...stage, status: "skipped" }
-                  : stage,
-            ),
-          );
-        }
-      } finally {
-        unsubscribe();
-        if (!cancelled) setStartupMode("manual");
-      }
+      setStartupMode("manual");
     }
 
     void runStartupFlow();
@@ -210,36 +167,41 @@ export default function LoginPage() {
   }
 
   return (
-    <main
-      className={[
-        "flex min-h-[100dvh] justify-center bg-slate-100 p-4 text-[var(--foreground)] transition-all duration-200 sm:p-6",
-        isKeyboardOpen ? "items-start pt-6 sm:pt-8" : "items-center",
-      ].join(" ")}
-    >
+    <main className="login-page h-[100dvh] overflow-y-auto bg-slate-100 text-[var(--foreground)]">
+      <div className="login-layout mx-auto flex min-h-full w-full flex-col items-center px-4 py-4 sm:px-6">
+        <div className="w-full max-w-2xl shrink-0">
+          <LoginSystemStatus
+            className="login-startup-status w-full bg-white"
+            onChange={setGateStatus}
+          />
+        </div>
+
       <section
         className={[
-          "w-full max-w-md transition-transform duration-200",
-          isKeyboardOpen ? "translate-y-0" : "",
+          "login-main flex w-full max-w-md flex-1 flex-col py-6 transition-all duration-200",
+          isKeyboardOpen ? "justify-start" : "justify-center",
         ].join(" ")}
       >
-        <div className="mb-6 flex flex-col items-center text-center">
-          <div className="text-sm font-semibold uppercase tracking-[0.18em] text-cyan-700">
-            {t("app.brand")}
-          </div>
-          <h1 className="mt-3 text-3xl font-semibold text-slate-950">
+        <div className="login-brand mb-6 flex flex-col items-center text-center">
+          <BrandLogo
+            className="login-brand-logo h-16 w-auto"
+            priority
+            variant="ahso"
+          />
+          <h1 className="login-brand-title mt-4 text-balance text-3xl font-semibold tracking-tight text-slate-950">
             OCR Metal Core Washing
           </h1>
         </div>
 
         <form onSubmit={handleSubmit}>
-          <Card>
-            <CardHeader>
+          <Card className="login-card">
+            <CardHeader className="login-card-header">
               <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
                 <div>
-                  <h2 className="text-2xl font-semibold text-slate-950">
+                  <h2 className="login-form-title text-2xl font-semibold text-slate-950">
                     {t("auth.signIn")}
                   </h2>
-                  <p className="mt-2 text-sm text-slate-500">
+                  <p className="login-form-subtitle mt-2 text-sm text-slate-500">
                     {t("auth.subtitle")}
                   </p>
                 </div>
@@ -247,22 +209,16 @@ export default function LoginPage() {
               </div>
             </CardHeader>
 
-            <CardContent>
-              <LoginSystemStatus onChange={setGateStatus} />
-
+            <CardContent className="login-card-content">
               {startupMode === "autoLogin" ? (
                 <div className="mt-5 border border-cyan-200 bg-cyan-50 px-3 py-3 text-sm font-medium text-cyan-900">
                   {t("login.autoLoginChecking")}
                 </div>
               ) : null}
 
-              {startupMode === "hardware" ? (
-                <LoginStartupHardwareStatus stages={startupHardwareStages} />
-              ) : null}
-
               {startupMode === "manual" ? (
                 <>
-                  <label className="mt-5 block text-sm font-medium text-slate-700">
+                  <label className="login-form-label mt-5 block text-sm font-medium text-slate-700">
                     {t("auth.username")}
                     <input
                       value={username}
@@ -272,18 +228,45 @@ export default function LoginPage() {
                     />
                   </label>
 
-                  <label className="mt-5 block text-sm font-medium text-slate-700">
+                  <label className="login-form-label mt-5 block text-sm font-medium text-slate-700">
                     {t("auth.password")}
-                    <input
-                      value={password}
-                      onChange={(event) => setPassword(event.target.value)}
-                      className="mt-2 h-11 w-full border border-slate-300 px-3 text-slate-950 outline-none transition focus:border-cyan-600"
-                      type="password"
-                      autoComplete="current-password"
-                    />
+                    <span className="relative mt-2 block">
+                      <Input
+                        value={password}
+                        onChange={(event) => setPassword(event.target.value)}
+                        className="h-11 pr-12"
+                        type={showPassword ? "text" : "password"}
+                        autoComplete="current-password"
+                      />
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        data-virtual-keyboard-control
+                        aria-label={
+                          showPassword
+                            ? t("auth.hidePassword")
+                            : t("auth.showPassword")
+                        }
+                        aria-pressed={showPassword}
+                        title={
+                          showPassword
+                            ? t("auth.hidePassword")
+                            : t("auth.showPassword")
+                        }
+                        className="absolute inset-y-0 right-0 h-full w-11 border-l border-slate-300 bg-slate-50 text-slate-600 hover:bg-slate-100 hover:text-slate-950 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-cyan-600"
+                        onClick={() => setShowPassword((current) => !current)}
+                      >
+                        {showPassword ? (
+                          <EyeOff aria-hidden="true" className="h-5 w-5" />
+                        ) : (
+                          <Eye aria-hidden="true" className="h-5 w-5" />
+                        )}
+                      </Button>
+                    </span>
                   </label>
 
-                  <label className="mt-5 flex min-h-11 items-center gap-3 text-sm font-medium text-slate-700">
+                  <label className="login-form-label mt-5 flex min-h-11 items-center gap-3 text-sm font-medium text-slate-700">
                     <input
                       checked={rememberLogin}
                       onChange={(event) =>
@@ -308,7 +291,7 @@ export default function LoginPage() {
                   disabled={
                     loading || gateStatus.checking || !gateStatus.licenseReady
                   }
-                  className="mt-7 w-full"
+                  className="login-submit mt-7 w-full"
                 >
                   {loading ? t("auth.signingIn") : t("auth.login")}
                 </Button>
@@ -317,15 +300,9 @@ export default function LoginPage() {
           </Card>
         </form>
       </section>
+      </div>
     </main>
   );
-}
-
-function createPendingStartupHardwareStages(): DesktopStartupHardwareStage[] {
-  return ["plc", "cameraPower", "cameraLight", "camera"].map((id) => ({
-    id: id as DesktopStartupHardwareStage["id"],
-    status: "pending",
-  }));
 }
 
 function silentlyDisconnectCamera(accessToken: string | null | undefined) {

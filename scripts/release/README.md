@@ -13,16 +13,13 @@ Do not commit real `.env` files. GitHub Actions builds the app without machine
 secrets; the installer creates them on the target PC.
 
 The setup does not bundle generated dependency folders such as `node_modules`
-or `tool/.venv`. During installation, `preflight-environment.ps1` first scans
-for required runtime frameworks and reports anything missing. The user can
-install missing frameworks manually and click Check again, or click Next to let
-setup download and install only the missing/unsupported runtime components from
-`online-runtime-manifest.json`. After the app files are copied,
-`bootstrap-installer.ps1` installs Node dependencies, generates the Prisma
-Client, runs migrations, seeds production data, and installs Python requirements
-on the target PC. The Device Tool runtime requires Python 3.11 only.
+or `tool/.venv`. It does bundle the encrypted Device Tool and its Python 3.11
+embedded runtime. During installation, `preflight-environment.ps1` scans Node.js,
+npm, and PostgreSQL. After the app files are copied, `bootstrap-installer.ps1`
+installs Node dependencies, installs Tool requirements into `tool/python-embed`,
+generates the Prisma Client, runs migrations, and seeds production data.
 
-When the online preflight installs Node.js, Python, or PostgreSQL, it records
+When the online preflight installs Node.js or PostgreSQL, it records
 that ownership in `C:\ProgramData\AHSO OCR\runtime-ownership.json`. The
 uninstaller uses that file so the default clean uninstall removes only runtime
 frameworks installed by this setup, not frameworks that already existed on the
@@ -60,6 +57,50 @@ vc_redist.x64.exe
 python-windows-x64.exe
 ```
 
+`python-windows-x64.exe` is needed only for legacy Tool bundles that do not
+contain `python-embed`; the configured encrypted release contains it already.
+
 After preflight finishes, the bootstrap script expects PostgreSQL through
-`psql.exe`, Node/npm through `npm.cmd`, and Python 3.11 to be available on the
-target PC.
+`psql.exe`, Node/npm through `npm.cmd`, and Python 3.11 at
+`runtime\tool\python-embed\python.exe`.
+
+## Private encrypted Tool release
+
+Both local and GitHub Actions builds use
+`scripts/release/private-tool-release.json`. The current source is the private
+GitHub release asset `AHSO-CO-LTD/API-Tool-v1@2026.Jul.06.2` /
+`tool-2026.Jul.06.2.zip`.
+
+The staging script verifies the configured SHA-256 and rejects a package that
+does not contain the compiled `api`, `core`, and `drivers` `.pyd` modules. It
+also rejects protected plaintext source in those modules.
+
+Local build with an authenticated GitHub CLI session:
+
+```powershell
+gh auth login
+gh auth status
+npm run release:win
+```
+
+The authenticated account must have read access to the private Tool repository.
+For an offline/local bundle override, point to either the extracted directory or
+the exact zip archive:
+
+```powershell
+$env:DEVICE_TOOL_BUNDLE_PATH = "C:\duyhai\AHSO\tool-2026.Jul.06.2"
+npm run release:win
+```
+
+GitHub Actions requires a repository Actions secret named
+`TOOL_RELEASE_TOKEN`. Use a fine-grained PAT with `Contents: Read` access to
+`AHSO-CO-LTD/API-Tool-v1`. The normal workflow `GITHUB_TOKEN` cannot read a
+different private repository.
+
+To upgrade the bundled Tool, update tag, asset name, and SHA-256 together in
+`private-tool-release.json`. Release metadata and the asset digest can be
+checked with:
+
+```powershell
+gh release view 2026.Jul.06.2 --repo AHSO-CO-LTD/API-Tool-v1 --json assets
+```

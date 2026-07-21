@@ -3,6 +3,7 @@
 import { useEffect } from "react";
 import { AlertTriangle } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 
 type ConfirmModalProps = {
   open: boolean;
@@ -12,6 +13,7 @@ type ConfirmModalProps = {
   cancelLabel: string;
   loading?: boolean;
   destructive?: boolean;
+  overlayClassName?: string;
   onConfirm: () => void;
   onCancel: () => void;
 };
@@ -24,6 +26,7 @@ export function ConfirmModal({
   cancelLabel,
   loading = false,
   destructive = false,
+  overlayClassName,
   onConfirm,
   onCancel,
 }: ConfirmModalProps) {
@@ -48,7 +51,10 @@ export function ConfirmModal({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-slate-950/40 px-4 py-6"
+      className={cn(
+        "fixed inset-0 flex items-center justify-center overflow-y-auto bg-slate-950/40 px-4 py-6",
+        overlayClassName ?? "z-50",
+      )}
       role="presentation"
       onMouseDown={() => {
         if (!loading) {

@@ -9,6 +9,10 @@ import { ModuleRef } from '@nestjs/core';
 import { LineSessionEndReason } from '@prisma/client';
 import { DeviceToolService } from '../device-tool/device-tool.service';
 import { InspectionsService } from '../inspections/inspections.service';
+import {
+  MachineOperationModeDto,
+  UpdateMachineRuntimeControlsDto,
+} from './dto/machine-runtime.dto';
 import { PlcRuntimeEvent, PlcRuntimeService } from './plc-runtime.service';
 
 const DEFAULT_CAMERA_RESTORE_TIMEOUT_MS = 60 * 1000;
@@ -39,6 +43,18 @@ type MachineRuntimeStep = {
 type ResumeSessionContext = {
   productId: string;
   operatorId: string;
+};
+
+type MachineOperationMode = 'manual' | 'auto';
+type MachineTriggerSource = 'manual' | 'plc';
+type MachineTriggerAction = 'ignored' | 'captured' | 'latched' | 'unknown';
+type MachineRuntimeFrame = {
+  jobId: string;
+  productId: string;
+  imageBase64: string;
+  width: number;
+  height: number;
+  capturedAt: string;
 };
 
 @Injectable()
@@ -80,6 +96,11 @@ export class MachineRuntimeService
   private transitionSequence = 0;
   private resumeSessionContext: ResumeSessionContext | null = null;
   private shutdownPromise: Promise<void> | null = null;
+  private operationMode: MachineOperationMode = 'auto';
+  private liveCameraEnabled = true;
+  private realtimeAiEnabled = true;
+  private latestFrame: MachineRuntimeFrame | null = null;
+  private cameraFrameSequence = 0;
 
   constructor(
     private readonly moduleRef: ModuleRef,
@@ -158,8 +179,37 @@ export class MachineRuntimeService
         latestLiveInspection: this.latestLiveInspection,
         liveInspectionSequence: this.liveInspectionSequence,
         liveInspectionError: this.liveInspectionError,
+        operationMode: this.operationMode,
+        liveCameraEnabled: this.liveCameraEnabled,
+        realtimeAiEnabled: this.realtimeAiEnabled,
+        cameraFrameSequence: this.cameraFrameSequence,
       },
     };
+  }
+
+  getLatestFrame() {
+    return {
+      data: this.latestFrame
+        ? { sequence: this.cameraFrameSequence, frame: this.latestFrame }
+        : null,
+    };
+  }
+
+  updateControls(dto: UpdateMachineRuntimeControlsDto) {
+    if (dto.mode) {
+      this.operationMode =
+        dto.mode === MachineOperationModeDto.auto ? 'auto' : 'manual';
+    }
+    if (typeof dto.liveCameraEnabled === 'boolean') {
+      this.liveCameraEnabled = dto.liveCameraEnabled;
+    }
+    if (typeof dto.realtimeAiEnabled === 'boolean') {
+      this.realtimeAiEnabled = dto.realtimeAiEnabled;
+    }
+
+    this.reconcileContinuousDetection();
+    this.touch();
+    return this.getStatus();
   }
 
   async startOperation() {
@@ -185,7 +235,7 @@ export class MachineRuntimeService
     }
 
     if (this.state === 'running') {
-      this.startContinuousDetection();
+      this.reconcileContinuousDetection();
       await this.recordActivity();
       return this.getStatus();
     }
@@ -197,6 +247,17 @@ export class MachineRuntimeService
   async notifyManualLatch() {
     if (this.state === 'running') await this.recordActivity();
     return this.getStatus();
+  }
+
+  async grabManually() {
+    const result = await this.executeTrigger('manual');
+    return {
+      data: {
+        ...this.getStatus().data,
+        action: result.action,
+        inspection: result.inspection,
+      },
+    };
   }
 
   async stopOperation() {
@@ -220,7 +281,7 @@ export class MachineRuntimeService
         'Manual resume is only available after the five-minute capture timeout',
       );
     }
-    await this.resumeOperation(false);
+    await this.resumeOperation(false, true);
     return this.getStatus();
   }
 
@@ -273,7 +334,11 @@ export class MachineRuntimeService
       }
 
       this.state = 'inactive';
-      await this.resumeOperation(false);
+      await this.resumeOperation(
+        false,
+        previousState === 'idle_machine_stop' ||
+          previousState === 'idle_capture_timeout',
+      );
       return this.getStatus();
     } catch (error) {
       const message = this.errorMessage(error);
@@ -371,69 +436,128 @@ export class MachineRuntimeService
 
     if (event.key === 'startTrigger') {
       if (this.state === 'idle_machine_stop') {
-        await this.resumeOperation(true);
+        await this.resumeOperation(true, true);
       } else if (this.state === 'idle_capture_timeout') {
-        await this.resumeOperation(false);
+        await this.resumeOperation(false, true);
       }
       return;
     }
 
     if (event.key === 'captureTrigger') {
+      if (this.operationMode !== 'auto') return;
       if (this.state === 'idle_capture_timeout') {
-        await this.resumeOperation(false);
+        await this.resumeOperation(false, true);
         return;
       }
       if (this.state === 'running' && !this.stopRequested) {
-        await this.recordActivity();
         await this.captureFromPlc();
       }
     }
   }
 
   private async captureFromPlc() {
+    await this.executeTrigger('plc');
+  }
+
+  private async executeTrigger(source: MachineTriggerSource): Promise<{
+    action: MachineTriggerAction;
+    inspection: unknown;
+  }> {
     if (
       this.captureInProgress ||
       this.state !== 'running' ||
-      this.stopRequested
+      this.stopRequested ||
+      (source === 'plc' && this.operationMode !== 'auto') ||
+      (source === 'manual' && this.operationMode !== 'manual')
     ) {
-      return;
+      return { action: 'ignored', inspection: null };
     }
+
+    if (!this.realtimeAiEnabled && this.liveCameraEnabled) {
+      return { action: 'ignored', inspection: null };
+    }
+
     this.captureInProgress = true;
     const abortController = new AbortController();
     this.captureAbortController = abortController;
     try {
-      const response =
-        await this.inspectionsService.captureRunningInspectionFromPlc(
+      if (!this.realtimeAiEnabled) {
+        const response = await this.inspectionsService.captureRunningFrame(
           abortController.signal,
         );
-      if (abortController.signal.aborted || this.stopRequested) return;
-      this.lastPlcInspection = response.data;
-      this.lastPlcInspectionSequence += 1;
-      this.touch();
-      await this.showLatchedResultIndicator(
-        response.data.lastResult?.result === 'OK',
-      ).catch((error) => {
-        this.logger.error(
-          `PLC result indicator update failed: ${this.errorMessage(error)}`,
-        );
-      });
-      if (
-        response.data.lastResult?.result === 'NG' &&
-        response.data.quantity > 0
-      ) {
-        await this.plcRuntime.pulseError();
+        if (abortController.signal.aborted || this.stopRequested) {
+          return { action: 'ignored', inspection: null };
+        }
+        this.storeLatestFrame(response.data);
+        await this.recordActivity();
+        return { action: 'captured', inspection: null };
       }
+
+      const response = this.liveCameraEnabled
+        ? await this.inspectionsService.latchLatestRunningInspection(
+            abortController.signal,
+          )
+        : await this.inspectionsService.captureAndLatchRunningInspection(
+            abortController.signal,
+          );
+      if (abortController.signal.aborted || this.stopRequested) {
+        return { action: 'ignored', inspection: null };
+      }
+      if (!this.liveCameraEnabled) this.storeLatestFrame(response.frame);
+      await this.recordActivity();
+
+      if (!response.latched) {
+        return { action: 'unknown', inspection: null };
+      }
+
+      if (source === 'plc') {
+        this.lastPlcInspection = response.data;
+        this.lastPlcInspectionSequence += 1;
+        this.touch();
+        await this.showPulsedResultIndicator(
+          response.data.lastResult?.result,
+          response.data.quantity,
+        ).catch((error) => {
+          this.logger.error(
+            `PLC result pulse failed: ${this.errorMessage(error)}`,
+          );
+        });
+      }
+
+      return { action: 'latched', inspection: response.data };
     } catch (error) {
-      if (abortController.signal.aborted) return;
+      if (abortController.signal.aborted) {
+        return { action: 'ignored', inspection: null };
+      }
       this.message = this.errorMessage(error);
       this.touch();
-      this.logger.error(`PLC capture failed: ${this.message}`);
+      this.logger.error(`${source} capture failed: ${this.message}`);
+      throw error;
     } finally {
       if (this.captureAbortController === abortController) {
         this.captureAbortController = null;
       }
       this.captureInProgress = false;
     }
+  }
+
+  private storeLatestFrame(frame: MachineRuntimeFrame) {
+    this.latestFrame = frame;
+    this.cameraFrameSequence += 1;
+    this.touch();
+  }
+
+  private reconcileContinuousDetection() {
+    if (
+      this.state === 'running' &&
+      this.liveCameraEnabled &&
+      this.realtimeAiEnabled
+    ) {
+      this.startContinuousDetection();
+      return;
+    }
+
+    this.stopContinuousDetection();
   }
 
   private startContinuousDetection() {
@@ -600,7 +724,10 @@ export class MachineRuntimeService
     this.setState('idle_capture_timeout');
   }
 
-  private async resumeOperation(restoreCameraPower: boolean) {
+  private async resumeOperation(
+    restoreCameraPower: boolean,
+    restoreDefaultControls = false,
+  ) {
     if (
       this.state === 'resuming' ||
       this.state === 'waiting_camera' ||
@@ -609,6 +736,7 @@ export class MachineRuntimeService
       return;
     }
 
+    if (restoreDefaultControls) this.restoreDefaultRuntimeControls();
     const sequence = ++this.transitionSequence;
     this.clearInactivityTimer();
     this.clearCountdownTimer();
@@ -703,7 +831,7 @@ export class MachineRuntimeService
     );
     this.idleReason = null;
     this.setState('running');
-    this.startContinuousDetection();
+    this.reconcileContinuousDetection();
     if (plcReady) {
       await this.showWaitingCheckingIndicator().catch((error) => {
         this.logger.error(
@@ -713,6 +841,13 @@ export class MachineRuntimeService
     }
     if (this.plcOffline) this.message = this.plcErrorMessage;
     await this.recordActivity();
+  }
+
+  private restoreDefaultRuntimeControls() {
+    this.operationMode = 'auto';
+    this.liveCameraEnabled = true;
+    this.realtimeAiEnabled = true;
+    this.touch();
   }
 
   private async waitForCameraFrame(sequence: number) {
@@ -840,19 +975,24 @@ export class MachineRuntimeService
   private async clearResultIndicators() {
     this.clearResultIndicatorTimer();
     await this.plcRuntime.setFixedOutput('waitingChecking', false);
-    await this.plcRuntime.setFixedOutput('okResult', false);
   }
 
   private async showWaitingCheckingIndicator() {
     this.clearResultIndicatorTimer();
-    await this.plcRuntime.setFixedOutput('okResult', false);
     await this.plcRuntime.setFixedOutput('waitingChecking', true);
   }
 
-  private async showLatchedResultIndicator(isOk: boolean) {
+  private async showPulsedResultIndicator(
+    result: string | undefined,
+    recognizedQuantity: number,
+  ) {
     this.clearResultIndicatorTimer();
     await this.plcRuntime.setFixedOutput('waitingChecking', false);
-    await this.plcRuntime.setFixedOutput('okResult', isOk);
+    if (result === 'OK') {
+      await this.plcRuntime.pulseOkResult();
+    } else if (result === 'NG' && recognizedQuantity > 0) {
+      await this.plcRuntime.pulseError();
+    }
     this.resultIndicatorTimer = setTimeout(() => {
       this.resultIndicatorTimer = null;
       if (this.state !== 'running' || this.destroyed) return;

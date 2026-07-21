@@ -482,6 +482,7 @@ export type PlcConfiguration = {
   okResultAddress: number | null;
   waitingCheckingAddress: number | null;
   errorPulseDurationMs: number;
+  okPulseDurationMs: number;
   sleepTimeSeconds: number;
   customKeys: PlcCustomKey[];
   createdAt: string;
@@ -520,7 +521,6 @@ export type PlcRuntimeStatus = {
   protocol: "modbus_tcp" | "slmp" | null;
   cameraPowerCommand: boolean | null;
   cameraLightCommand: boolean | null;
-  okResultCommand: boolean | null;
   waitingCheckingCommand: boolean | null;
   lastError: string | null;
   recentEvents: PlcRuntimeEvent[];
@@ -592,6 +592,24 @@ export type MachineRuntimeStatus = {
   latestLiveInspection: CurrentInspectionState | null;
   liveInspectionSequence: number;
   liveInspectionError: string | null;
+  operationMode: "manual" | "auto";
+  liveCameraEnabled: boolean;
+  realtimeAiEnabled: boolean;
+  cameraFrameSequence: number;
+};
+
+export type MachineRuntimeFrame = {
+  jobId: string;
+  productId: string;
+  imageBase64: string;
+  width: number;
+  height: number;
+  capturedAt: string;
+};
+
+export type MachineRuntimeAction = MachineRuntimeStatus & {
+  action: "ignored" | "captured" | "latched" | "unknown";
+  inspection: CurrentInspectionState | null;
 };
 
 const API_BASE_URL =
@@ -1710,11 +1728,11 @@ export async function setPlcCameraLight(accessToken: string, enabled: boolean) {
   );
 }
 
-export async function setPlcOkResult(accessToken: string, enabled: boolean) {
+export async function pulsePlcOkResult(accessToken: string) {
   return plcRequest<{ data: PlcRuntimeStatus }>(
     accessToken,
-    "/plc/outputs/ok-result",
-    { method: "PUT", body: JSON.stringify({ enabled }) },
+    "/plc/outputs/ok-pulse",
+    { method: "POST" },
   );
 }
 
@@ -1756,6 +1774,27 @@ export async function getMachineRuntimeStatus(accessToken: string) {
   );
 }
 
+export async function getMachineRuntimeFrame(accessToken: string) {
+  return plcRequest<{
+    data: { sequence: number; frame: MachineRuntimeFrame } | null;
+  }>(accessToken, "/plc/machine/frame");
+}
+
+export async function updateMachineRuntimeControls(
+  accessToken: string,
+  controls: Partial<{
+    mode: "manual" | "auto";
+    liveCameraEnabled: boolean;
+    realtimeAiEnabled: boolean;
+  }>,
+) {
+  return plcRequest<{ data: MachineRuntimeStatus }>(
+    accessToken,
+    "/plc/machine/controls",
+    { method: "PATCH", body: JSON.stringify(controls) },
+  );
+}
+
 export async function startMachineOperation(accessToken: string) {
   return plcRequest<{ data: MachineRuntimeStatus }>(
     accessToken,
@@ -1776,6 +1815,14 @@ export async function notifyManualPlcLatch(accessToken: string) {
   return plcRequest<{ data: MachineRuntimeStatus }>(
     accessToken,
     "/plc/machine/manual-latch",
+    { method: "POST" },
+  );
+}
+
+export async function grabMachineFrame(accessToken: string) {
+  return plcRequest<{ data: MachineRuntimeAction }>(
+    accessToken,
+    "/plc/machine/grab",
     { method: "POST" },
   );
 }

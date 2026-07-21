@@ -22,9 +22,9 @@ import {
   disconnectPlc,
   executePlcCustomKey,
   pulsePlcError,
+  pulsePlcOkResult,
   setPlcCameraLight,
   setPlcCameraPower,
-  setPlcOkResult,
   setPlcWaitingChecking,
   type PlcConfiguration,
   type PlcRuntimeStatus,
@@ -226,26 +226,18 @@ export function PlcRuntimePanel({
               }
               t={t}
             />
-            <OutputControl
+            <PulseControl
               icon={CheckCircle2}
               label={t("plc.okResult")}
-              value={status?.okResultCommand}
               disabled={
                 !connected ||
                 Boolean(action) ||
                 config?.okResultAddress === null
               }
-              onOff={() =>
+              onPulse={() =>
                 void execute(
-                  "ok-result-off",
-                  (token) => setPlcOkResult(token, false),
-                  "plc.executeSuccess",
-                )
-              }
-              onOn={() =>
-                void execute(
-                  "ok-result-on",
-                  (token) => setPlcOkResult(token, true),
+                  "ok-result-pulse",
+                  pulsePlcOkResult,
                   "plc.executeSuccess",
                 )
               }
@@ -276,31 +268,23 @@ export function PlcRuntimePanel({
               }
               t={t}
             />
-            <div className="flex min-h-28 flex-col justify-between gap-3 border border-slate-200 p-4">
-              <div className="flex items-center gap-2 font-medium text-slate-900">
-                <Send className="h-5 w-5 text-cyan-700" aria-hidden="true" />
-                {t("plc.errorPulse")}
-              </div>
-              <Button
-                type="button"
-                variant="outline"
-                className="h-11"
-                onClick={() =>
-                  void execute(
-                    "error-pulse",
-                    pulsePlcError,
-                    "plc.executeSuccess",
-                  )
-                }
-                disabled={
-                  !connected ||
-                  Boolean(action) ||
-                  config?.errorPulseAddress === null
-                }
-              >
-                {t("plc.sendPulse")}
-              </Button>
-            </div>
+            <PulseControl
+              icon={Send}
+              label={t("plc.errorPulse")}
+              disabled={
+                !connected ||
+                Boolean(action) ||
+                config?.errorPulseAddress === null
+              }
+              onPulse={() =>
+                void execute(
+                  "error-pulse",
+                  pulsePlcError,
+                  "plc.executeSuccess",
+                )
+              }
+              t={t}
+            />
           </div>
         </section>
 
@@ -487,6 +471,40 @@ function OutputControl({
           {t("plc.turnOn")}
         </Button>
       </div>
+    </div>
+  );
+}
+
+type PulseControlProps = {
+  icon: typeof Power;
+  label: string;
+  disabled: boolean;
+  onPulse: () => void;
+  t: (key: string) => string;
+};
+
+function PulseControl({
+  icon: Icon,
+  label,
+  disabled,
+  onPulse,
+  t,
+}: PulseControlProps) {
+  return (
+    <div className="flex min-h-28 flex-col justify-between gap-3 border border-slate-200 p-4">
+      <div className="flex items-center gap-2 font-medium text-slate-900">
+        <Icon className="h-5 w-5 text-cyan-700" aria-hidden="true" />
+        {label}
+      </div>
+      <Button
+        type="button"
+        variant="outline"
+        className="h-11"
+        onClick={onPulse}
+        disabled={disabled}
+      >
+        {t("plc.sendPulse")}
+      </Button>
     </div>
   );
 }

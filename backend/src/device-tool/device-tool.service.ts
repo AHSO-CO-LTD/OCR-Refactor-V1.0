@@ -1027,7 +1027,10 @@ export class DeviceToolService {
       ? 90
       : this.toToolRotation(region.rotation);
 
-    let pipeline = sharp(imageBuffer).extract({ left, top, width, height });
+    const croppedImage = await sharp(imageBuffer)
+      .extract({ left, top, width, height })
+      .toBuffer();
+    let pipeline = sharp(croppedImage);
     if (rotation !== 0) pipeline = pipeline.rotate(rotation);
 
     const output = await pipeline

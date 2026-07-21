@@ -198,11 +198,11 @@ export function RoiSettingsPanel({
             <div
               key={region.index}
               className={[
-                "grid gap-3 border bg-slate-50 p-3 md:grid-cols-[90px_repeat(3,minmax(0,1fr))_130px_44px]",
+                "grid gap-3 border bg-slate-50 p-3 sm:grid-cols-2 min-[1100px]:grid-cols-[90px_repeat(3,minmax(0,1fr))_130px_44px]",
                 overlappingIndexes.has(region.index) ? "border-red-300" : "border-slate-200",
               ].join(" ")}
             >
-              <div className="flex items-center font-mono text-sm font-semibold text-cyan-800">ROI {region.index}</div>
+              <div className="flex items-center font-mono text-sm font-semibold text-cyan-800 sm:col-span-2 min-[1100px]:col-span-1">ROI {region.index}</div>
               {(["x", "y", "rotation"] as const).map((field) => (
                 <label key={field} className="space-y-1 text-xs font-medium uppercase tracking-wide text-slate-500">
                   <span>{field}</span>
@@ -213,7 +213,7 @@ export function RoiSettingsPanel({
                   />
                 </label>
               ))}
-              <div className="flex items-end">
+              <div className="flex items-end sm:col-span-2 min-[1100px]:col-span-1">
                 <div className="flex h-10 w-full items-center justify-center border border-slate-200 bg-white px-3 font-mono text-sm text-slate-700" title={t("configuration.fixedRoiSize")}>
                   {CONFIGURATION_ROI_WIDTH} × {CONFIGURATION_ROI_HEIGHT}
                 </div>

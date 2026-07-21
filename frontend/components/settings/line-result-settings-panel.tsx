@@ -286,7 +286,7 @@ function SessionRow({ label, value }: { label: string; value: string }) {
 
 function StatusRow({ label, value }: { label: string; value: string }) {
   return (
-    <div className="grid grid-cols-[130px_minmax(0,1fr)] gap-3 border-b border-slate-100 pb-3 text-sm last:border-b-0 last:pb-0">
+    <div className="grid gap-1 border-b border-slate-100 pb-3 text-sm last:border-b-0 last:pb-0 sm:grid-cols-[130px_minmax(0,1fr)] sm:gap-3">
       <span className="text-slate-500">{label}</span>
       <span className="break-words font-semibold text-slate-950">{value}</span>
     </div>

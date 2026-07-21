@@ -67,6 +67,7 @@ type RoleCode = "dev" | "admin" | "engineer" | "operator";
 
 ```ts
 type PermissionKey =
+  | "dashboard.view"
   | "user.manage"
   | "role.manage"
   | "permission.manage"
@@ -721,6 +722,30 @@ POST /products/import
 - Upload dùng `multipart/form-data`, field `file`, tối đa 5 MB và chỉ nhận `.xlsx`.
 - Mã mới tạo sản phẩm với tên bằng mã và các thông số mặc định; mã đã tồn tại cập nhật link model.
 - Yêu cầu quyền `product.manage`.
+
+## Machine Runtime Controls
+
+```http
+GET /plc/machine/status
+GET /plc/machine/frame
+PATCH /plc/machine/controls
+POST /plc/machine/grab
+```
+
+`PATCH /plc/machine/controls` accepts any subset of:
+
+```json
+{
+  "mode": "manual",
+  "liveCameraEnabled": true,
+  "realtimeAiEnabled": false
+}
+```
+
+- `mode` is `manual` or `auto`.
+- `machine/grab` is rejected as an action in Auto and never emits a PLC result pulse.
+- `machine/frame` returns the latest frame captured by runtime plus its sequence; the frontend fetches it only when the sequence changes.
+- `machine/status` exposes the three controls and `cameraFrameSequence` with the existing machine state.
 
 ## Line Operation Reports
 

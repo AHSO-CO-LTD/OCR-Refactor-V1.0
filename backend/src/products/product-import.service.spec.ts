@@ -82,4 +82,45 @@ describe('ProductImportService', () => {
       imageHeight: 500,
     });
   });
+
+  it('reads a model path from hyperlink text containing rich text segments', async () => {
+    const workbook = new ExcelJS.Workbook();
+    const sheet = workbook.addWorksheet('Products');
+    sheet.addRow(['Product code', 'Model link']);
+    sheet.getCell('A2').value = 'RICH-PATH';
+    sheet.getCell('B2').value = {
+      text: {
+        richText: [
+          { text: 'C:\\Models\\' },
+          {
+            font: { color: { argb: 'FF1155CC' }, underline: true },
+            text: 'rich-model.pt',
+          },
+        ],
+      },
+      hyperlink: 'http://rich-model.pt/',
+    } as unknown as ExcelJS.CellValue;
+    const buffer = Buffer.from(await workbook.xlsx.writeBuffer());
+    type ProductCreateArgs = {
+      data: { code: string; modelPath: string };
+    };
+    const create = jest
+      .fn<Promise<unknown>, [ProductCreateArgs]>()
+      .mockResolvedValue({});
+    const prisma = {
+      product: { findMany: jest.fn().mockResolvedValue([]) },
+      $transaction: jest.fn(async (operation: (tx: unknown) => Promise<void>) =>
+        operation({ product: { update: jest.fn(), create } }),
+      ),
+    } as unknown as PrismaService;
+    const service = new ProductImportService(prisma);
+
+    await service.importWorkbook(buffer);
+
+    expect(create).toHaveBeenCalledTimes(1);
+    expect(create.mock.calls[0][0].data).toMatchObject({
+      code: 'RICH-PATH',
+      modelPath: 'C:\\Models\\rich-model.pt',
+    });
+  });
 });

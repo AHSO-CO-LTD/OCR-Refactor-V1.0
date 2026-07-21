@@ -182,22 +182,49 @@ export class ProductImportService {
   }
 
   private cellText(cell: ExcelJS.Cell) {
-    if (typeof cell.value === 'string' || typeof cell.value === 'number') {
-      return String(cell.value);
+    return this.excelValueText(cell.value) || this.excelValueText(cell.text);
+  }
+
+  private excelValueText(value: unknown): string {
+    if (
+      typeof value === 'string' ||
+      typeof value === 'number' ||
+      typeof value === 'boolean'
+    ) {
+      return String(value);
     }
-    if (cell.value && typeof cell.value === 'object') {
-      if ('text' in cell.value) return String(cell.value.text ?? '');
-      if ('result' in cell.value) {
-        const result: unknown = cell.value.result;
-        if (
-          typeof result === 'string' ||
-          typeof result === 'number' ||
-          typeof result === 'boolean'
-        ) {
-          return String(result);
-        }
-      }
+
+    if (Array.isArray(value)) {
+      return value.map((item) => this.excelValueText(item)).join('');
     }
-    return cell.text ?? '';
+
+    if (!value || typeof value !== 'object') {
+      return '';
+    }
+
+    const objectValue = value as Record<string, unknown>;
+    const richText = objectValue.richText;
+
+    if (Array.isArray(richText)) {
+      return (richText as unknown[])
+        .map((segment) =>
+          segment && typeof segment === 'object'
+            ? this.excelValueText(
+                (segment as Record<string, unknown>).text ?? segment,
+              )
+            : this.excelValueText(segment),
+        )
+        .join('');
+    }
+
+    if ('text' in objectValue) {
+      return this.excelValueText(objectValue.text);
+    }
+
+    if ('result' in objectValue) {
+      return this.excelValueText(objectValue.result);
+    }
+
+    return '';
   }
 }

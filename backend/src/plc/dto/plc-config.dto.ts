@@ -96,6 +96,11 @@ export class UpdatePlcConfigDto {
   errorPulseDurationMs!: number;
 
   @IsInt()
+  @Min(50)
+  @Max(10000)
+  okPulseDurationMs!: number;
+
+  @IsInt()
   @Min(1)
   @Max(86400)
   sleepTimeSeconds!: number;

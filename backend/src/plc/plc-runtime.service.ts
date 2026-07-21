@@ -54,8 +54,14 @@ type WatchMapping = {
 export type PlcFixedOutputKey =
   | 'cameraPower'
   | 'cameraLight'
-  | 'okResult'
   | 'waitingChecking';
+
+export type PlcStartupSignalCheck = {
+  id: string;
+  label?: string;
+  status: 'done' | 'failed' | 'skipped';
+  error?: string;
+};
 
 @Injectable()
 export class PlcRuntimeService
@@ -69,7 +75,6 @@ export class PlcRuntimeService
   private lastError: string | null = null;
   private cameraPowerCommand: boolean | null = null;
   private cameraLightCommand: boolean | null = null;
-  private okResultCommand: boolean | null = null;
   private waitingCheckingCommand: boolean | null = null;
   private recentEvents: PlcRuntimeEvent[] = [];
   private watcherControllers: AbortController[] = [];
@@ -122,10 +127,6 @@ export class PlcRuntimeService
         {
           key: 'cameraPower' as const,
           address: config.cameraPowerAddress,
-        },
-        {
-          key: 'okResult' as const,
-          address: config.okResultAddress,
         },
         {
           key: 'waitingChecking' as const,
@@ -199,6 +200,7 @@ export class PlcRuntimeService
           okResultAddress: dto.okResultAddress,
           waitingCheckingAddress: dto.waitingCheckingAddress,
           errorPulseDurationMs: dto.errorPulseDurationMs,
+          okPulseDurationMs: dto.okPulseDurationMs,
           sleepTimeSeconds: dto.sleepTimeSeconds,
         },
         update: {
@@ -214,6 +216,7 @@ export class PlcRuntimeService
           okResultAddress: dto.okResultAddress,
           waitingCheckingAddress: dto.waitingCheckingAddress,
           errorPulseDurationMs: dto.errorPulseDurationMs,
+          okPulseDurationMs: dto.okPulseDurationMs,
           sleepTimeSeconds: dto.sleepTimeSeconds,
         },
       });
@@ -259,6 +262,7 @@ export class PlcRuntimeService
     this.intentionalDisconnect = false;
     this.cancelReconnect();
     this.stopWatchers();
+    this.clearFixedOutputStates();
     this.setState('connecting');
 
     try {
@@ -268,9 +272,10 @@ export class PlcRuntimeService
       this.connectedHost = config.ipAddress;
       this.connectedProtocol = status.driver;
       this.lastError = null;
+      await this.syncFixedOutputStates(config);
       this.setState('connected');
       this.startWatchers(config);
-      return this.getRuntimeStatus();
+      return this.createRuntimeStatus(config);
     } catch (error) {
       this.lastError = this.errorMessage(error);
       this.setState('error', this.lastError);
@@ -305,15 +310,25 @@ export class PlcRuntimeService
         const toolStatus = await this.toolClient.status(this.connectedHost);
         if (toolStatus.state !== 'connected') {
           this.state = 'reconnecting';
+          this.clearFixedOutputStates();
           this.scheduleReconnect();
+        } else if (config) {
+          await this.syncFixedOutputStates(config);
         }
       } catch (error) {
         this.lastError = this.errorMessage(error);
         this.state = 'reconnecting';
+        this.clearFixedOutputStates();
         this.scheduleReconnect();
       }
     }
 
+    return this.createRuntimeStatus(config);
+  }
+
+  private createRuntimeStatus(
+    config: Awaited<ReturnType<typeof this.loadConfig>>,
+  ) {
     return {
       data: {
         state: this.state,
@@ -322,7 +337,6 @@ export class PlcRuntimeService
         protocol: this.connectedProtocol ?? config?.protocol ?? null,
         cameraPowerCommand: this.cameraPowerCommand,
         cameraLightCommand: this.cameraLightCommand,
-        okResultCommand: this.okResultCommand,
         waitingCheckingCommand: this.waitingCheckingCommand,
         lastError: this.lastError,
         recentEvents: this.recentEvents,
@@ -335,7 +349,6 @@ export class PlcRuntimeService
     const addressByKey: Record<PlcFixedOutputKey, number | null> = {
       cameraPower: config.cameraPowerAddress,
       cameraLight: config.cameraLightAddress,
-      okResult: config.okResultAddress,
       waitingChecking: config.waitingCheckingAddress,
     };
     const address = addressByKey[key];
@@ -349,7 +362,6 @@ export class PlcRuntimeService
     );
     if (key === 'cameraPower') this.cameraPowerCommand = value;
     if (key === 'cameraLight') this.cameraLightCommand = value;
-    if (key === 'okResult') this.okResultCommand = value;
     if (key === 'waitingChecking') this.waitingCheckingCommand = value;
     this.emit({
       type: 'output',
@@ -364,30 +376,101 @@ export class PlcRuntimeService
 
   async pulseError() {
     const config = await this.requireConfig();
-    if (config.errorPulseAddress === null) return this.getRuntimeStatus();
+    return this.pulseFixedOutput(
+      config,
+      'errorPulse',
+      config.errorPulseAddress,
+      config.errorPulseDurationMs,
+    );
+  }
+
+  async pulseOkResult() {
+    const config = await this.requireConfig();
+    return this.pulseFixedOutput(
+      config,
+      'okResult',
+      config.okResultAddress,
+      config.okPulseDurationMs,
+    );
+  }
+
+  private async pulseFixedOutput(
+    config: Awaited<ReturnType<typeof this.requireConfig>>,
+    key: 'errorPulse' | 'okResult',
+    address: number | null,
+    durationMs: number,
+  ) {
+    if (address === null) return this.getRuntimeStatus();
     if (this.state !== 'connected' || this.connectedHost !== config.ipAddress) {
       throw new BadRequestException('PLC is not connected');
     }
-    const toolAddress = toToolBooleanAddress(
-      config.protocol,
-      config.errorPulseAddress,
-    );
+    const toolAddress = toToolBooleanAddress(config.protocol, address);
     await this.enqueue(() =>
-      this.toolClient.pulse(
-        config.ipAddress,
-        toolAddress,
-        config.errorPulseDurationMs / 1000,
-      ),
+      this.toolClient.pulse(config.ipAddress, toolAddress, durationMs / 1000),
     );
     this.emit({
       type: 'output',
-      key: 'errorPulse',
-      address: config.errorPulseAddress,
+      key,
+      address,
       toolAddress,
       value: true,
       source: 'fixed',
     });
     return this.getRuntimeStatus();
+  }
+
+  async testStartupSignals() {
+    const config = await this.requireConnectedConfig();
+    const checks: PlcStartupSignalCheck[] = [];
+
+    await this.runStartupSignalCheck(
+      checks,
+      'ngResult',
+      config.errorPulseAddress,
+      () => this.pulseError().then(() => undefined),
+    );
+    await this.runStartupSignalCheck(
+      checks,
+      'okResult',
+      config.okResultAddress,
+      () => this.pulseOkResult().then(() => undefined),
+    );
+    await this.runStartupSignalCheck(
+      checks,
+      'waitingChecking',
+      config.waitingCheckingAddress,
+      () => this.pulseStartupFixedOutput('waitingChecking'),
+    );
+
+    const monitoredInputs = [
+      ['captureTrigger', config.captureTriggerAddress],
+      ['stopTrigger', config.stopTriggerAddress],
+      ['startTrigger', config.startTriggerAddress],
+    ] as const;
+
+    for (const [id, address] of monitoredInputs) {
+      checks.push({
+        id,
+        status: address === null ? 'skipped' : 'done',
+      });
+    }
+
+    for (const key of config.customKeys) {
+      checks.push({
+        id: `custom:${key.id}`,
+        label: key.name,
+        status: 'skipped',
+      });
+    }
+
+    return {
+      data: {
+        status: checks.some((check) => check.status !== 'skipped')
+          ? ('done' as const)
+          : ('skipped' as const),
+        checks,
+      },
+    };
   }
 
   async executeCustomKey(id: string, dto: ExecuteCustomPlcKeyDto) {
@@ -422,6 +505,78 @@ export class PlcRuntimeService
       source: 'custom',
     });
     return this.getRuntimeStatus();
+  }
+
+  private async runStartupSignalCheck(
+    checks: PlcStartupSignalCheck[],
+    id: string,
+    address: number | null,
+    action: () => Promise<void>,
+  ) {
+    if (address === null) {
+      checks.push({ id, status: 'skipped' });
+      return;
+    }
+
+    try {
+      await action();
+      checks.push({ id, status: 'done' });
+    } catch (error) {
+      checks.push({
+        id,
+        status: 'failed',
+        error: this.errorMessage(error),
+      });
+    }
+  }
+
+  private async pulseStartupFixedOutput(
+    key: Extract<PlcFixedOutputKey, 'waitingChecking'>,
+  ) {
+    await this.setFixedOutput(key, true);
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 300));
+    } finally {
+      await this.setFixedOutput(key, false);
+    }
+  }
+
+  private async syncFixedOutputStates(
+    config: NonNullable<Awaited<ReturnType<typeof this.loadConfig>>>,
+  ) {
+    const outputs = [
+      ['cameraPower', config.cameraPowerAddress],
+      ['cameraLight', config.cameraLightAddress],
+      ['waitingChecking', config.waitingCheckingAddress],
+    ] as const;
+
+    for (const [key, address] of outputs) {
+      if (address === null) {
+        this.setFixedOutputState(key, null);
+        continue;
+      }
+      const toolAddress = toToolBooleanAddress(config.protocol, address);
+      const response = await this.enqueue(() =>
+        this.toolClient.readBoolean(config.ipAddress, toolAddress, 1),
+      );
+      const value = response.values[0];
+      if (typeof value !== 'boolean') {
+        throw new Error(`PLC returned no boolean value for ${key}`);
+      }
+      this.setFixedOutputState(key, value);
+    }
+  }
+
+  private setFixedOutputState(key: PlcFixedOutputKey, value: boolean | null) {
+    if (key === 'cameraPower') this.cameraPowerCommand = value;
+    if (key === 'cameraLight') this.cameraLightCommand = value;
+    if (key === 'waitingChecking') this.waitingCheckingCommand = value;
+  }
+
+  private clearFixedOutputStates() {
+    this.cameraPowerCommand = null;
+    this.cameraLightCommand = null;
+    this.waitingCheckingCommand = null;
   }
 
   private startWatchers(
@@ -628,6 +783,7 @@ export class PlcRuntimeService
       okResultAddress: config.okResultAddress,
       waitingCheckingAddress: config.waitingCheckingAddress,
       errorPulseDurationMs: config.errorPulseDurationMs,
+      okPulseDurationMs: config.okPulseDurationMs,
       sleepTimeSeconds: config.sleepTimeSeconds,
       customKeys: config.customKeys,
       createdAt: config.createdAt.toISOString(),
@@ -662,10 +818,7 @@ export class PlcRuntimeService
     this.state = state;
     this.connectedHost = null;
     this.connectedProtocol = null;
-    this.cameraPowerCommand = null;
-    this.cameraLightCommand = null;
-    this.okResultCommand = null;
-    this.waitingCheckingCommand = null;
+    this.clearFixedOutputStates();
     this.lastError = null;
     if (emitEvent) this.emit({ type: 'status', state });
   }

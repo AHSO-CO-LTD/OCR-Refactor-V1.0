@@ -12,7 +12,8 @@ still call the backend only; the backend calls the Tool through `/tool/v1`.
 
 1. User runs `AHSO-OCR-Setup-<version>-x64.exe`.
 2. NSIS requests administrator permission.
-3. Setup scans Node.js/npm, Python 3.11, and PostgreSQL on the customer PC.
+3. Setup scans Node.js/npm and PostgreSQL on the customer PC. Python 3.11 is
+   already embedded in the encrypted Device Tool.
 4. Setup shows the framework status summary:
    - if all frameworks are ready, setup tells the user that the PC already has
      all required frameworks.
@@ -33,7 +34,8 @@ still call the backend only; the backend calls the Tool through `/tool/v1`.
 12. Installer runs `resources/installer/bootstrap-installer.ps1`.
 13. Bootstrap creates `C:\ProgramData\AHSO OCR\.env`.
 14. Bootstrap installs Node dependencies.
-15. Bootstrap creates the Tool Python venv and installs `tool/requirements.txt`.
+15. Bootstrap installs `tool/requirements.txt` into `tool/python-embed` and
+    verifies that the compiled Tool can be imported.
 16. Bootstrap runs Prisma migrations.
 17. Bootstrap seeds roles, permissions, and the hidden `dev` support account.
 18. User opens the app and sees first-run admin creation when no active admin exists.
@@ -52,11 +54,47 @@ failure rollback.
 push tag vX.Y.Z
   -> GitHub Actions Windows runner
   -> npm ci
+  -> download the pinned encrypted Tool asset from its private repository
+  -> verify SHA-256 and compiled-module structure
   -> build backend/frontend/electron
   -> stage release-runtime
   -> electron-builder NSIS
   -> upload Setup.exe + latest.yml to GitHub Release
 ```
+
+The workflow exposes the repository Actions secret `TOOL_RELEASE_TOKEN` as
+`GH_TOKEN` only while preparing the runtime. This must be a fine-grained PAT
+with `Contents: Read` access to `AHSO-CO-LTD/API-Tool-v1`; the workflow's normal
+`GITHUB_TOKEN` is scoped to this application repository and cannot read another
+private repository.
+
+The pinned Tool release is configured in:
+
+```text
+scripts/release/private-tool-release.json
+```
+
+## Local Release Build
+
+Authenticate GitHub CLI with an account that can read the private Tool repo,
+then build normally:
+
+```powershell
+gh auth login
+gh auth status
+npm run release:win
+```
+
+For a local/offline bundle, bypass GitHub download with:
+
+```powershell
+$env:DEVICE_TOOL_BUNDLE_PATH = "C:\duyhai\AHSO\tool-2026.Jul.06.2"
+npm run release:win
+```
+
+The override accepts an extracted bundle directory or the exact release zip.
+The package structure is still validated. Zip overrides are also checked
+against the configured SHA-256.
 
 ## Env Rule
 
@@ -130,7 +168,7 @@ uninstall with no boxes checked.
   frameworks installed by setup are preserved.
 - Keep both: only the AHSO OCR app files and shortcuts are removed.
 
-For safety, the uninstaller removes Node.js, Python 3.11, and PostgreSQL only
+For safety, the uninstaller removes Node.js and PostgreSQL only
 when `C:\ProgramData\AHSO OCR\runtime-ownership.json` shows that the online
 setup installed them. Frameworks that already existed on the customer PC before
 setup are not removed automatically.
@@ -158,8 +196,9 @@ __pycache__/
 ```
 
 The installer bootstrap installs Node packages and Python requirements on the
-target PC during setup. The Device Tool runtime is Python 3.11 only; setup does
-not use any other Python version.
+target PC during setup. Python requirements are installed into the Python 3.11
+embedded runtime shipped inside the encrypted Device Tool; system Python is not
+required for this release.
 
 ## Online Environment Preflight
 
@@ -177,7 +216,8 @@ scripts/release/online-runtime-manifest.json
 Current scan checks:
 
 - Node.js and npm, with Node.js major version `>= 22`.
-- Python `3.11`.
+- Bundled encrypted Device Tool Python `3.11` (reported as ready without a
+  system-Python scan or download).
 - PostgreSQL client/server availability through `psql.exe`, with major version
   `>= 14`.
 - General internet access through stable connectivity endpoints only when setup
@@ -200,8 +240,8 @@ summary. The user must click Next before setup continues to the
 PostgreSQL/database configuration pages.
 
 The bootstrap step still verifies the runtime after files are copied and then
-installs app dependencies, the Tool virtual environment, Prisma migrations, and
-production seed data.
+installs app dependencies, Tool requirements into the embedded Python runtime,
+Prisma migrations, and production seed data.
 
 ## Product Preview Rotation Default
 

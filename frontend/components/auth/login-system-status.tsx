@@ -11,6 +11,7 @@ import {
 } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
 import { LICENSE_WATCHDOG_INTERVAL_MS } from "@/lib/use-license-watchdog";
+import { cn } from "@/lib/utils";
 
 export type LoginGateStatus = {
   checking: boolean;
@@ -19,6 +20,7 @@ export type LoginGateStatus = {
 };
 
 type Props = {
+  className?: string;
   onChange: (status: LoginGateStatus) => void;
 };
 
@@ -32,7 +34,7 @@ const initialSnapshot: StatusSnapshot = {
   license: null,
 };
 
-export function LoginSystemStatus({ onChange }: Props) {
+export function LoginSystemStatus({ className, onChange }: Props) {
   const { apiError, t } = useI18n();
   const [snapshot, setSnapshot] = useState<StatusSnapshot>(initialSnapshot);
   const [checking, setChecking] = useState(true);
@@ -95,9 +97,9 @@ export function LoginSystemStatus({ onChange }: Props) {
     snapshot.license?.donglePresent === true;
 
   return (
-    <div className="mt-5 border border-slate-200 bg-slate-50 p-3">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div>
+    <div className={cn("border border-slate-200 bg-slate-50 p-3", className)}>
+      <div className="login-status-header flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="min-w-0">
           <div className="text-sm font-semibold text-slate-950">
             {t("login.statusTitle")}
           </div>
@@ -124,7 +126,7 @@ export function LoginSystemStatus({ onChange }: Props) {
         </Button>
       </div>
 
-      <div className="mt-3 grid gap-2 sm:grid-cols-3">
+      <div className="login-status-grid mt-3 grid gap-2 sm:grid-cols-3">
         <StatusCell
           label={t("login.apiConnection")}
           value={
@@ -168,7 +170,7 @@ export function LoginSystemStatus({ onChange }: Props) {
         />
       </div>
 
-      <div className="mt-3 text-xs text-slate-500">
+      <div className="login-status-checked mt-3 break-words text-xs text-slate-500">
         {t("dashboard.lastChecked")}:{" "}
         {snapshot.license?.lastCheckedAt ?? t("dashboard.noData")}
       </div>
@@ -192,14 +194,14 @@ function StatusCell({
   tone: "ok" | "error" | "idle";
 }) {
   return (
-    <div className="border border-slate-200 bg-white px-3 py-2">
+    <div className="login-status-cell min-w-0 border border-slate-200 bg-white px-3 py-2">
       <div className="flex items-center justify-between gap-2">
         <span className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
           {label}
         </span>
         <span className={statusPillClass(tone)} />
       </div>
-      <div className="mt-2 text-sm font-semibold text-slate-950">{value}</div>
+      <div className="login-status-value mt-2 break-words text-sm font-semibold text-slate-950">{value}</div>
     </div>
   );
 }

@@ -366,6 +366,10 @@ function Find-Python {
 function Install-PythonIfNeeded {
   param([pscustomobject]$PythonConfig)
 
+  if ($PythonConfig.required -eq $false) {
+    return "bundled with encrypted Device Tool"
+  }
+
   $requiredMajor = [int]$PythonConfig.requiredMajor
   $requiredMinor = [int]$PythonConfig.requiredMinor
   $python = Find-Python -RequiredMajor $requiredMajor -RequiredMinor $requiredMinor
@@ -468,6 +472,14 @@ function Get-NodeRequirementStatus {
 
 function Get-PythonRequirementStatus {
   param([pscustomobject]$PythonConfig)
+
+  if ($PythonConfig.required -eq $false) {
+    return [pscustomobject]@{
+      ready = $true
+      status = "bundled with encrypted Device Tool"
+      missingLabel = ""
+    }
+  }
 
   $requiredMajor = [int]$PythonConfig.requiredMajor
   $requiredMinor = [int]$PythonConfig.requiredMinor

@@ -2307,12 +2307,13 @@ export function ProductProfileForm({
                 </CameraPreviewTransformLayer>
               </div>
 
-              <div className="mt-3 grid gap-2">
-                {roiRegions.map((region) => (
-                  <div
-                    key={region.index}
-                    className="grid grid-cols-[52px_repeat(5,minmax(0,1fr))_86px_48px_48px] gap-2"
-                  >
+              <div className="mt-3 overflow-x-auto pb-1">
+                <div className="grid min-w-[760px] gap-2">
+                  {roiRegions.map((region) => (
+                    <div
+                      key={region.index}
+                      className="grid grid-cols-[52px_repeat(5,minmax(0,1fr))_86px_48px_48px] gap-2"
+                    >
                     <div className="flex h-12 items-center border border-slate-200 px-3 text-base font-semibold">
                       {region.index}
                     </div>
@@ -2380,8 +2381,9 @@ export function ProductProfileForm({
                     >
                       <Trash2 className="h-4 w-4" aria-hidden="true" />
                     </Button>
-                  </div>
-                ))}
+                    </div>
+                  ))}
+                </div>
               </div>
             </section>
 

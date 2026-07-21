@@ -19,6 +19,7 @@ describe('PlcRuntimeService', () => {
     okResultAddress: 102,
     waitingCheckingAddress: 103,
     errorPulseDurationMs: 500,
+    okPulseDurationMs: 750,
     sleepTimeSeconds: 300,
     createdAt: new Date(),
     updatedAt: new Date(),
@@ -44,6 +45,11 @@ describe('PlcRuntimeService', () => {
     } as unknown as PrismaService;
     const writeBoolean = jest.fn().mockResolvedValue({});
     const disconnect = jest.fn().mockResolvedValue(null);
+    const readBoolean = jest
+      .fn()
+      .mockImplementation((_host: string, address: number) =>
+        Promise.resolve({ address, values: [false] }),
+      );
     const toolClient = {
       connect: jest.fn().mockResolvedValue({
         driver: 'modbus_tcp',
@@ -61,6 +67,7 @@ describe('PlcRuntimeService', () => {
             signal.addEventListener('abort', () => resolve());
           }),
       ),
+      readBoolean,
       writeBoolean,
       disconnect,
     } as unknown as PlcToolClient;
@@ -90,12 +97,6 @@ describe('PlcRuntimeService', () => {
     expect(writeBoolean).toHaveBeenNthCalledWith(
       3,
       config.ipAddress,
-      8294,
-      false,
-    );
-    expect(writeBoolean).toHaveBeenNthCalledWith(
-      4,
-      config.ipAddress,
       8295,
       false,
     );
@@ -105,6 +106,55 @@ describe('PlcRuntimeService', () => {
         (event) => event.type === 'status' && event.state === 'disconnected',
       ),
     ).toBe(false);
+  });
+
+  it('reads configured fixed output states after connect and status refresh', async () => {
+    const prisma = {
+      plcConfig: { findUnique: jest.fn().mockResolvedValue(config) },
+    } as unknown as PrismaService;
+    const values = new Map<number, boolean>([
+      [8195, true],
+      [8292, false],
+      [8295, false],
+    ]);
+    const readBoolean = jest
+      .fn()
+      .mockImplementation((_host: string, address: number) =>
+        Promise.resolve({ address, values: [values.get(address) ?? false] }),
+      );
+    const toolClient = {
+      connect: jest.fn().mockResolvedValue({
+        driver: 'modbus_tcp',
+        state: 'connected',
+      }),
+      status: jest.fn().mockResolvedValue({ state: 'connected' }),
+      readBoolean,
+      watchBoolean: jest.fn().mockImplementation(() => new Promise(() => {})),
+    } as unknown as PlcToolClient;
+    const service = new PlcRuntimeService(prisma, toolClient);
+
+    await expect(service.connect()).resolves.toMatchObject({
+      data: {
+        cameraPowerCommand: true,
+        cameraLightCommand: false,
+        waitingCheckingCommand: false,
+      },
+    });
+
+    values.set(8195, false);
+    values.set(8292, true);
+    values.set(8295, true);
+
+    await expect(service.getRuntimeStatus()).resolves.toMatchObject({
+      data: {
+        cameraPowerCommand: false,
+        cameraLightCommand: true,
+        waitingCheckingCommand: true,
+      },
+    });
+    expect(readBoolean).toHaveBeenCalledWith(config.ipAddress, 8195, 1);
+    expect(readBoolean).toHaveBeenCalledWith(config.ipAddress, 8292, 1);
+    expect(readBoolean).toHaveBeenCalledWith(config.ipAddress, 8295, 1);
   });
 
   it('skips fixed signals whose address is not configured', async () => {
@@ -125,6 +175,7 @@ describe('PlcRuntimeService', () => {
     } as unknown as PrismaService;
     const writeBoolean = jest.fn();
     const pulse = jest.fn();
+    const readBoolean = jest.fn();
     const watchBoolean = jest
       .fn()
       .mockImplementation(() => new Promise(() => {}));
@@ -135,6 +186,7 @@ describe('PlcRuntimeService', () => {
       }),
       status: jest.fn().mockResolvedValue({ state: 'connected' }),
       watchBoolean,
+      readBoolean,
       writeBoolean,
       pulse,
     } as unknown as PlcToolClient;
@@ -142,12 +194,84 @@ describe('PlcRuntimeService', () => {
 
     await service.connect();
     await service.setFixedOutput('cameraPower', true);
-    await service.setFixedOutput('okResult', true);
+    await service.pulseOkResult();
     await service.pulseError();
+    const startupSignals = await service.testStartupSignals();
 
     expect(watchBoolean).not.toHaveBeenCalled();
+    expect(readBoolean).not.toHaveBeenCalled();
     expect(writeBoolean).not.toHaveBeenCalled();
     expect(pulse).not.toHaveBeenCalled();
+    expect(startupSignals).toEqual({
+      data: {
+        status: 'skipped',
+        checks: [
+          { id: 'ngResult', status: 'skipped' },
+          { id: 'okResult', status: 'skipped' },
+          { id: 'waitingChecking', status: 'skipped' },
+          { id: 'captureTrigger', status: 'skipped' },
+          { id: 'stopTrigger', status: 'skipped' },
+          { id: 'startTrigger', status: 'skipped' },
+        ],
+      },
+    });
+  });
+
+  it('tests configured fixed result signals and leaves custom outputs untouched', async () => {
+    jest.useFakeTimers();
+    const prisma = {
+      plcConfig: { findUnique: jest.fn().mockResolvedValue(config) },
+    } as unknown as PrismaService;
+    const writeBoolean = jest.fn().mockResolvedValue({});
+    const pulse = jest.fn().mockResolvedValue({});
+    const toolClient = {
+      connect: jest.fn().mockResolvedValue({
+        driver: 'modbus_tcp',
+        state: 'connected',
+      }),
+      status: jest.fn().mockResolvedValue({ state: 'connected' }),
+      readBoolean: jest
+        .fn()
+        .mockImplementation((_host: string, address: number) =>
+          Promise.resolve({ address, values: [false] }),
+        ),
+      watchBoolean: jest.fn().mockImplementation(() => new Promise(() => {})),
+      writeBoolean,
+      pulse,
+    } as unknown as PlcToolClient;
+    const service = new PlcRuntimeService(prisma, toolClient);
+
+    try {
+      await service.connect();
+      const resultPromise = service.testStartupSignals();
+      await jest.advanceTimersByTimeAsync(700);
+      const result = await resultPromise;
+
+      expect(pulse).toHaveBeenNthCalledWith(1, config.ipAddress, 8293, 0.5);
+      expect(pulse).toHaveBeenNthCalledWith(2, config.ipAddress, 8294, 0.75);
+      expect(writeBoolean).toHaveBeenNthCalledWith(
+        1,
+        config.ipAddress,
+        8295,
+        true,
+      );
+      expect(writeBoolean).toHaveBeenNthCalledWith(
+        2,
+        config.ipAddress,
+        8295,
+        false,
+      );
+      expect(result.data.checks).toContainEqual({
+        id: 'custom:custom-1',
+        label: 'customOutput',
+        status: 'skipped',
+      });
+      expect(
+        result.data.checks.filter((check) => check.status === 'failed'),
+      ).toHaveLength(0);
+    } finally {
+      jest.useRealTimers();
+    }
   });
 
   it('automatically reconnects after saving PLC configuration', async () => {
@@ -173,6 +297,11 @@ describe('PlcRuntimeService', () => {
       connect,
       disconnect: jest.fn().mockResolvedValue(null),
       status: jest.fn().mockResolvedValue({ state: 'connected' }),
+      readBoolean: jest
+        .fn()
+        .mockImplementation((_host: string, address: number) =>
+          Promise.resolve({ address, values: [false] }),
+        ),
       watchBoolean: jest.fn().mockImplementation(() => new Promise(() => {})),
     } as unknown as PlcToolClient;
     const service = new PlcRuntimeService(prisma, toolClient);
@@ -190,6 +319,7 @@ describe('PlcRuntimeService', () => {
       okResultAddress: config.okResultAddress,
       waitingCheckingAddress: config.waitingCheckingAddress,
       errorPulseDurationMs: config.errorPulseDurationMs,
+      okPulseDurationMs: config.okPulseDurationMs,
       sleepTimeSeconds: config.sleepTimeSeconds,
       customKeys: config.customKeys.map((key) => ({
         name: key.name,

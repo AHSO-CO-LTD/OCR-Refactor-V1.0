@@ -182,8 +182,16 @@ describe('InspectionsService PLC capture', () => {
     const saved = await readFile(String(capturedLogs[0]?.imagePath));
     expect(saved).toEqual(Buffer.from('completed-frame'));
 
-    finishProcessingDetection(completedScan);
+    finishProcessingDetection({
+      ...completedScan,
+      results: [{ text: '', rows: [], error: null }],
+    });
     await inFlightDetection;
+
+    const unknownResult = await service.captureRunningInspectionFromPlc();
+    expect(unknownResult.latched).toBe(false);
+    expect(unknownResult.data.lastResult?.result).toBe('UNKNOWN');
+    expect(capturedLogs).toHaveLength(1);
   });
 
   it('rejects a PLC capture before any detection has completed', async () => {
@@ -194,7 +202,7 @@ describe('InspectionsService PLC capture', () => {
     const service = new InspectionsService(prisma, {} as DeviceToolService);
 
     await expect(service.captureRunningInspectionFromPlc()).rejects.toThrow(
-      'No completed detection is available for PLC capture',
+      'No completed detection is available to latch',
     );
     expect(findFirst).not.toHaveBeenCalled();
   });

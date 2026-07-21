@@ -5,8 +5,9 @@ import { usePathname, useRouter } from "next/navigation";
 import { ReactNode, useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { AccountMenu } from "@/components/account-menu";
+import { BrandLogo } from "@/components/brand/brand-logo";
 import { MachineRuntimeOverlay } from "@/components/plc/machine-runtime-overlay";
-import { ConfirmModal } from "@/components/ui/confirm-modal";
+import { useDesktopLifecycle } from "@/components/system/desktop-lifecycle-provider";
 import type { SessionUser, SystemLicenseState } from "@/lib/api";
 import {
   connectCamera,
@@ -22,14 +23,12 @@ import {
   getPostLoginRoute,
   isExpectedRuntimeCamera,
   selectOperatorStartupProduct,
-  shouldUseOperatorStartup,
 } from "@/lib/operator-startup-preferences";
 import {
   clearSession,
   getAccessToken,
   refreshSession,
 } from "@/lib/session";
-import { getDesktopBridge } from "@/lib/desktop";
 import { useLicenseWatchdog } from "@/lib/use-license-watchdog";
 
 type AppShellProps = {
@@ -40,24 +39,36 @@ type AppShellProps = {
 
 type NavGroupKey =
   | "navGroup.overview"
+  | "navGroup.operation"
   | "navGroup.management"
   | "navGroup.configuration"
   | "navGroup.inspection";
 
 const menuItems = [
-  { labelKey: "nav.dashboard", href: "/dashboard", permission: null, groupKey: "navGroup.overview" },
-  { labelKey: "nav.line", href: "/dashboard/line", permission: null, groupKey: "navGroup.overview" },
+  {
+    labelKey: "nav.dashboard",
+    href: "/dashboard",
+    permission: "dashboard.view",
+    groupKey: "navGroup.overview",
+  },
+  {
+    labelKey: "nav.line",
+    href: "/dashboard/line",
+    permission: null,
+    groupKey: "navGroup.operation",
+  },
   {
     labelKey: "nav.lineTest",
     href: "/dashboard/line-test",
     permission: "inspection.test",
-    groupKey: "navGroup.overview",
+    groupKey: "navGroup.operation",
   },
   {
     labelKey: "nav.lineAnimationTest",
     href: "/dashboard/line-animation-test",
     permission: "inspection.test",
-    groupKey: "navGroup.overview",
+    groupKey: "navGroup.operation",
+    hidden: true,
   },
   { labelKey: "nav.users", href: "/dashboard/users", permission: "user.manage", groupKey: "navGroup.management" },
   { labelKey: "nav.roles", href: "/dashboard/roles", permission: "role.manage", groupKey: "navGroup.management" },
@@ -84,10 +95,12 @@ const menuItems = [
   href: string;
   permission: string | string[] | null;
   groupKey: NavGroupKey;
+  hidden?: boolean;
 }>;
 
 const navGroups = [
   { labelKey: "navGroup.overview", groupKey: "navGroup.overview" },
+  { labelKey: "navGroup.operation", groupKey: "navGroup.operation" },
   { labelKey: "navGroup.management", groupKey: "navGroup.management" },
   { labelKey: "navGroup.configuration", groupKey: "navGroup.configuration" },
   { labelKey: "navGroup.inspection", groupKey: "navGroup.inspection" },
@@ -111,15 +124,11 @@ export function AppShell({ children }: AppShellProps) {
   const router = useRouter();
   const pathname = usePathname();
   const { t } = useI18n();
+  const { requestExit, requestRestart } = useDesktopLifecycle();
   const adminNavRef = useRef<HTMLDivElement | null>(null);
   const [user, setUser] = useState<SessionUser | null>(null);
   const [loading, setLoading] = useState(true);
   const [selectedAdminGroup, setSelectedAdminGroup] = useState<NavGroupKey | null>(null);
-  const [exitConfirmOpen, setExitConfirmOpen] = useState(false);
-  const [restartConfirmOpen, setRestartConfirmOpen] = useState(false);
-  const [shutdownLoading, setShutdownLoading] = useState(false);
-  const [shutdownMode, setShutdownMode] = useState<"exit" | "restart">("exit");
-  const [shutdownStatus, setShutdownStatus] = useState("");
   const handleLicenseLost = useCallback(
     (license: SystemLicenseState) => {
       silentlyDisconnectCamera(getAccessToken());
@@ -162,12 +171,6 @@ export function AppShell({ children }: AppShellProps) {
         const nextUser = response.data.user;
         refreshSession(token, nextUser);
         setUser(nextUser);
-
-        if (shouldUseOperatorStartup(nextUser) && pathname === "/dashboard") {
-          router.replace(getPostLoginRoute(nextUser));
-          return;
-        }
-
       })
       .catch(() => {
         clearSession();
@@ -175,18 +178,6 @@ export function AppShell({ children }: AppShellProps) {
       })
       .finally(() => setLoading(false));
   }, [pathname, router]);
-
-  useEffect(() => {
-    const bridge = getDesktopBridge();
-
-    if (!bridge) {
-      return;
-    }
-
-    return bridge.onShutdownStatus((message) => {
-      setShutdownStatus(message);
-    });
-  }, []);
 
   useEffect(() => {
     if (!user) {
@@ -232,83 +223,12 @@ export function AppShell({ children }: AppShellProps) {
     router.replace("/login");
   }
 
-  function handleExitApp() {
-    const bridge = getDesktopBridge();
-
-    if (!bridge) {
-      toast.warning(t("settings.desktopOnly"));
-      return;
-    }
-
-    setExitConfirmOpen(true);
-  }
-
-  function handleRestartApp() {
-    const bridge = getDesktopBridge();
-
-    if (!bridge) {
-      toast.warning(t("settings.desktopOnly"));
-      return;
-    }
-
-    setRestartConfirmOpen(true);
-  }
-
-  async function confirmExitApp() {
-    const bridge = getDesktopBridge();
-
-    if (!bridge) {
-      toast.warning(t("settings.desktopOnly"));
-      setExitConfirmOpen(false);
-      return;
-    }
-
-    setExitConfirmOpen(false);
-    setShutdownLoading(true);
-    setShutdownMode("exit");
-    setShutdownStatus(t("settings.shutdownPreparing"));
-    const toastId = toast.loading(t("settings.exiting"));
-
-    try {
-      await bridge.exitApp();
-    } catch {
-      toast.dismiss(toastId);
-      toast.error(t("settings.exitError"));
-      setShutdownLoading(false);
-      setShutdownStatus("");
-    }
-  }
-
-  async function confirmRestartApp() {
-    const bridge = getDesktopBridge();
-
-    if (!bridge) {
-      toast.warning(t("settings.desktopOnly"));
-      setRestartConfirmOpen(false);
-      return;
-    }
-
-    setRestartConfirmOpen(false);
-    setShutdownLoading(true);
-    setShutdownMode("restart");
-    setShutdownStatus(t("settings.restartPreparing"));
-    const toastId = toast.loading(t("settings.restarting"));
-
-    try {
-      await bridge.restartApp();
-    } catch {
-      toast.dismiss(toastId);
-      toast.error(t("settings.restartError"));
-      setShutdownLoading(false);
-      setShutdownStatus("");
-    }
-  }
-
   const visibleMenuItems = menuItems.filter(
-    (item) => user && canAccessMenuItem(item, user),
+    (item) => !item.hidden && user && canAccessMenuItem(item, user),
   );
   const canManageDesktopSettings = true;
   const usesSidebar = user?.role === "dev" || user?.role === "admin";
+  const showNavbar = !usesSidebar && visibleMenuItems.length > 1;
   const visibleAdminGroups = navGroups
     .map((group) => ({
       ...group,
@@ -400,15 +320,19 @@ export function AppShell({ children }: AppShellProps) {
     <main className="flex h-[100dvh] overflow-hidden bg-slate-100 text-slate-950">
       <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
         <header className="relative z-20 shrink-0 border-b border-slate-200 bg-white px-4 py-2 sm:px-5 lg:px-6">
-          <div className="flex min-h-12 flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-            <div className="min-w-0">
-              <div className="text-xs font-semibold uppercase tracking-[0.18em] text-cyan-700">
-                {t("app.brand")}
-              </div>
-              <div className="truncate text-lg font-semibold">{t("app.line")}</div>
+          <div className="grid min-h-12 min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-x-2 gap-y-2 min-[1180px]:grid-cols-[auto_minmax(0,1fr)_auto]">
+            <div className="col-start-1 row-start-1 flex min-w-0 shrink-0 items-center">
+              <BrandLogo
+                className="h-auto w-[clamp(120px,18vw,200px)] max-w-full"
+                priority
+                variant="factory"
+              />
             </div>
             {usesSidebar ? (
-              <div ref={adminNavRef} className="min-w-0 flex-1">
+              <div
+                ref={adminNavRef}
+                className="col-span-2 col-start-1 row-start-2 min-w-0 min-[1180px]:col-span-1 min-[1180px]:col-start-2 min-[1180px]:row-start-1"
+              >
                 <div className="overflow-x-auto">
                   <nav className="flex min-w-max items-center gap-2 sm:justify-center">
                     {visibleAdminGroups.map((group) => {
@@ -483,20 +407,20 @@ export function AppShell({ children }: AppShellProps) {
                   </div>
                 ) : null}
               </div>
-            ) : (
-              <div className="min-w-0 flex-1 overflow-x-auto">
+            ) : showNavbar ? (
+              <div className="col-span-2 col-start-1 row-start-2 min-w-0 overflow-x-auto min-[1180px]:col-span-1 min-[1180px]:col-start-2 min-[1180px]:row-start-1">
                 <div className="flex min-w-max items-center gap-2 px-0 sm:justify-center">
                   {navLinks}
                 </div>
               </div>
-            )}
-            <div className="flex min-w-0 flex-wrap items-center gap-3 text-sm sm:justify-end lg:gap-4">
+            ) : null}
+            <div className="col-start-2 row-start-1 flex min-w-0 items-center justify-end text-sm min-[1180px]:col-start-3">
               <AccountMenu
                 canManageDesktopSettings={canManageDesktopSettings}
                 donglePresent={license?.licensed === true && license.donglePresent === true}
-                onExitApp={handleExitApp}
+                onExitApp={requestExit}
                 onLogout={handleLogout}
-                onRestartApp={handleRestartApp}
+                onRestartApp={requestRestart}
                 user={user}
               />
             </div>
@@ -505,11 +429,13 @@ export function AppShell({ children }: AppShellProps) {
 
         {usesSidebar ? (
           <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
-            <div className="flex min-h-0 min-w-0 flex-col">
+            <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
               <section
                 className={[
-                  "min-h-0 min-w-0 flex-1 overflow-x-hidden p-4 sm:p-5 lg:p-5 xl:p-6",
-                  isOperatorLinePage ? "overflow-y-hidden" : "overflow-y-auto",
+                  "min-h-0 min-w-0 flex-1 overflow-x-hidden",
+                  isOperatorLinePage
+                    ? "overflow-y-hidden p-2 sm:p-3 xl:p-4"
+                    : "overflow-y-auto p-3 sm:p-4 lg:p-5 xl:p-6",
                   isConfigurationPage ? "[scrollbar-gutter:stable]" : "",
                 ].join(" ")}
               >
@@ -521,8 +447,10 @@ export function AppShell({ children }: AppShellProps) {
           <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
             <section
               className={[
-                "min-h-0 min-w-0 flex-1 overflow-x-hidden p-4 sm:p-5 lg:p-6",
-                isOperatorLinePage ? "overflow-y-hidden" : "overflow-y-auto",
+                "min-h-0 min-w-0 flex-1 overflow-x-hidden",
+                isOperatorLinePage
+                  ? "overflow-y-hidden p-2 sm:p-3 xl:p-4"
+                  : "overflow-y-auto p-3 sm:p-4 lg:p-6",
                 isConfigurationPage ? "[scrollbar-gutter:stable]" : "",
               ].join(" ")}
             >
@@ -530,40 +458,6 @@ export function AppShell({ children }: AppShellProps) {
             </section>
           </div>
         )}
-        <ConfirmModal
-          open={exitConfirmOpen}
-          title={t("settings.exitConfirmTitle")}
-          description={t("settings.exitConfirmDescription")}
-          confirmLabel={t("settings.exitConfirm")}
-          cancelLabel={t("common.cancel")}
-          destructive
-          onConfirm={confirmExitApp}
-          onCancel={() => setExitConfirmOpen(false)}
-        />
-        <ConfirmModal
-          open={restartConfirmOpen}
-          title={t("settings.restartConfirmTitle")}
-          description={t("settings.restartConfirmDescription")}
-          confirmLabel={t("settings.restartConfirm")}
-          cancelLabel={t("common.cancel")}
-          onConfirm={confirmRestartApp}
-          onCancel={() => setRestartConfirmOpen(false)}
-        />
-        {shutdownLoading ? (
-          <ShutdownOverlay
-            detail={formatShutdownStatus(shutdownStatus, t)}
-            title={
-              shutdownMode === "restart"
-                ? t("settings.restartTitle")
-                : t("settings.shutdownTitle")
-            }
-            description={
-              shutdownMode === "restart"
-                ? t("settings.restartDescription")
-                : t("settings.shutdownDescription")
-            }
-          />
-        ) : null}
         <MachineRuntimeOverlay
           enabled={
             user?.isDev === true ||
@@ -574,81 +468,6 @@ export function AppShell({ children }: AppShellProps) {
       </div>
     </main>
   );
-}
-
-function ShutdownOverlay({
-  description,
-  detail,
-  title,
-}: {
-  description: string;
-  detail: string;
-  title: string;
-}) {
-  return (
-    <div
-      className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/70 px-4 text-slate-950"
-      role="status"
-      aria-live="polite"
-      aria-busy="true"
-    >
-      <section className="w-full max-w-lg border border-slate-200 bg-white p-6">
-        <div className="flex items-start gap-4">
-          <div className="mt-1 h-9 w-9 shrink-0 animate-spin border-2 border-slate-300 border-t-cyan-700" />
-          <div className="min-w-0">
-            <h2 className="text-lg font-semibold">{title}</h2>
-            <p className="mt-2 text-sm leading-6 text-slate-600">{description}</p>
-            <p className="mt-4 border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-medium text-slate-700">
-              {detail}
-            </p>
-          </div>
-        </div>
-      </section>
-    </div>
-  );
-}
-
-function formatShutdownStatus(
-  status: string,
-  t: (key: string) => string,
-) {
-  if (status.includes("Preparing shutdown")) {
-    return t("settings.shutdownPreparing");
-  }
-
-  if (status.includes("Restarting app")) {
-    return t("settings.restartPreparing");
-  }
-
-  if (status.includes("frontend: stopping")) {
-    return t("settings.shutdownFrontendStopping");
-  }
-
-  if (status.includes("frontend: stopped")) {
-    return t("settings.shutdownFrontendStopped");
-  }
-
-  if (status.includes("backend: stopping")) {
-    return t("settings.shutdownBackendStopping");
-  }
-
-  if (status.includes("backend: stopped")) {
-    return t("settings.shutdownBackendStopped");
-  }
-
-  if (status.includes("device-tool: stopping")) {
-    return t("settings.shutdownToolStopping");
-  }
-
-  if (status.includes("device-tool: stopped")) {
-    return t("settings.shutdownToolStopped");
-  }
-
-  if (status.includes("Shutdown complete")) {
-    return t("settings.shutdownComplete");
-  }
-
-  return status || t("settings.shutdownPreparing");
 }
 
 function isActivePath(pathname: string, href: string) {

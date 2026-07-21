@@ -3,26 +3,20 @@ import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { createConnection } from "node:net";
 import { dirname, join } from "node:path";
+import type {
+  StartupHardwareStageId,
+  StartupHardwareStageUpdate,
+  StartupServiceStageId,
+  StartupServiceStageUpdate,
+  StartupStageDetail,
+  StartupStageStatus,
+} from "./startup-types";
 
 export type LocalServiceName = "backend" | "device-tool" | "frontend";
-
-export type StartupHardwareStageId =
-  | "plc"
-  | "cameraPower"
-  | "cameraLight"
-  | "camera";
-
-export type StartupHardwareStageStatus =
-  | "pending"
-  | "running"
-  | "done"
-  | "skipped"
-  | "failed";
-
-export type StartupHardwareStageUpdate = {
-  id: StartupHardwareStageId;
-  status: StartupHardwareStageStatus;
-};
+export type {
+  StartupHardwareStageUpdate,
+  StartupServiceStageUpdate,
+} from "./startup-types";
 
 type LocalServiceDefinition = {
   command: string;
@@ -125,15 +119,43 @@ function isValidPort(port: number) {
   return Number.isInteger(port) && port > 0 && port <= 65535;
 }
 
+function toStartupServiceStageId(
+  serviceName: LocalServiceName,
+): StartupServiceStageId {
+  if (serviceName === "device-tool") return "deviceTool";
+  return serviceName;
+}
+
 export class ServiceManager {
   private readonly services: ManagedService[];
   private readonly desktopInternalToken = randomUUID();
   private backendMigrationsReady = false;
   private logListener: ((message: string) => void) | null = null;
   private watchdogTimer: NodeJS.Timeout | null = null;
+  private readonly startupServiceStages = new Map<
+    StartupServiceStageId,
+    StartupStageStatus
+  >([
+    ["deviceTool", "pending"],
+    ["database", "pending"],
+    ["backend", "pending"],
+    ["frontend", "pending"],
+  ]);
+  private startupStageListener:
+    | ((stage: StartupServiceStageUpdate) => void)
+    | null = null;
+  private startupHardwarePromise: Promise<{
+    stages: StartupHardwareStageUpdate[];
+  }> | null = null;
+  private startupHardwareAttempt = 0;
 
   constructor(repoRoot: string) {
     const toolPython = resolveToolPython(repoRoot);
+    const deviceToolCommand = resolveDeviceToolCommand(
+      repoRoot,
+      toolPython,
+      DEFAULT_PORTS["device-tool"],
+    );
     const backendCommand = resolveBackendCommand(repoRoot);
     const frontendPath = join(repoRoot, "frontend");
     const frontendCommand = resolveFrontendCommand(
@@ -145,9 +167,9 @@ export class ServiceManager {
     this.services = [
       {
         name: "device-tool",
-        command: toolPython.command,
-        args: [...toolPython.args, "main.py"],
-        cwd: join(repoRoot, "tool"),
+        command: deviceToolCommand.command,
+        args: deviceToolCommand.args,
+        cwd: deviceToolCommand.cwd,
         healthUrl: `http://127.0.0.1:${DEFAULT_PORTS["device-tool"]}${DEVICE_TOOL_HEALTH_PATH}`,
         port: DEFAULT_PORTS["device-tool"],
         lastRestartAt: 0,
@@ -193,12 +215,69 @@ export class ServiceManager {
     ];
   }
 
-  async startAll(onStatus: (message: string) => void) {
-    for (const service of this.services) {
-      await this.ensureService(service, onStatus);
+  async startAll<T = void>(
+    onStatus: (message: string) => void,
+    onStage?: (stage: StartupServiceStageUpdate) => void,
+    onBackendReady?: () => Promise<T>,
+  ): Promise<T | undefined> {
+    this.startupStageListener = onStage ?? null;
+    const startService = async (service: ManagedService) => {
+      const stageId = toStartupServiceStageId(service.name);
+      this.updateStartupServiceStage(stageId, "running");
+      try {
+        await this.ensureService(service, onStatus);
+        this.updateStartupServiceStage(stageId, "done");
+      } catch (error) {
+        if (
+          service.name === "backend" &&
+          this.startupServiceStages.get("database") === "running"
+        ) {
+          this.updateStartupServiceStage("database", "failed");
+        }
+        this.updateStartupServiceStage(stageId, "failed");
+        throw error;
+      }
+    };
+
+    const deviceTool = this.services.find(
+      (service) => service.name === "device-tool",
+    );
+    const backend = this.services.find((service) => service.name === "backend");
+    const frontend = this.services.find(
+      (service) => service.name === "frontend",
+    );
+    if (!deviceTool || !backend || !frontend) {
+      throw new Error("Desktop service configuration is incomplete");
     }
 
+    const infrastructure = await Promise.allSettled([
+      startService(deviceTool),
+      startService(backend),
+    ]);
+    const infrastructureFailure = infrastructure.find(
+      (result): result is PromiseRejectedResult => result.status === "rejected",
+    );
+    if (infrastructureFailure) throw infrastructureFailure.reason;
+
+    const frontendOperation = startService(frontend);
+    const backendReadyOperation = onBackendReady?.();
+    const remaining = await Promise.allSettled([
+      frontendOperation,
+      ...(backendReadyOperation ? [backendReadyOperation] : []),
+    ]);
+    const remainingFailure = remaining.find(
+      (result): result is PromiseRejectedResult => result.status === "rejected",
+    );
+    if (remainingFailure) throw remainingFailure.reason;
+
     this.startWatchdog();
+    return backendReadyOperation
+      ? (remaining[1] as PromiseFulfilledResult<T>).value
+      : undefined;
+  }
+
+  getStartupServiceStages(): StartupServiceStageUpdate[] {
+    return [...this.startupServiceStages].map(([id, status]) => ({ id, status }));
   }
 
   getFrontendUrl() {
@@ -208,7 +287,51 @@ export class ServiceManager {
     return `http://127.0.0.1:${frontend?.port ?? DEFAULT_PORTS.frontend}/`;
   }
 
-  async prepareStartupHardware(
+  getBackendUrl() {
+    const backend = this.services.find((service) => service.name === "backend");
+    return `http://127.0.0.1:${backend?.port ?? DEFAULT_PORTS.backend}/api/`;
+  }
+
+  prepareStartupHardware(
+    preferredProductId: string | undefined,
+    onStage: (stage: StartupHardwareStageUpdate) => void,
+  ) {
+    if (this.startupHardwarePromise) return this.startupHardwarePromise;
+    const attempt = ++this.startupHardwareAttempt;
+    const emitCurrentAttempt = (stage: StartupHardwareStageUpdate) => {
+      if (attempt === this.startupHardwareAttempt) onStage(stage);
+    };
+    const operation = this.performStartupHardwarePreparation(
+      preferredProductId,
+      emitCurrentAttempt,
+    );
+    this.startupHardwarePromise = operation.finally(() => {
+      if (attempt === this.startupHardwareAttempt) {
+        this.startupHardwarePromise = null;
+      }
+    });
+    return this.startupHardwarePromise;
+  }
+
+  async abortStartupHardware() {
+    this.startupHardwareAttempt += 1;
+    this.startupHardwarePromise = null;
+    const response = await fetch(
+      `http://127.0.0.1:${this.getServicePort("backend")}/api/internal/plc-runtime/startup/abort`,
+      {
+        method: "POST",
+        headers: {
+          "x-desktop-internal-token": this.desktopInternalToken,
+        },
+        signal: AbortSignal.timeout(15_000),
+      },
+    );
+    if (!response.ok) {
+      throw new Error((await response.text()) || `${response.status}`);
+    }
+  }
+
+  private async performStartupHardwarePreparation(
     preferredProductId: string | undefined,
     onStage: (stage: StartupHardwareStageUpdate) => void,
   ) {
@@ -225,22 +348,33 @@ export class ServiceManager {
         path: "startup/camera",
         body: preferredProductId ? { productId: preferredProductId } : {},
       },
+      { id: "plcSignals", path: "startup/plc-signals" },
     ];
     const results: StartupHardwareStageUpdate[] = [];
 
-    for (const stage of stages) {
+    const runStage = async (stage: (typeof stages)[number]) => {
       onStage({ id: stage.id, status: "running" });
       try {
         const response = await this.requestBackendStartupStage(
           stage.path,
           stage.body,
         );
+        const hasFailures = response.details?.some(
+          (detail) => detail.status === "failed",
+        );
         const result: StartupHardwareStageUpdate = {
           id: stage.id,
-          status: response.status === "skipped" ? "skipped" : "done",
+          status:
+            response.status === "skipped"
+              ? "skipped"
+              : hasFailures
+                ? "warning"
+                : "done",
+          details: response.details,
         };
         results.push(result);
         onStage(result);
+        return result;
       } catch (error) {
         const result: StartupHardwareStageUpdate = {
           id: stage.id,
@@ -252,8 +386,40 @@ export class ServiceManager {
           "backend",
           `startup ${stage.id} failed (${error instanceof Error ? error.message : String(error)})`,
         );
+        return result;
       }
+    };
+
+    const skipStage = (stage: (typeof stages)[number]) => {
+      const result: StartupHardwareStageUpdate = {
+        id: stage.id,
+        status: "skipped",
+      };
+      results.push(result);
+      onStage(result);
+    };
+
+    const [plcStage, powerStage, lightStage, cameraStage, signalsStage] = stages;
+    const plc = await runStage(plcStage);
+    if (plc.status !== "done") {
+      for (const stage of [powerStage, lightStage, cameraStage, signalsStage]) {
+        skipStage(stage);
+      }
+      return { stages: results };
     }
+
+    const cameraBranch = async () => {
+      const power = await runStage(powerStage);
+      if (power.status === "done") {
+        await runStage(lightStage);
+        await runStage(cameraStage);
+      } else {
+        skipStage(lightStage);
+        skipStage(cameraStage);
+      }
+    };
+
+    await Promise.all([cameraBranch(), runStage(signalsStage)]);
 
     return { stages: results };
   }
@@ -587,7 +753,7 @@ export class ServiceManager {
   ) {
     if (service.name === "device-tool") {
       throw new Error(
-        `device-tool must run on port ${DEFAULT_PORTS["device-tool"]} from tool/config.json; release that port and start again`,
+        `device-tool must run on configured port ${DEFAULT_PORTS["device-tool"]}; release that port and start again`,
       );
     }
 
@@ -690,6 +856,7 @@ export class ServiceManager {
         "database migration check skipped by BACKEND_AUTO_MIGRATE=false",
       );
       this.backendMigrationsReady = true;
+      this.updateStartupServiceStage("database", "skipped");
       return;
     }
 
@@ -699,10 +866,12 @@ export class ServiceManager {
         "database migration check skipped; Prisma schema not found",
       );
       this.backendMigrationsReady = true;
+      this.updateStartupServiceStage("database", "skipped");
       return;
     }
 
     onStatus("backend: checking database migrations");
+    this.updateStartupServiceStage("database", "running");
     this.emitLog("backend", "checking database migrations");
 
     const command = resolveNpmCommand([
@@ -736,6 +905,7 @@ export class ServiceManager {
     }
 
     this.backendMigrationsReady = true;
+    this.updateStartupServiceStage("database", "done");
     onStatus("backend: database migrations ready");
     this.emitLog("backend", "database migrations ready");
   }
@@ -911,9 +1081,23 @@ export class ServiceManager {
       throw new Error((await response.text()) || `${response.status}`);
     }
     const payload = (await response.json()) as {
-      data?: { status?: "done" | "skipped" };
+      data?: {
+        status?: "done" | "skipped";
+        checks?: StartupStageDetail[];
+      };
     };
-    return { status: payload.data?.status ?? "done" };
+    return {
+      status: payload.data?.status ?? "done",
+      details: payload.data?.checks,
+    };
+  }
+
+  private updateStartupServiceStage(
+    id: StartupServiceStageId,
+    status: StartupStageStatus,
+  ) {
+    this.startupServiceStages.set(id, status);
+    this.startupStageListener?.({ id, status });
   }
 
   private async getDeviceToolCleanupUrls(baseUrl: string) {
@@ -1117,6 +1301,35 @@ function resolveToolPython(repoRoot: string) {
   }
 
   return { command: "py", args: ["-3.11"] };
+}
+
+function resolveDeviceToolCommand(
+  repoRoot: string,
+  toolPython: { args: string[]; command: string },
+  port: number,
+): ServiceCommand {
+  const toolPath = join(repoRoot, "tool");
+
+  if (port === 8668) {
+    return {
+      command: toolPython.command,
+      args: [...toolPython.args, "main.py"],
+      cwd: toolPath,
+    };
+  }
+
+  const launchScript = [
+    "import os",
+    "os.environ.setdefault('DEVICE_API_HOME', os.getcwd())",
+    "import uvicorn",
+    `uvicorn.run('api.app:app', host='0.0.0.0', port=${port}, log_level='info', ws_ping_interval=None, ws_ping_timeout=None, ws_per_message_deflate=False)`,
+  ].join("; ");
+
+  return {
+    command: toolPython.command,
+    args: [...toolPython.args, "-c", launchScript],
+    cwd: toolPath,
+  };
 }
 
 function canRun(command: string, args: string[]) {

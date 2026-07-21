@@ -213,7 +213,7 @@ export function CameraImageViewer({
   return (
     <div
       ref={containerRef}
-      className="relative flex aspect-[3/1] min-h-[280px] touch-none items-center justify-center overflow-hidden bg-slate-950"
+      className="relative flex aspect-[3/1] min-h-[180px] w-full min-w-0 touch-none items-center justify-center overflow-hidden bg-slate-950 sm:min-h-[220px] xl:min-h-[280px]"
       onPointerDown={handlePointerDown}
       onPointerMove={handlePointerMove}
       onPointerUp={handlePointerUp}

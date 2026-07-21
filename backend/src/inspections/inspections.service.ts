@@ -59,6 +59,15 @@ type CompletedLineDetection = {
   scan: ProductFrameScan;
 };
 
+type RunningCameraFrame = {
+  jobId: string;
+  productId: string;
+  imageBase64: string;
+  width: number;
+  height: number;
+  capturedAt: string;
+};
+
 @Injectable()
 export class InspectionsService {
   private latestCompletedLineDetection: CompletedLineDetection | null = null;
@@ -263,34 +272,8 @@ export class InspectionsService {
   }
 
   async refreshLatestRunningInspection(signal?: AbortSignal) {
-    const job = await this.prisma.inspectionJob.findFirst({
-      where: { status: InspectionStatus.running },
-      orderBy: { createdAt: 'desc' },
-    });
-
-    if (!job) {
-      throw new BadRequestException(
-        'A running inspection job is required for continuous detection',
-      );
-    }
-
-    const product = await this.getActiveProductForScan(job.productId);
-    signal?.throwIfAborted();
-    await this.deviceToolService.ensureCameraReady(
-      this.toCameraProfile(product),
-      signal,
-    );
-    const frame = await this.deviceToolService.grabCameraFrame(
-      { encodeFormat: '.jpg', jpegQuality: 90 },
-      signal,
-    );
-    signal?.throwIfAborted();
-
-    if (!frame.image_base64) {
-      throw new BadRequestException(
-        'Continuous detection returned no camera frame',
-      );
-    }
+    const { frame, job, product } =
+      await this.grabRunningInspectionFrame(signal);
 
     const scan = await this.deviceToolService.inspectProductFrame(
       {
@@ -330,12 +313,12 @@ export class InspectionsService {
     };
   }
 
-  async captureRunningInspectionFromPlc(signal?: AbortSignal) {
+  async latchLatestRunningInspection(signal?: AbortSignal) {
     const completedDetection = this.latestCompletedLineDetection;
 
     if (!completedDetection) {
       throw new BadRequestException(
-        'No completed detection is available for PLC capture',
+        'No completed detection is available to latch',
       );
     }
 
@@ -349,6 +332,14 @@ export class InspectionsService {
       throw new BadRequestException(
         'The latest completed detection does not belong to the running job',
       );
+    }
+
+    const liveState = await this.buildLiveInspectionState(completedDetection);
+    const result = liveState.lastResult?.result;
+    const frame = this.toRuntimeFrame(completedDetection);
+
+    if (result !== InspectionResult.OK && result !== InspectionResult.NG) {
+      return { data: liveState, frame, latched: false };
     }
 
     const capturedAt = new Date();
@@ -375,11 +366,82 @@ export class InspectionsService {
       throw error;
     }
 
-    return { data: await this.buildInspectionState(job.id) };
+    return {
+      data: await this.buildInspectionState(job.id),
+      frame,
+      latched: true,
+    };
+  }
+
+  async captureAndLatchRunningInspection(signal?: AbortSignal) {
+    await this.refreshLatestRunningInspection(signal);
+    return this.latchLatestRunningInspection(signal);
+  }
+
+  async captureRunningFrame(signal?: AbortSignal) {
+    const { frame, job, product } =
+      await this.grabRunningInspectionFrame(signal);
+
+    return {
+      data: {
+        jobId: job.id,
+        productId: product.id,
+        imageBase64: frame.image_base64,
+        width: frame.width,
+        height: frame.height,
+        capturedAt: new Date().toISOString(),
+      } satisfies RunningCameraFrame,
+    };
+  }
+
+  async captureRunningInspectionFromPlc(signal?: AbortSignal) {
+    return this.latchLatestRunningInspection(signal);
   }
 
   clearLatestRunningInspection() {
     this.latestCompletedLineDetection = null;
+  }
+
+  private async grabRunningInspectionFrame(signal?: AbortSignal) {
+    const job = await this.prisma.inspectionJob.findFirst({
+      where: { status: InspectionStatus.running },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    if (!job) {
+      throw new BadRequestException(
+        'A running inspection job is required to capture a camera frame',
+      );
+    }
+
+    const product = await this.getActiveProductForScan(job.productId);
+    signal?.throwIfAborted();
+    await this.deviceToolService.ensureCameraReady(
+      this.toCameraProfile(product),
+      signal,
+    );
+    const frame = await this.deviceToolService.grabCameraFrame(
+      { encodeFormat: '.jpg', jpegQuality: 90 },
+      signal,
+    );
+    signal?.throwIfAborted();
+
+    if (!frame.image_base64) {
+      throw new BadRequestException('Camera returned no frame');
+    }
+
+    return { frame, job, product };
+  }
+
+  private toRuntimeFrame(detection: CompletedLineDetection) {
+    return {
+      jobId: detection.jobId,
+      productId: detection.productId,
+      imageBase64: detection.imageBase64,
+      width: detection.scan.image_width,
+      height: detection.scan.image_height,
+      capturedAt: detection.completedAt.toISOString(),
+    } satisfies RunningCameraFrame;
   }
 
   async verifyRunningInspectionCameraFrame() {

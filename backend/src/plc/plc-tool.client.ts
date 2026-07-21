@@ -78,6 +78,16 @@ export class PlcToolClient {
     });
   }
 
+  readBoolean(host: string, address: number, count = 1) {
+    return this.request<{ address: number; values: boolean[] }>(
+      `/comm/${encodeURIComponent(host)}/read_boolean`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ address, count }),
+      },
+    );
+  }
+
   writeBoolean(host: string, address: number, value: boolean) {
     return this.request<{ address: number; count: number }>(
       `/comm/${encodeURIComponent(host)}/write_boolean`,

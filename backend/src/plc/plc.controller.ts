@@ -3,6 +3,7 @@ import {
   Controller,
   Get,
   Param,
+  Patch,
   Post,
   Put,
   UseGuards,
@@ -20,6 +21,7 @@ import {
   SetPlcBooleanDto,
   UpdatePlcConfigDto,
 } from './dto/plc-config.dto';
+import { UpdateMachineRuntimeControlsDto } from './dto/machine-runtime.dto';
 import { PlcRuntimeService } from './plc-runtime.service';
 import { MachineRuntimeService } from './machine-runtime.service';
 
@@ -77,10 +79,10 @@ export class PlcController {
     return this.plcRuntime.setFixedOutput('cameraLight', dto.enabled);
   }
 
-  @Put('outputs/ok-result')
-  @RequirePermissions(PERMISSIONS.PLC_OPERATE)
-  setOkResult(@Body() dto: SetPlcBooleanDto) {
-    return this.plcRuntime.setFixedOutput('okResult', dto.enabled);
+  @Post('outputs/ok-pulse')
+  @RequireAnyPermission(PERMISSIONS.PLC_MANAGE, PERMISSIONS.PLC_OPERATE)
+  pulseOkResult() {
+    return this.plcRuntime.pulseOkResult();
   }
 
   @Put('outputs/waiting-checking')
@@ -115,6 +117,22 @@ export class PlcController {
     return this.machineRuntime.getStatus();
   }
 
+  @Get('machine/frame')
+  @RequirePermissions(PERMISSIONS.PLC_OPERATE)
+  @ApiOperation({ summary: 'Get the latest frame captured by machine runtime' })
+  getMachineFrame() {
+    return this.machineRuntime.getLatestFrame();
+  }
+
+  @Patch('machine/controls')
+  @RequirePermissions(PERMISSIONS.PLC_OPERATE)
+  @ApiOperation({
+    summary: 'Set manual/auto, live camera, and real-time AI controls',
+  })
+  updateMachineControls(@Body() dto: UpdateMachineRuntimeControlsDto) {
+    return this.machineRuntime.updateControls(dto);
+  }
+
   @Post('machine/start')
   @RequirePermissions(PERMISSIONS.PLC_OPERATE)
   @ApiOperation({
@@ -140,6 +158,15 @@ export class PlcController {
   })
   notifyManualLatch() {
     return this.machineRuntime.notifyManualLatch();
+  }
+
+  @Post('machine/grab')
+  @RequirePermissions(PERMISSIONS.PLC_OPERATE)
+  @ApiOperation({
+    summary: 'Run the manual Grab action without emitting a PLC result pulse',
+  })
+  grabManually() {
+    return this.machineRuntime.grabManually();
   }
 
   @Post('machine/resume')

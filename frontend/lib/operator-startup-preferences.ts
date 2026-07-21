@@ -19,7 +19,13 @@ export function shouldUseOperatorStartup(user?: SessionUser | null) {
 }
 
 export function getPostLoginRoute(user?: SessionUser | null) {
-  return shouldUseOperatorStartup(user) ? OPERATOR_STARTUP_ROUTE : "/dashboard";
+  if (shouldUseOperatorStartup(user)) {
+    return OPERATOR_STARTUP_ROUTE;
+  }
+
+  return user?.isDev || user?.permissions.includes("dashboard.view")
+    ? "/dashboard"
+    : OPERATOR_STARTUP_ROUTE;
 }
 
 export function getOperatorStartupPreferences() {

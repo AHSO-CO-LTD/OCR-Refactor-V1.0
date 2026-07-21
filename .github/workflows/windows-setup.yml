@@ -28,7 +28,13 @@ jobs:
 
       - name: Prepare runtime
         shell: powershell
-        run: powershell -ExecutionPolicy Bypass -File ./scripts/release/prepare-runtime.ps1
+        env:
+          GH_TOKEN: ${{ secrets.TOOL_RELEASE_TOKEN }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:GH_TOKEN)) {
+            throw "Repository secret TOOL_RELEASE_TOKEN is required to download the encrypted private Tool release."
+          }
+          powershell -ExecutionPolicy Bypass -File ./scripts/release/prepare-runtime.ps1
 
       - name: Build setup artifact
         if: ${{ !startsWith(github.ref, 'refs/tags/v') }}

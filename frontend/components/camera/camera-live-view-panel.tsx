@@ -930,7 +930,7 @@ export function CameraLiveViewPanel({ configurationMode = false }: CameraLiveVie
           </div>
           <div className="flex flex-wrap items-center gap-2">
             {configurationMode ? (
-              <div className="min-w-[260px] flex-1 sm:flex-none">
+              <div className="w-full min-w-0 basis-full sm:w-auto sm:min-w-[260px] sm:basis-auto sm:flex-1 xl:flex-none">
                 <ListboxSelect
                   value={selectedProductId}
                   onChange={(productId) => void handleSelectProduct(productId)}

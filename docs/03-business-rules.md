@@ -107,6 +107,7 @@ Frontend hiding alone is never enough.
 
 ## Recommended Permission Categories
 
+- `dashboard.view`
 - `user.manage`
 - `role.manage`
 - `permission.manage`
@@ -135,3 +136,8 @@ Frontend hiding alone is never enough.
 - product change and parameter change should be versioned or logged
 - emergency overrides should be visible in history
 - locked users should be handled by attempt policy
+- Manual/Auto, live camera, and real-time AI are independent runtime controls.
+- Manual ignores PLC capture for production; Auto disables the app Grab action.
+- App Grab never emits an OK/NG pulse to PLC.
+- With AI off, a trigger can only capture a frame when live camera is off; it must not inspect, latch, change counters, or pulse PLC.
+- An aggregate `UNKNOWN` result must not be latched, counted, logged, or sent to PLC.

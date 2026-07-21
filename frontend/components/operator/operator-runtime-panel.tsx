@@ -1,24 +1,27 @@
 "use client";
 
+import { Minus, Package, Plus, Save } from "lucide-react";
 import {
-  Camera,
-  Minus,
-  Package,
-  Plus,
-  RotateCcw,
-  Save,
-  Settings2,
-  Video,
-  Zap,
-} from "lucide-react";
-import { KeyboardEvent, useEffect, useMemo, useRef, useState } from "react";
+  KeyboardEvent,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { toast } from "sonner";
+import { CameraConnectionOverlay } from "@/components/camera/camera-connection-overlay";
 import { useConnectedCameraPreview } from "@/components/camera/use-connected-camera-preview";
 import {
   OperatorRoiEditor,
   type OperatorRoiStatus,
 } from "@/components/operator/operator-roi-editor";
-import { Badge } from "@/components/ui/badge";
+import { OperatorRuntimeActions } from "@/components/operator/operator-runtime-actions";
+import {
+  OperatorAiStatus,
+  OperatorLiveCameraStatus,
+  OperatorModeStatus,
+} from "@/components/operator/operator-live-runtime-status";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -28,10 +31,10 @@ import {
   ApiError,
   beginInspectionSession,
   getCurrentInspection,
+  getMachineRuntimeFrame,
   getMachineRuntimeStatus,
+  grabMachineFrame,
   listProductProfiles,
-  notifyManualPlcLatch,
-  startInspection,
   startMachineOperation,
   stopMachineOperation,
   stopInspection,
@@ -42,6 +45,7 @@ import {
   type ProductProfile,
   type RoiRegion,
   updateProductBatchSize,
+  updateMachineRuntimeControls,
 } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
 import {
@@ -52,18 +56,11 @@ import {
   getRuntimeTestSettings,
   subscribeRuntimeTestSettings,
 } from "@/lib/runtime-test-settings";
-import { getAccessToken } from "@/lib/session";
+import { getAccessToken, getStoredUser } from "@/lib/session";
 
 type DataSource = "api" | "demo";
 type AnimationState = "UNKNOWN" | "CHECKING" | "WAITING_PLC" | "OK" | "NG";
-type RuntimeFrame = {
-  atMs: number;
-  regions: RoiRegion[];
-  statuses: Record<number, OperatorRoiStatus>;
-  labels?: Record<number, string>;
-};
 
-const detectDelayMs = 300;
 const plcDoneHoldMs = 750;
 const resultHoldMs = 1200;
 
@@ -110,6 +107,12 @@ function wait(ms: number) {
   return new Promise((resolve) => window.setTimeout(resolve, ms));
 }
 
+function toCameraImageSource(imageBase64: string) {
+  return imageBase64.startsWith("data:")
+    ? imageBase64
+    : `data:image/jpeg;base64,${imageBase64}`;
+}
+
 function getSlotLabel(slot: InspectionSlotState, fallback: string) {
   return slot.rawText?.trim() || slot.expectedText?.trim() || fallback;
 }
@@ -126,12 +129,16 @@ function getSlotFingerprint(slot: InspectionSlotState | undefined) {
 
 export function OperatorRuntimePanel() {
   const { apiError, t } = useI18n();
+  const operatorActionButtonsLocked = getStoredUser()?.role === "operator";
   const timersRef = useRef<number[]>([]);
+  const batchEditorRef = useRef<HTMLDivElement | null>(null);
   const currentJobIdRef = useRef("");
   const autoRunRef = useRef(false);
   const scanRunningRef = useRef(false);
   const lastPlcInspectionSequenceRef = useRef(0);
   const lastLiveInspectionSequenceRef = useRef(0);
+  const lastCameraFrameSequenceRef = useRef(0);
+  const runtimeDefaultsAppliedRef = useRef(false);
   const liveRoiFingerprintsRef = useRef<Record<number, string>>({});
   const liveRoiStatusesRef = useRef<Record<number, OperatorRoiStatus>>({});
   const liveRoiLabelsRef = useRef<Record<number, string>>({});
@@ -161,6 +168,15 @@ export function OperatorRuntimePanel() {
   const [changingProduct, setChangingProduct] = useState(false);
   const [scanRunning, setScanRunning] = useState(false);
   const [autoRunning, setAutoRunning] = useState(false);
+  const [machineRuntimeState, setMachineRuntimeState] =
+    useState<MachineRuntimeStatus["state"]>("inactive");
+  const [operationMode, setOperationMode] = useState<"manual" | "auto">(
+    "auto",
+  );
+  const [liveCameraEnabled, setLiveCameraEnabled] = useState(true);
+  const [realtimeAiEnabled, setRealtimeAiEnabled] = useState(true);
+  const [controlUpdating, setControlUpdating] = useState(false);
+  const [capturedPreviewImageSrc, setCapturedPreviewImageSrc] = useState("");
   const [animationState, setAnimationState] =
     useState<AnimationState>("UNKNOWN");
   const [activeRoiIndexes, setActiveRoiIndexes] = useState<number[]>([]);
@@ -173,6 +189,37 @@ export function OperatorRuntimePanel() {
   const [runtimeSettings, setRuntimeSettings] = useState(() =>
     getRuntimeTestSettings(),
   );
+
+  const runtimeControlsActive = ![
+    "stopping",
+    "idle_machine_stop",
+    "idle_capture_timeout",
+    "resuming",
+    "waiting_camera",
+    "restart_required",
+    "error",
+  ].includes(machineRuntimeState);
+  const effectiveLiveCameraEnabled =
+    runtimeControlsActive && liveCameraEnabled;
+  const effectiveRealtimeAiEnabled =
+    runtimeControlsActive && realtimeAiEnabled;
+
+  useEffect(() => {
+    if (!keypadOpen) {
+      return;
+    }
+
+    function handleOutsidePointerDown(event: PointerEvent) {
+      if (!batchEditorRef.current?.contains(event.target as Node)) {
+        setKeypadOpen(false);
+      }
+    }
+
+    window.addEventListener("pointerdown", handleOutsidePointerDown);
+    return () => {
+      window.removeEventListener("pointerdown", handleOutsidePointerDown);
+    };
+  }, [keypadOpen]);
 
   useEffect(() => {
     let cancelled = false;
@@ -318,11 +365,14 @@ export function OperatorRuntimePanel() {
   const {
     imageSrc: livePreviewImageSrc,
     connected: livePreviewConnected,
+    connectionStatus: livePreviewConnectionStatus,
+    reconnect: reconnectLivePreview,
     runtimeDeviceName: livePreviewRuntimeDeviceName,
   } = useConnectedCameraPreview(
     selectedProduct.camera.deviceName,
     dataSource === "api",
     dataSource === "api" ? selectedProduct.camera : undefined,
+    effectiveLiveCameraEnabled,
   );
 
   const safeBatchSize = Math.max(1, Number(batchSize) || 1);
@@ -330,6 +380,9 @@ export function OperatorRuntimePanel() {
   const overlayResult =
     animationState === "OK" || animationState === "NG" ? animationState : null;
   const runtimeActionsDisabled = loadingProducts || dataSource !== "api";
+  const previewImageSrc = effectiveLiveCameraEnabled
+    ? livePreviewImageSrc
+    : capturedPreviewImageSrc || livePreviewImageSrc;
 
   useEffect(() => {
     if (dataSource !== "api" || loadingProducts) {
@@ -437,7 +490,7 @@ export function OperatorRuntimePanel() {
 
       if (wasAutoRunning) {
         toast.info(t("operator.productChangedSessionRestarted"));
-        void startAutoInspection(nextProduct);
+        void ensureMachineOperation(nextProduct);
       }
     } finally {
       setChangingProduct(false);
@@ -608,155 +661,6 @@ export function OperatorRuntimePanel() {
       : "OK";
   }
 
-  function scheduleRuntimeFrames(
-    frames: RuntimeFrame[],
-    finalState: "OK" | "NG",
-    inspection: CurrentInspectionState,
-  ) {
-    clearTimers();
-
-    if (frames.length === 0) {
-      return false;
-    }
-
-    const visibleIndexes = new Set<number>();
-    const sessionStatuses: Record<number, OperatorRoiStatus> = {};
-    const sessionLabels: Record<number, string> = Object.fromEntries(
-      frames.flatMap((frame) =>
-        frame.regions.map((region) => [
-          region.index,
-          frame.labels?.[region.index] ?? selectedProduct.code,
-        ]),
-      ),
-    );
-
-    setAnimationState("UNKNOWN");
-    setRoiStatuses({});
-    setRoiDetectedTextLabels(sessionLabels);
-    setActiveRoiIndexes([]);
-
-    frames.forEach((frame) => {
-      const frameIndexes = new Set(frame.regions.map((region) => region.index));
-      const frameTimer = window.setTimeout(() => {
-        Array.from(visibleIndexes).forEach((index) => {
-          if (!frameIndexes.has(index)) {
-            visibleIndexes.delete(index);
-            delete sessionStatuses[index];
-            delete sessionLabels[index];
-          }
-        });
-
-        frame.regions.forEach((region) => {
-          const finalStatus = frame.statuses[region.index] ?? "NG";
-          const finalLabel = frame.labels?.[region.index];
-
-          visibleIndexes.add(region.index);
-          sessionStatuses[region.index] = "CHECKING";
-          sessionLabels[region.index] =
-            finalLabel ?? sessionLabels[region.index] ?? selectedProduct.code;
-
-          const resultTimer = window.setTimeout(() => {
-            sessionStatuses[region.index] = finalStatus;
-
-            if (finalLabel) {
-              sessionLabels[region.index] = finalLabel;
-            }
-
-            setRoiStatuses({ ...sessionStatuses });
-            setRoiDetectedTextLabels({ ...sessionLabels });
-          }, inspectionResultDelayMs);
-
-          timersRef.current.push(resultTimer);
-        });
-
-        setAnimationState("CHECKING");
-        setActiveRoiIndexes(Array.from(visibleIndexes));
-        setRoiStatuses({ ...sessionStatuses });
-        setRoiDetectedTextLabels({ ...sessionLabels });
-      }, frame.atMs);
-
-      timersRef.current.push(frameTimer);
-    });
-
-    const lastFrameEndAt =
-      Math.max(...frames.map((frame) => frame.atMs)) + inspectionResultDelayMs;
-    const waitPlcTimer = window.setTimeout(() => {
-      setAnimationState("WAITING_PLC");
-    }, lastFrameEndAt);
-    const plcDoneTimer = window.setTimeout(() => {
-      setAnimationState(finalState);
-      applyInspectionCounters(inspection);
-    }, lastFrameEndAt + plcDoneHoldMs);
-
-    timersRef.current.push(waitPlcTimer, plcDoneTimer);
-    return true;
-  }
-
-  async function playRuntimeFrames(
-    frames: RuntimeFrame[],
-    finalState: "OK" | "NG",
-    inspection: CurrentInspectionState,
-  ) {
-    const scheduled = scheduleRuntimeFrames(frames, finalState, inspection);
-
-    if (!scheduled) {
-      return false;
-    }
-
-    const lastFrameAt = Math.max(...frames.map((frame) => frame.atMs));
-    await wait(
-      lastFrameAt + inspectionResultDelayMs + plcDoneHoldMs + resultHoldMs,
-    );
-    return true;
-  }
-
-  async function playRejectedInspectionResult(
-    finalState: "UNKNOWN" | "NG",
-    inspection: CurrentInspectionState | null,
-  ) {
-    clearTimers();
-    setAnimationState("CHECKING");
-    setActiveRoiIndexes([]);
-    setRoiStatuses({});
-    setRoiDetectedTextLabels({});
-
-    await wait(inspectionResultDelayMs);
-    setAnimationState(finalState);
-    setActiveRoiIndexes([]);
-    setRoiStatuses({});
-    setRoiDetectedTextLabels({});
-
-    if (inspection) {
-      applyInspectionCounters(inspection);
-    }
-
-    await wait(resultHoldMs);
-    return true;
-  }
-
-  async function playInspectionResult(inspection: CurrentInspectionState) {
-    const animation = buildAnimationResult(inspection);
-
-    if (animation.regions.length === 0) {
-      return playRejectedInspectionResult("UNKNOWN", inspection);
-    }
-
-    const finalResult = resolveVisibleInspectionResult(inspection);
-
-    return playRuntimeFrames(
-      [
-        {
-          atMs: detectDelayMs,
-          regions: animation.regions,
-          statuses: animation.finalStatuses,
-          labels: animation.finalLabels,
-        },
-      ],
-      finalResult === "OK" ? "OK" : "NG",
-      inspection,
-    );
-  }
-
   async function playLatchedInspectionResult(
     inspection: CurrentInspectionState,
   ) {
@@ -786,86 +690,191 @@ export function OperatorRuntimePanel() {
     return true;
   }
 
-  async function runInspectionScan(
-    showToast = false,
-    productOverride?: ProductProfile,
-  ) {
+  async function ensureMachineOperation(productOverride?: ProductProfile) {
     const validated = validateRuntimeInputs(productOverride);
-
-    if (!validated || scanRunningRef.current) {
-      return false;
-    }
-
-    scanRunningRef.current = true;
-    setScanRunning(true);
-    setAnimationState("CHECKING");
-    setActiveRoiIndexes([]);
-    setRoiStatuses({});
-    setRoiDetectedTextLabels({});
-
-    try {
-      const session = await beginInspectionSession(
-        validated.accessToken,
-        validated.product.id,
-      );
-      currentJobIdRef.current = session.data.jobId;
-      await startMachineOperation(validated.accessToken);
-      const response = await startInspection(
-        validated.accessToken,
-        validated.product.id,
-      );
-      currentJobIdRef.current = response.data.jobId;
-      await playInspectionResult(response.data);
-
-      if (showToast) {
-        const result = resolveVisibleInspectionResult(response.data);
-        toast.success(t(`lineAnimationTest.state${result}`));
-      }
-
-      return true;
-    } catch (cause) {
-      const message =
-        cause instanceof ApiError
-          ? cause.message
-          : t("lineAnimationTest.realTestFailed");
-      await playRejectedInspectionResult("NG", null);
-      toast.error(message);
-      return false;
-    } finally {
-      await notifyManualPlcLatch(validated.accessToken).catch(() => undefined);
-      scanRunningRef.current = false;
-      setScanRunning(false);
-    }
-  }
-
-  async function startAutoInspection(productOverride?: ProductProfile) {
-    if (autoRunRef.current || scanRunningRef.current) {
-      return;
-    }
-
-    const validated = validateRuntimeInputs(productOverride);
-
-    if (!validated) {
-      return;
-    }
+    if (!validated) return null;
 
     try {
       const inspection = await beginInspectionSession(
         validated.accessToken,
         validated.product.id,
       );
-      await startMachineOperation(validated.accessToken);
+      const runtime = await startMachineOperation(validated.accessToken);
       currentJobIdRef.current = inspection.data.jobId;
       applyInspectionCounters(inspection.data);
       autoRunRef.current = true;
       setAutoRunning(true);
-      toast.success(t("operator.runStarted"));
+      setMachineRuntimeState(runtime.data.state);
+      return validated;
     } catch (cause) {
       const message =
         cause instanceof ApiError
           ? apiError(cause.message, "lineAnimationTest.realTestFailed")
           : t("lineAnimationTest.realTestFailed");
       toast.error(message);
+      return null;
+    }
+  }
+
+  const syncCapturedRuntimeFrame = useCallback(
+    async (accessToken: string, sequence: number) => {
+      if (sequence <= lastCameraFrameSequenceRef.current) return;
+      const response = await getMachineRuntimeFrame(accessToken);
+      const payload = response.data;
+
+      if (!payload || payload.sequence <= lastCameraFrameSequenceRef.current) {
+        return;
+      }
+
+      lastCameraFrameSequenceRef.current = payload.sequence;
+      if (payload.frame.productId !== selectedProductId) return;
+      setCapturedPreviewImageSrc(
+        toCameraImageSource(payload.frame.imageBase64),
+      );
+    },
+    [selectedProductId],
+  );
+
+  async function handleManualGrab() {
+    if (
+      scanRunningRef.current ||
+      operationMode !== "manual" ||
+      (liveCameraEnabled && !realtimeAiEnabled)
+    ) {
+      return;
+    }
+
+    const validated = await ensureMachineOperation();
+    if (!validated) return;
+
+    scanRunningRef.current = true;
+    setScanRunning(true);
+    if (realtimeAiEnabled) setAnimationState("CHECKING");
+
+    try {
+      const response = await grabMachineFrame(validated.accessToken);
+      await syncCapturedRuntimeFrame(
+        validated.accessToken,
+        response.data.cameraFrameSequence,
+      );
+
+      if (response.data.action === "latched" && response.data.inspection) {
+        await playLatchedInspectionResult(response.data.inspection);
+        const result = resolveVisibleInspectionResult(response.data.inspection);
+        toast.success(t(`lineAnimationTest.state${result}`));
+      } else if (response.data.action === "captured") {
+        toast.success(t("operator.frameCaptured"));
+      } else if (response.data.action === "unknown") {
+        setAnimationState("UNKNOWN");
+        toast.warning(t("operator.unknownIgnored"));
+      }
+    } catch (cause) {
+      const message =
+        cause instanceof ApiError
+          ? apiError(cause.message, "lineAnimationTest.realTestFailed")
+          : t("lineAnimationTest.realTestFailed");
+      toast.error(message);
+    } finally {
+      scanRunningRef.current = false;
+      setScanRunning(false);
+    }
+  }
+
+  function applyRuntimeControls(status: MachineRuntimeStatus) {
+    if (status.operationMode === "manual" || status.operationMode === "auto") {
+      setOperationMode(status.operationMode);
+    }
+    if (typeof status.liveCameraEnabled === "boolean") {
+      setLiveCameraEnabled(status.liveCameraEnabled);
+    }
+    if (typeof status.realtimeAiEnabled === "boolean") {
+      setRealtimeAiEnabled(status.realtimeAiEnabled);
+    }
+  }
+
+  async function changeOperationMode(nextMode: "manual" | "auto") {
+    if (controlUpdating || operationMode === nextMode) return;
+    const validated =
+      nextMode === "auto"
+        ? await ensureMachineOperation()
+        : validateRuntimeInputs();
+    if (!validated) return;
+
+    setControlUpdating(true);
+    try {
+      const response = await updateMachineRuntimeControls(
+        validated.accessToken,
+        { mode: nextMode },
+      );
+      applyRuntimeControls(response.data);
+      toast.success(
+        t(nextMode === "auto" ? "operator.autoEnabled" : "operator.manualEnabled"),
+      );
+    } catch (cause) {
+      toast.error(
+        cause instanceof ApiError
+          ? cause.message
+          : t("lineAnimationTest.realTestFailed"),
+      );
+    } finally {
+      setControlUpdating(false);
+    }
+  }
+
+  async function toggleLiveCamera() {
+    if (controlUpdating) return;
+    const validated = validateRuntimeInputs();
+    if (!validated) return;
+    const nextEnabled = !liveCameraEnabled;
+
+    setControlUpdating(true);
+    try {
+      const response = await updateMachineRuntimeControls(
+        validated.accessToken,
+        { liveCameraEnabled: nextEnabled },
+      );
+      applyRuntimeControls(response.data);
+      toast.success(
+        t(nextEnabled ? "operator.liveEnabled" : "operator.liveDisabled"),
+      );
+    } catch (cause) {
+      toast.error(
+        cause instanceof ApiError
+          ? cause.message
+          : t("lineAnimationTest.realTestFailed"),
+      );
+    } finally {
+      setControlUpdating(false);
+    }
+  }
+
+  async function toggleRealtimeAi() {
+    if (controlUpdating) return;
+    const nextEnabled = !realtimeAiEnabled;
+    const validated = nextEnabled
+      ? await ensureMachineOperation()
+      : validateRuntimeInputs();
+    if (!validated) return;
+
+    setControlUpdating(true);
+    try {
+      const response = await updateMachineRuntimeControls(
+        validated.accessToken,
+        { realtimeAiEnabled: nextEnabled },
+      );
+      applyRuntimeControls(response.data);
+      if (!nextEnabled) resetAnimationState();
+      toast.success(
+        t(nextEnabled ? "operator.aiEnabled" : "operator.aiDisabled"),
+      );
+    } catch (cause) {
+      toast.error(
+        cause instanceof ApiError
+          ? cause.message
+          : t("lineAnimationTest.realTestFailed"),
+      );
+    } finally {
+      setControlUpdating(false);
     }
   }
 
@@ -1040,12 +1049,30 @@ export function OperatorRuntimePanel() {
       if (!accessToken) return;
       requestRunning = true;
       try {
-        const response = await getMachineRuntimeStatus(accessToken);
+        const response = runtimeDefaultsAppliedRef.current
+          ? await getMachineRuntimeStatus(accessToken)
+          : await updateMachineRuntimeControls(accessToken, {
+              mode: "auto",
+              realtimeAiEnabled: true,
+            });
         if (!active) return;
+        runtimeDefaultsAppliedRef.current = true;
         const status = response.data;
+        const machineIsRunning = status.state === "running";
+        autoRunRef.current = machineIsRunning;
+        setAutoRunning(machineIsRunning);
+        setMachineRuntimeState(status.state);
+        applyRuntimeControls(status);
+        if (
+          status.liveCameraEnabled === false &&
+          typeof status.cameraFrameSequence === "number"
+        ) {
+          await syncCapturedRuntimeFrame(
+            accessToken,
+            status.cameraFrameSequence,
+          );
+        }
         if (!["inactive", "running"].includes(status.state)) {
-          autoRunRef.current = false;
-          setAutoRunning(false);
           scanRunningRef.current = false;
           setScanRunning(false);
           clearTimers();
@@ -1066,109 +1093,40 @@ export function OperatorRuntimePanel() {
       window.clearTimeout(initialId);
       window.clearInterval(intervalId);
     };
-  }, [dataSource]);
+  }, [dataSource, selectedProductId, syncCapturedRuntimeFrame]);
 
   const actionButtons = (
-    <>
-      <Button
-        type="button"
-        variant="outline"
-        disabled={runtimeActionsDisabled || scanRunning || autoRunning}
-        className="operator-line-action-button h-14 border-[#1e293b] bg-[#9fc3eb] text-base font-semibold text-slate-950 opacity-100 hover:bg-[#8fb8e6] disabled:opacity-70"
-        onClick={() => void runInspectionScan(true)}
-      >
-        <Camera className="h-5 w-5" />
-        {scanRunning ? t("lineAnimationTest.realTesting") : t("operator.grab")}
-      </Button>
-      <Button
-        type="button"
-        variant="outline"
-        className="operator-line-action-button h-14 border-[#1e293b] bg-[#9fc3eb] text-base font-semibold text-slate-950 opacity-100 hover:bg-[#8fb8e6]"
-        onClick={() =>
-          toast.info(
-            livePreviewConnected
-              ? t("operator.cameraOn")
-              : t("operator.cameraOff"),
-          )
-        }
-      >
-        <Video className="h-5 w-5" />
-        {t("operator.liveCamera")}
-      </Button>
-      <Button
-        type="button"
-        variant="outline"
-        disabled={runtimeActionsDisabled || scanRunning}
-        className={[
-          "operator-line-action-button h-14 border-[#1e293b] text-base font-semibold text-slate-950 opacity-100 hover:bg-[#8fb8e6] disabled:opacity-70",
-          autoRunning ? "bg-[#6fa3d9]" : "bg-[#9fc3eb]",
-        ].join(" ")}
-        onClick={() =>
-          autoRunning
-            ? void stopCurrentInspection(true)
-            : void startAutoInspection()
-        }
-      >
-        <Zap className="h-5 w-5" />
-        {autoRunning ? t("operator.stopLine") : t("operator.realTimeAi")}
-      </Button>
-      <Button
-        type="button"
-        variant="outline"
-        disabled={!autoRunning}
-        className="operator-line-action-button h-14 border-[#1e293b] bg-[#9fc3eb] text-base font-semibold text-slate-950 opacity-100 hover:bg-[#8fb8e6] disabled:opacity-70"
-        onClick={() => void stopCurrentInspection(true)}
-      >
-        <Settings2 className="h-5 w-5" />
-        {t("operator.manual")}
-      </Button>
-      <Button
-        type="button"
-        variant="outline"
-        disabled={runtimeActionsDisabled || autoRunning || scanRunning}
-        className="operator-line-action-button h-14 border-[#1e293b] bg-[#9fc3eb] text-base font-semibold text-slate-950 opacity-100 hover:bg-[#8fb8e6] disabled:opacity-70"
-        onClick={() => void startAutoInspection()}
-      >
-        <Settings2 className="h-5 w-5" />
-        {t("operator.auto")}
-      </Button>
-      <Button
-        type="button"
-        variant="outline"
-        className="operator-line-action-button h-14 border-[#1e293b] bg-[#9fc3eb] text-base font-semibold text-slate-950 hover:bg-[#8fb8e6]"
-        onClick={() => void resetCounters(true)}
-      >
-        <RotateCcw className="h-5 w-5" />
-        {t("operator.resetCounter")}
-      </Button>
-    </>
+    <OperatorRuntimeActions
+      actionsLocked={operatorActionButtonsLocked}
+      controlsDisabled={runtimeActionsDisabled}
+      controlUpdating={controlUpdating}
+      liveCameraEnabled={liveCameraEnabled}
+      operationMode={operationMode}
+      realtimeAiEnabled={realtimeAiEnabled}
+      runtimeControlsActive={runtimeControlsActive}
+      scanRunning={scanRunning}
+      onGrab={() => void handleManualGrab()}
+      onLiveCameraToggle={() => void toggleLiveCamera()}
+      onRealtimeAiToggle={() => void toggleRealtimeAi()}
+      onModeChange={(mode) => void changeOperationMode(mode)}
+      onResetCounter={() => void resetCounters(true)}
+    />
   );
 
   return (
-    <div className="grid h-full min-w-0 min-h-0 grid-rows-[auto_minmax(0,1fr)_auto] gap-3">
+    <div className="operator-line-runtime grid h-full min-w-0 min-h-0 grid-rows-[auto_minmax(0,1fr)_auto] gap-3">
       <Card className="operator-line-top-card border-[#86a8cf] bg-[#cfdff2] shadow-none">
         <CardContent className="operator-line-top-content grid gap-4 p-4 min-[980px]:grid-cols-[340px_minmax(0,1fr)]">
           <div className="operator-line-product-box rounded-sm border border-[#9db7d8] bg-[#d9e6f5] p-4">
-            <div className="mb-3 flex items-center justify-between gap-3">
-              <CardTitle className="flex items-center gap-2 text-xl font-bold text-slate-950">
+            <div className="operator-line-product-header mb-3 flex items-center justify-between gap-3">
+              <CardTitle className="operator-line-product-title flex items-center gap-2 text-xl font-bold text-slate-950">
                 <Package className="h-5 w-5 text-[#274d7d]" />
                 {t("operator.productToday")}
               </CardTitle>
-              <Badge
-                className={
-                  dataSource === "api"
-                    ? "border-[#8bb96d] bg-[#eef8e2] text-[#355f13]"
-                    : "border-[#d9a04f] bg-[#fff1d8] text-[#8a4b00]"
-                }
-              >
-                {dataSource === "api"
-                  ? t("operator.sourceApi")
-                  : t("operator.sourceDemo")}
-              </Badge>
             </div>
 
-            <div className="grid gap-3">
-              <div className="grid gap-2">
+            <div className="operator-line-product-form grid gap-3">
+              <div className="operator-line-product-field grid gap-2">
                 <label className="text-sm font-semibold text-[#274d7d]">
                   {t("products.code")}
                 </label>
@@ -1176,29 +1134,29 @@ export function OperatorRuntimePanel() {
                   aria-label={t("products.code")}
                   value={selectedProduct.id}
                   disabled={loadingProducts || scanRunning || changingProduct}
-                  className="h-11 border-[#9db7d8] bg-white text-base"
+                  className="operator-line-form-control h-11 border-[#9db7d8] bg-white text-base"
                   onChange={(event) =>
                     void handleProductChange(event.target.value)
                   }
                 >
                   {products.map((product) => (
                     <option key={product.id} value={product.id}>
-                      {product.code} - {product.name}
+                      {product.code}
                     </option>
                   ))}
                 </Select>
               </div>
 
-              <div className="grid gap-2">
+              <div className="operator-line-product-field grid gap-2">
                 <label className="text-sm font-semibold text-[#274d7d]">
                   {t("operator.packSize")}
                 </label>
-                <div className="relative grid gap-2">
-                  <div className="grid grid-cols-[56px_minmax(0,1fr)_56px] gap-2">
+                <div ref={batchEditorRef} className="relative grid gap-2">
+                  <div className="operator-line-pack-row grid grid-cols-[56px_minmax(0,1fr)_56px] gap-2">
                     <Button
                       type="button"
                       variant="outline"
-                      className="h-12 border-[#9db7d8] bg-white text-slate-950 hover:bg-slate-50"
+                      className="operator-line-form-control h-12 border-[#9db7d8] bg-white text-slate-950 hover:bg-slate-50"
                       onClick={() => adjustBatchDraft(-1)}
                     >
                       <Minus className="h-5 w-5" />
@@ -1208,9 +1166,9 @@ export function OperatorRuntimePanel() {
                       inputMode="numeric"
                       data-virtual-keyboard="off"
                       value={batchDraft}
-                      className="h-12 border-[#9db7d8] bg-white text-center text-lg font-semibold"
+                      className="operator-line-form-control h-12 border-[#9db7d8] bg-white text-center text-lg font-semibold"
                       onFocus={() => setKeypadOpen(true)}
-                      onClick={() => setKeypadOpen((current) => !current)}
+                      onClick={() => setKeypadOpen(true)}
                       onChange={(event) =>
                         handleBatchDraftChange(event.target.value)
                       }
@@ -1219,7 +1177,7 @@ export function OperatorRuntimePanel() {
                     <Button
                       type="button"
                       variant="outline"
-                      className="h-12 border-[#9db7d8] bg-white text-slate-950 hover:bg-slate-50"
+                      className="operator-line-form-control h-12 border-[#9db7d8] bg-white text-slate-950 hover:bg-slate-50"
                       onClick={() => adjustBatchDraft(1)}
                     >
                       <Plus className="h-5 w-5" />
@@ -1227,7 +1185,7 @@ export function OperatorRuntimePanel() {
                   </div>
                   <Button
                     type="button"
-                    className="h-12 border-[#274d7d] bg-[#274d7d] text-base text-white hover:bg-[#1f3d64]"
+                    className="operator-line-form-control operator-line-save-button h-12 border-[#274d7d] bg-[#274d7d] text-base text-white hover:bg-[#1f3d64]"
                     disabled={savingBatch || autoRunning || scanRunning}
                     onClick={() => void saveBatchSize()}
                   >
@@ -1313,8 +1271,36 @@ export function OperatorRuntimePanel() {
               roiCheckingLabel={t("lineAnimationTest.checkingBand")}
               roiTextAnimationMs={inspectionResultDelayMs}
               interactive={false}
-              previewImageSrc={livePreviewImageSrc}
+              previewImageSrc={previewImageSrc}
               showClock
+              clockLeadingContent={
+                <OperatorModeStatus
+                  active={runtimeControlsActive}
+                  operationMode={operationMode}
+                />
+              }
+              clockTrailingContent={
+                <OperatorAiStatus
+                  realtimeAiEnabled={effectiveRealtimeAiEnabled}
+                />
+              }
+              footerTrailingContent={
+                <OperatorLiveCameraStatus
+                  liveCameraEnabled={effectiveLiveCameraEnabled}
+                />
+              }
+              connectionOverlay={
+                dataSource === "api" ? (
+                  <CameraConnectionOverlay
+                    status={livePreviewConnectionStatus}
+                    deviceName={
+                      livePreviewRuntimeDeviceName ||
+                      selectedProduct.camera.deviceName
+                    }
+                    onReconnect={reconnectLivePreview}
+                  />
+                ) : undefined
+              }
             />
           </div>
         </div>

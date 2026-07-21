@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   connectCamera,
   DEFAULT_CAMERA_STREAM_JPEG_QUALITY,
@@ -13,11 +13,20 @@ import { getAccessToken } from "@/lib/session";
 
 type ConnectedCameraPreviewState = {
   connected: boolean;
+  connectionStatus: CameraPreviewConnectionStatus;
   imageSrc: string;
   matchesExpectedCamera: boolean;
   runtimeConnected: boolean;
   runtimeDeviceName: string;
 };
+
+export type CameraPreviewConnectionStatus =
+  | "idle"
+  | "connecting"
+  | "connected"
+  | "disconnected"
+  | "mismatch"
+  | "error";
 
 const STATUS_POLL_MS = 4000;
 
@@ -25,9 +34,11 @@ export function useConnectedCameraPreview(
   expectedDeviceName?: string,
   enabled = true,
   cameraProfile?: CameraProfile,
+  streamEnabled = true,
 ) {
   const [state, setState] = useState<ConnectedCameraPreviewState>({
     connected: false,
+    connectionStatus: enabled ? "connecting" : "idle",
     imageSrc: "",
     matchesExpectedCamera: false,
     runtimeConnected: false,
@@ -37,9 +48,64 @@ export function useConnectedCameraPreview(
   const imageUrlRef = useRef("");
   const accessTokenRef = useRef("");
   const ensuredProfileKeyRef = useRef("");
-  const profileKey = buildCameraProfileKey(cameraProfile);
+  const [reconnectAttempt, setReconnectAttempt] = useState(0);
+  const cameraIdentityKey = buildCameraIdentityKey(
+    cameraProfile,
+    expectedDeviceName,
+  );
+  const hardwareProfileKey = buildCameraHardwareProfileKey(cameraProfile);
+  const cameraProfileRef = useRef(cameraProfile);
+  const expectedDeviceNameRef = useRef(expectedDeviceName);
+  const hardwareProfileKeyRef = useRef(hardwareProfileKey);
+  const streamEnabledRef = useRef(streamEnabled);
+  const closeSocketRef = useRef<(clearImage?: boolean) => void>(() => undefined);
+  const syncStatusRef = useRef<() => Promise<void>>(async () => undefined);
 
   useEffect(() => {
+    cameraProfileRef.current = cameraProfile;
+    expectedDeviceNameRef.current = expectedDeviceName;
+    hardwareProfileKeyRef.current = hardwareProfileKey;
+  }, [cameraProfile, expectedDeviceName, hardwareProfileKey]);
+
+  useEffect(() => {
+    streamEnabledRef.current = streamEnabled;
+    if (!enabled) return;
+
+    if (!streamEnabled) {
+      closeSocketRef.current(false);
+      return;
+    }
+
+    void syncStatusRef.current();
+  }, [enabled, streamEnabled]);
+
+  const reconnect = useCallback(() => {
+    ensuredProfileKeyRef.current = "";
+
+    if (socketRef.current) {
+      const activeSocket = socketRef.current;
+      socketRef.current = null;
+      activeSocket.close();
+    }
+
+    if (imageUrlRef.current) {
+      URL.revokeObjectURL(imageUrlRef.current);
+      imageUrlRef.current = "";
+    }
+
+    setState({
+      connected: false,
+      connectionStatus: "connecting",
+      imageSrc: "",
+      matchesExpectedCamera: false,
+      runtimeConnected: false,
+      runtimeDeviceName: "",
+    });
+    setReconnectAttempt((current) => current + 1);
+  }, []);
+
+  useEffect(() => {
+    let active = true;
     accessTokenRef.current = getAccessToken() ?? "";
 
     function replaceImage(nextImageSrc: string) {
@@ -71,6 +137,7 @@ export function useConnectedCameraPreview(
       const resetTimer = window.setTimeout(() => {
         setState({
           connected: false,
+          connectionStatus: "idle",
           imageSrc: "",
           matchesExpectedCamera: false,
           runtimeConnected: false,
@@ -89,7 +156,11 @@ export function useConnectedCameraPreview(
     }
 
     function openSocket() {
-      if (!accessTokenRef.current || socketRef.current) {
+      if (
+        !accessTokenRef.current ||
+        !streamEnabledRef.current ||
+        socketRef.current
+      ) {
         return;
       }
 
@@ -102,40 +173,83 @@ export function useConnectedCameraPreview(
       socket.binaryType = "blob";
       socketRef.current = socket;
 
+      socket.onopen = () => {
+        if (!active || socketRef.current !== socket) {
+          return;
+        }
+
+        setState((current) => ({
+          ...current,
+          connectionStatus: current.matchesExpectedCamera
+            ? "connected"
+            : "mismatch",
+        }));
+      };
+
       socket.onmessage = (event) => {
-        if (typeof event.data === "string") {
+        if (!active || typeof event.data === "string") {
           return;
         }
 
         replaceImage(URL.createObjectURL(event.data as Blob));
+        setState((current) => ({
+          ...current,
+          connectionStatus: current.matchesExpectedCamera
+            ? "connected"
+            : "mismatch",
+        }));
       };
 
       socket.onclose = () => {
-        if (socketRef.current === socket) {
+        if (active && socketRef.current === socket) {
           socketRef.current = null;
+          replaceImage("");
+          setState((current) => ({
+            ...current,
+            connectionStatus: "disconnected",
+          }));
         }
       };
 
       socket.onerror = () => {
-        if (socketRef.current === socket) {
+        if (active && socketRef.current === socket) {
           socketRef.current = null;
+          replaceImage("");
+          setState((current) => ({
+            ...current,
+            connectionStatus: "error",
+          }));
+          socket.close();
         }
       };
     }
 
     async function ensureCameraProfile() {
-      if (!cameraProfile || ensuredProfileKeyRef.current === profileKey) {
+      const currentCameraProfile = cameraProfileRef.current;
+      const currentHardwareProfileKey = hardwareProfileKeyRef.current;
+
+      if (
+        !currentCameraProfile ||
+        ensuredProfileKeyRef.current === currentHardwareProfileKey
+      ) {
         return true;
       }
 
       try {
-        await connectCamera(accessTokenRef.current, cameraProfile);
-        ensuredProfileKeyRef.current = profileKey;
+        await connectCamera(accessTokenRef.current, currentCameraProfile);
+        if (!active) {
+          return false;
+        }
+        ensuredProfileKeyRef.current = currentHardwareProfileKey;
         return true;
       } catch {
+        if (!active) {
+          return false;
+        }
         ensuredProfileKeyRef.current = "";
         setState({
           connected: false,
+          connectionStatus: "error",
           imageSrc: "",
           matchesExpectedCamera: false,
           runtimeConnected: false,
@@ -150,6 +264,7 @@ export function useConnectedCameraPreview(
       if (!accessTokenRef.current) {
         setState({
           connected: false,
+          connectionStatus: "error",
           imageSrc: "",
           matchesExpectedCamera: false,
           runtimeConnected: false,
@@ -161,36 +276,55 @@ export function useConnectedCameraPreview(
 
       const cameraReady = await ensureCameraProfile();
 
-      if (!cameraReady) {
+      if (!active || !cameraReady) {
         return;
       }
 
       try {
         const status = await getCameraStatus(accessTokenRef.current);
+        if (!active) {
+          return;
+        }
         const connected = Boolean(status.data.connected);
         const runtimeDeviceName = String(status.data.device_name ?? "");
         const matchesExpectedCamera = isExpectedCamera(
           runtimeDeviceName,
-          expectedDeviceName,
+          expectedDeviceNameRef.current,
         );
 
         setState((current) => ({
           ...current,
           connected,
+          connectionStatus: connected
+            ? matchesExpectedCamera
+              ? !streamEnabledRef.current ||
+                socketRef.current?.readyState === WebSocket.OPEN
+                ? "connected"
+                : "connecting"
+              : "mismatch"
+            : "disconnected",
           matchesExpectedCamera,
           runtimeConnected: connected,
           runtimeDeviceName,
         }));
 
         if (connected) {
-          openSocket();
+          if (streamEnabledRef.current) {
+            openSocket();
+          } else {
+            closeSocket(false);
+          }
           return;
         }
 
         closeSocket();
       } catch {
+        if (!active) {
+          return;
+        }
         setState({
           connected: false,
+          connectionStatus: "error",
           imageSrc: "",
           matchesExpectedCamera: false,
           runtimeConnected: false,
@@ -200,41 +334,139 @@ export function useConnectedCameraPreview(
       }
     }
 
+    closeSocketRef.current = closeSocket;
+    syncStatusRef.current = syncStatus;
+
+    const connectingTimer = window.setTimeout(() => {
+      if (!active) {
+        return;
+      }
+
+      setState((current) => ({
+        ...current,
+        connected: false,
+        connectionStatus: "connecting",
+        imageSrc: "",
+        matchesExpectedCamera: false,
+        runtimeConnected: false,
+      }));
+    }, 0);
+
     void syncStatus();
     const intervalId = window.setInterval(() => {
       void syncStatus();
     }, STATUS_POLL_MS);
 
     return () => {
+      active = false;
+      closeSocketRef.current = () => undefined;
+      syncStatusRef.current = async () => undefined;
+      window.clearTimeout(connectingTimer);
       window.clearInterval(intervalId);
       closeSocket();
       if (imageUrlRef.current) {
         URL.revokeObjectURL(imageUrlRef.current);
       }
     };
-  }, [cameraProfile, enabled, expectedDeviceName, profileKey]);
+  }, [cameraIdentityKey, enabled, reconnectAttempt]);
 
-  return state;
+  useEffect(() => {
+    if (
+      !enabled ||
+      !cameraProfileRef.current ||
+      !hardwareProfileKey ||
+      ensuredProfileKeyRef.current === hardwareProfileKey ||
+      socketRef.current?.readyState !== WebSocket.OPEN
+    ) {
+      return;
+    }
+
+    let active = true;
+    const applyTimer = window.setTimeout(() => {
+      const accessToken = getAccessToken() ?? "";
+      const currentCameraProfile = cameraProfileRef.current;
+      const currentHardwareProfileKey = hardwareProfileKeyRef.current;
+
+      if (
+        !active ||
+        !accessToken ||
+        !currentCameraProfile ||
+        !currentHardwareProfileKey ||
+        socketRef.current?.readyState !== WebSocket.OPEN
+      ) {
+        return;
+      }
+
+      void connectCamera(accessToken, currentCameraProfile)
+        .then(() => {
+          if (active) {
+            ensuredProfileKeyRef.current = currentHardwareProfileKey;
+          }
+        })
+        .catch(() => {
+          if (!active) {
+            return;
+          }
+
+          ensuredProfileKeyRef.current = "";
+          if (socketRef.current) {
+            const activeSocket = socketRef.current;
+            socketRef.current = null;
+            activeSocket.close();
+          }
+          if (imageUrlRef.current) {
+            URL.revokeObjectURL(imageUrlRef.current);
+            imageUrlRef.current = "";
+          }
+          setState({
+            connected: false,
+            connectionStatus: "error",
+            imageSrc: "",
+            matchesExpectedCamera: false,
+            runtimeConnected: false,
+            runtimeDeviceName: "",
+          });
+        });
+    }, 0);
+
+    return () => {
+      active = false;
+      window.clearTimeout(applyTimer);
+    };
+  }, [enabled, hardwareProfileKey, state.connectionStatus]);
+
+  return { ...state, reconnect };
 }
 
-function buildCameraProfileKey(cameraProfile?: CameraProfile) {
+function buildCameraIdentityKey(
+  cameraProfile?: CameraProfile,
+  expectedDeviceName?: string,
+) {
+  if (!cameraProfile) {
+    return expectedDeviceName?.trim().toLowerCase() ?? "";
+  }
+
+  return [
+    cameraProfile.sourceType,
+    cameraProfile.cameraIdentityId
+      ? `identity:${cameraProfile.cameraIdentityId}`
+      : `device:${cameraProfile.deviceName?.trim().toLowerCase() ?? ""}`,
+    cameraProfile.rtspUrl?.trim().toLowerCase() ?? "",
+  ].join("|");
+}
+
+function buildCameraHardwareProfileKey(cameraProfile?: CameraProfile) {
   if (!cameraProfile) {
     return "";
   }
 
   return [
-    cameraProfile.cameraIdentityId ?? "",
-    cameraProfile.sourceType,
-    cameraProfile.deviceName ?? "",
+    buildCameraIdentityKey(cameraProfile),
     cameraProfile.exposure,
     cameraProfile.imageWidth,
     cameraProfile.imageHeight,
     cameraProfile.offsetX,
     cameraProfile.offsetY,
-    cameraProfile.zoomFactor,
-    cameraProfile.previewPanX,
-    cameraProfile.previewPanY,
-    cameraProfile.previewRotation,
   ].join("|");
 }
 

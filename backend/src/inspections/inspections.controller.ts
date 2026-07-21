@@ -167,6 +167,7 @@ export class InspectionsController {
   @ApiOperation({ summary: 'Get the current running inspection job' })
   @Get('current')
   @RequireAnyPermission(
+    PERMISSIONS.DASHBOARD_VIEW,
     PERMISSIONS.INSPECTION_START,
     PERMISSIONS.INSPECTION_STOP,
   )

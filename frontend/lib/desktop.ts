@@ -25,11 +25,58 @@ export type DesktopStartupHardwareStageId =
   | "plc"
   | "cameraPower"
   | "cameraLight"
-  | "camera";
+  | "camera"
+  | "plcSignals";
+
+export type DesktopStartupStageStatus =
+  | "pending"
+  | "running"
+  | "done"
+  | "warning"
+  | "skipped"
+  | "failed";
+
+export type DesktopStartupStageDetail = {
+  id: string;
+  label?: string;
+  status: "done" | "failed" | "skipped";
+  error?: string;
+};
 
 export type DesktopStartupHardwareStage = {
   id: DesktopStartupHardwareStageId;
-  status: "pending" | "running" | "done" | "skipped" | "failed";
+  status: DesktopStartupStageStatus;
+  details?: DesktopStartupStageDetail[];
+};
+
+export type DesktopStartupServiceStage = {
+  id: "deviceTool" | "database" | "backend" | "frontend";
+  status: DesktopStartupStageStatus;
+};
+
+export type DesktopStartupStage = {
+  id:
+    | DesktopStartupServiceStage["id"]
+    | DesktopStartupHardwareStageId
+    | "license";
+  status: DesktopStartupStageStatus;
+  details?: DesktopStartupStageDetail[];
+};
+
+export type DesktopStartupSnapshot = {
+  error: string | null;
+  language: "en" | "vi";
+  phase: "running" | "blocked" | "warning" | "finished";
+  stages: DesktopStartupStage[];
+};
+
+export type DesktopStartupLogContext = {
+  error?: string | null;
+  stages: Array<{
+    id: string;
+    status: DesktopStartupStageStatus;
+    details?: DesktopStartupStageDetail[];
+  }>;
 };
 
 export type DesktopBridge = {
@@ -41,23 +88,26 @@ export type DesktopBridge = {
   exitApp(): Promise<{ success: boolean }>;
   getTestStorageSettings(): Promise<DesktopTestStorageSettings>;
   getTerminalLogs(): Promise<string[]>;
+  getStartupSnapshot(): Promise<DesktopStartupSnapshot>;
+  exportStartupLog(
+    context?: DesktopStartupLogContext,
+  ): Promise<{ canceled: boolean; filePath: string | null }>;
+  getLanguagePreference(): Promise<"en" | "vi">;
   getWindowSettings(): Promise<DesktopWindowSettings>;
   installUpdate(): Promise<{ success: boolean }>;
   openTerminalWindow(): Promise<{ success: boolean }>;
-  prepareStartupHardware(
-    preferredProductId?: string,
-  ): Promise<{ stages: DesktopStartupHardwareStage[] }>;
   restartApp(): Promise<{ success: boolean }>;
+  setCloseConfirmationReady(ready: boolean): Promise<{ success: boolean }>;
+  setLanguagePreference(language: "en" | "vi"): Promise<"en" | "vi">;
   saveTestStorageSettings(
     settings: DesktopTestStorageSettings,
   ): Promise<DesktopTestStorageSettings>;
   selectFolder(): Promise<{ canceled: boolean; folderPath: string | null }>;
   selectModelFile(): Promise<{ canceled: boolean; filePath: string | null }>;
   onTerminalLog(callback: (message: string) => void): () => void;
+  onCloseRequested(callback: () => void): () => void;
   onShutdownStatus(callback: (message: string) => void): () => void;
-  onStartupHardwareStatus(
-    callback: (payload: DesktopStartupHardwareStage) => void,
-  ): () => void;
+  onStartupSnapshot(callback: (payload: DesktopStartupSnapshot) => void): () => void;
   onUpdateStatus(callback: (payload: Record<string, unknown>) => void): () => void;
   platform: string;
   versions: {

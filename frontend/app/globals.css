@@ -18,6 +18,113 @@ body {
   color: var(--foreground);
 }
 
+.login-page {
+  scrollbar-gutter: stable;
+}
+
+@media (max-width: 639px) {
+  .login-main {
+    justify-content: flex-start;
+    padding-block: 1rem;
+  }
+
+  .login-brand {
+    margin-bottom: 1rem;
+  }
+
+  .login-brand-logo {
+    height: 3rem;
+  }
+
+  .login-brand-title {
+    margin-top: 0.5rem;
+    font-size: 1.5rem;
+    line-height: 1.2;
+  }
+
+  .login-card-header {
+    padding: 1rem 1rem 0.75rem;
+  }
+
+  .login-card-content {
+    padding: 0 1rem 1rem;
+  }
+}
+
+@media (min-width: 640px) and (max-height: 820px) {
+  .login-layout {
+    padding-block: 0.5rem;
+  }
+
+  .login-startup-status {
+    padding: 0.625rem;
+  }
+
+  .login-startup-status .login-status-header {
+    gap: 0.5rem;
+  }
+
+  .login-startup-status .login-status-grid {
+    margin-top: 0.5rem;
+  }
+
+  .login-startup-status .login-status-cell {
+    padding: 0.375rem 0.625rem;
+  }
+
+  .login-startup-status .login-status-value {
+    margin-top: 0.25rem;
+  }
+
+  .login-startup-status .login-status-checked {
+    margin-top: 0.5rem;
+  }
+
+  .login-main {
+    justify-content: flex-start;
+    padding-block: 0.5rem;
+  }
+
+  .login-brand {
+    margin-bottom: 0.5rem;
+  }
+
+  .login-brand-logo {
+    height: 2.5rem;
+  }
+
+  .login-brand-title {
+    margin-top: 0.25rem;
+    font-size: 1.5rem;
+    line-height: 1.2;
+  }
+
+  .login-card-header {
+    padding: 0.75rem 1rem 0.5rem;
+  }
+
+  .login-card-content {
+    padding: 0 1rem 0.75rem;
+  }
+
+  .login-form-title {
+    font-size: 1.25rem;
+    line-height: 1.4;
+  }
+
+  .login-form-subtitle {
+    margin-top: 0.25rem;
+  }
+
+  .login-form-label {
+    margin-top: 0.75rem;
+  }
+
+  .login-submit {
+    margin-top: 1rem;
+  }
+}
+
 button:not(:disabled),
 [role="button"]:not([aria-disabled="true"]),
 summary,
@@ -212,7 +319,9 @@ input[type="radio"]:not(:disabled) {
   border-width: 0 var(--roi-border-width, 2px) var(--roi-border-width, 2px) 0;
 }
 
-.virtual-text-keyboard .simple-keyboard {
+.virtual-text-keyboard .simple-keyboard.hg-theme-default {
+  width: 100%;
+  padding: 0;
   background: transparent;
 }
 
@@ -222,39 +331,86 @@ input[type="radio"]:not(:disabled) {
 }
 
 .virtual-text-keyboard .hg-row {
-  display: grid;
-  grid-template-columns: repeat(10, minmax(0, 1fr));
+  display: flex;
   gap: 8px;
 }
 
-.virtual-text-keyboard .hg-button {
-  height: 48px;
-  border: 1px solid #cbd5e1;
+.virtual-text-keyboard .simple-keyboard.hg-theme-default .hg-button {
+  flex: 1 1 0 !important;
+  width: auto !important;
+  max-width: none !important;
+  min-width: 0;
+  height: 56px;
+  border: 1px solid #94a3b8 !important;
   border-radius: 0;
-  box-shadow: none;
-  background: #ffffff;
+  box-shadow: 0 1px 0 #cbd5e1 !important;
+  background: #ffffff !important;
   color: #0f172a;
   font-family: inherit;
   font-size: 16px;
   font-weight: 600;
+  touch-action: manipulation;
+  user-select: none;
 }
 
-.virtual-text-keyboard .hg-button:hover {
-  background: #f8fafc;
+.virtual-text-keyboard .simple-keyboard.hg-theme-default .hg-button:hover {
+  background: #f8fafc !important;
 }
 
-.virtual-text-keyboard .hg-button.hg-functionBtn {
-  background: #f8fafc;
+.virtual-text-keyboard .simple-keyboard.hg-theme-default .hg-button.hg-functionBtn,
+.virtual-text-keyboard .simple-keyboard.hg-theme-default .hg-button.vk-key--function {
+  flex-grow: 1.35 !important;
+  background: #e2e8f0 !important;
   font-size: 14px;
 }
 
-.virtual-text-keyboard .hg-button.hg-activeButton {
-  background: #dbeafe;
-  border-color: #38bdf8;
+.virtual-text-keyboard .simple-keyboard.hg-theme-default .hg-button.vk-key--space {
+  flex-grow: 2.25 !important;
+  background: #f8fafc !important;
+}
+
+.virtual-text-keyboard .simple-keyboard.hg-theme-default .hg-button.vk-key--enter {
+  flex-grow: 1.5 !important;
+  border-color: #0e7490 !important;
+  background: #0e7490 !important;
+  color: #ffffff;
+}
+
+.virtual-text-keyboard .simple-keyboard.hg-theme-default .hg-button:active,
+.virtual-text-keyboard .simple-keyboard.hg-theme-default .hg-button.hg-activeButton {
+  transform: translateY(1px);
+  border-color: #0891b2 !important;
+  background: #cffafe !important;
+  box-shadow: none !important;
+  color: #0f172a;
+}
+
+.virtual-text-keyboard .simple-keyboard.hg-theme-default .hg-button.vk-key--enter:active,
+.virtual-text-keyboard .simple-keyboard.hg-theme-default .hg-button.vk-key--enter.hg-activeButton {
+  border-color: #164e63 !important;
+  background: #155e75 !important;
+  color: #ffffff;
+}
+
+.virtual-text-keyboard .simple-keyboard.hg-theme-default .hg-button:focus-visible {
+  outline: 3px solid #67e8f9;
+  outline-offset: 1px;
 }
 
 .virtual-text-keyboard .hg-button span {
   pointer-events: none;
+}
+
+@media (max-width: 760px) {
+  .virtual-text-keyboard .hg-rows,
+  .virtual-text-keyboard .hg-row {
+    gap: 6px;
+  }
+
+  .virtual-text-keyboard .simple-keyboard.hg-theme-default .hg-button {
+    height: 48px;
+    font-size: 14px;
+  }
 }
 
 .operator-roi-scan-glow {
@@ -423,137 +579,261 @@ input[type="radio"]:not(:disabled) {
   color: #111827;
 }
 
+.operator-line-runtime {
+  container-name: operator-runtime;
+  container-type: size;
+  gap: clamp(0.375rem, 1.2dvh, 0.75rem);
+}
+
+.operator-line-top-card {
+  max-height: min(43cqh, 18rem);
+  min-height: 0;
+  overflow: visible;
+}
+
+.operator-line-top-card .operator-line-top-content {
+  gap: clamp(0.375rem, 1.25cqh, 0.75rem);
+  padding: clamp(0.5rem, 1.5cqh, 1rem);
+}
+
+.operator-line-top-card .operator-line-product-box {
+  padding: clamp(0.5rem, 1.4cqh, 0.875rem);
+}
+
+.operator-line-product-header {
+  margin-bottom: clamp(0.375rem, 1.1cqh, 0.75rem);
+  gap: clamp(0.375rem, 1cqh, 0.75rem);
+}
+
+.operator-line-product-title {
+  gap: clamp(0.375rem, 0.9cqh, 0.5rem);
+  font-size: clamp(0.875rem, 2.1cqh, 1.25rem);
+  line-height: 1.15;
+}
+
+.operator-line-product-title svg {
+  width: clamp(0.875rem, 2.3cqh, 1.25rem);
+  height: clamp(0.875rem, 2.3cqh, 1.25rem);
+}
+
+.operator-line-product-form {
+  gap: clamp(0.375rem, 1.1cqh, 0.75rem);
+}
+
+.operator-line-product-field,
+.operator-line-pack-row {
+  gap: clamp(0.25rem, 0.8cqh, 0.5rem);
+}
+
+.operator-line-product-field label {
+  font-size: clamp(0.6875rem, 1.45cqh, 0.875rem);
+  line-height: 1.2;
+}
+
+.operator-line-pack-row {
+  grid-template-columns:
+    clamp(2rem, 6cqh, 3.5rem)
+    minmax(0, 1fr)
+    clamp(2rem, 6cqh, 3.5rem);
+}
+
+.operator-line-product-box .operator-line-form-control {
+  height: clamp(2.5rem, 6.2cqh, 3rem);
+  min-height: 0;
+  font-size: clamp(0.75rem, 1.7cqh, 1rem);
+}
+
+.operator-line-product-box input.operator-line-form-control {
+  font-size: clamp(0.875rem, 2.1cqh, 1.125rem);
+}
+
+.operator-line-top-card .operator-line-stats-shell,
+.operator-line-top-card .operator-line-stats-grid,
+.operator-line-top-card .operator-line-status-grid {
+  gap: clamp(0.375rem, 1.2cqh, 0.75rem);
+}
+
+.operator-line-top-card .operator-line-info-tile {
+  min-height: 0;
+  padding: clamp(0.5rem, 1.5cqh, 1rem);
+}
+
+.operator-line-top-card .operator-line-info-tile > div:first-child {
+  font-size: clamp(0.625rem, 1.35cqh, 0.875rem);
+  line-height: 1.2;
+}
+
+.operator-line-top-card .operator-line-info-tile > div:last-child {
+  margin-top: clamp(0.25rem, 0.9cqh, 0.75rem);
+  font-size: clamp(1.5rem, 4.2cqh, 2.5rem);
+}
+
+.operator-line-top-card .operator-line-okng-value {
+  font-size: clamp(2.25rem, 7cqh, 4.25rem);
+}
+
 .operator-line-top-actions {
   display: none;
+}
+
+.operator-line-preview-card {
+  min-height: 0;
+}
+
+.operator-line-preview-heading {
+  padding-block: clamp(0.25rem, 0.8cqh, 0.5rem);
+  font-size: clamp(1rem, 3cqh, 1.75rem);
+  line-height: 1.05;
+}
+
+.operator-line-preview-body {
+  container-name: operator-preview-space;
+  container-type: size;
+  display: grid;
+  min-height: 0;
+  place-items: center;
+  overflow: hidden;
+  padding: clamp(0.25rem, 1cqh, 0.75rem);
 }
 
 .operator-camera-preview-frame {
   border: 2px solid #009ee3;
 }
 
-.operator-line-preview-heading {
-  padding-block: 0.5rem;
-  font-size: 1.75rem;
-  line-height: 1.05;
+.operator-line-preview-body .operator-camera-preview-frame {
+  container-name: operator-camera-preview;
+  container-type: inline-size;
+  width: min(100cqw, 300cqh);
+  max-width: 100%;
+  max-height: 100%;
 }
 
-.operator-line-preview-body {
-  padding: 0.75rem;
+.operator-line-preview-body .operator-preview-top-meta {
+  inset-inline: clamp(0.25rem, 1cqw, 0.75rem);
+  top: clamp(0.25rem, 1cqw, 0.75rem);
+  gap: clamp(0.25rem, 0.8cqw, 0.5rem);
 }
 
-@media (min-aspect-ratio: 13/10) and (min-width: 1400px) {
-  .operator-line-top-card .operator-line-top-content {
-    grid-template-columns: 308px minmax(0, 1fr) 190px;
-    gap: 0.75rem;
-    padding: 0.75rem;
+.operator-line-preview-body .operator-preview-dimensions,
+.operator-line-preview-body .operator-preview-source {
+  padding: clamp(0.2rem, 0.7cqw, 0.5rem) clamp(0.3rem, 0.9cqw, 0.75rem);
+  font-size: clamp(0.5rem, 1.15cqw, 0.75rem);
+  line-height: 1.2;
+}
+
+.operator-line-preview-body .operator-preview-clock-cluster {
+  top: clamp(0.25rem, 1cqw, 0.75rem);
+  width: min(70cqw, 720px);
+  gap: clamp(0.2rem, 0.7cqw, 0.5rem);
+}
+
+.operator-line-preview-body .operator-preview-clock,
+.operator-line-preview-body .operator-preview-runtime-status {
+  padding: clamp(0.2rem, 0.7cqw, 0.375rem)
+    clamp(0.3rem, 0.9cqw, 0.75rem);
+  font-size: clamp(0.5rem, 1.2cqw, 0.875rem);
+  line-height: 1.25;
+}
+
+.operator-line-preview-body .operator-preview-footer-meta {
+  inset-inline: clamp(0.25rem, 1cqw, 0.75rem);
+  bottom: clamp(0.25rem, 1cqw, 0.75rem);
+  gap: clamp(0.25rem, 0.8cqw, 0.5rem);
+  font-size: clamp(0.5rem, 1.15cqw, 0.75rem);
+}
+
+.operator-line-preview-body .operator-preview-footer-meta > div {
+  padding: clamp(0.125rem, 0.35cqw, 0.25rem)
+    clamp(0.3rem, 0.8cqw, 0.625rem);
+  font-size: inherit;
+}
+
+.operator-line-footer-actions {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: clamp(0.375rem, 1.2cqh, 0.75rem);
+}
+
+.operator-line-action-button {
+  height: clamp(2.5rem, 6.5cqh, 3.5rem);
+  min-height: 0;
+  padding-inline: clamp(0.5rem, 1.4cqw, 1rem);
+  font-size: clamp(0.75rem, 1.65cqh, 1rem);
+  line-height: 1.15;
+}
+
+.operator-line-action-button svg {
+  width: clamp(0.875rem, 2.2cqh, 1.25rem);
+  height: clamp(0.875rem, 2.2cqh, 1.25rem);
+}
+
+@media (min-width: 600px) {
+  .operator-line-footer-actions {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
+}
 
-  .operator-line-top-card .operator-line-product-box {
-    grid-column: 1;
-    padding: 0.75rem;
+@media (max-width: 719px) {
+  .operator-line-top-card {
+    overflow: auto;
+  }
+}
+
+@media (min-width: 720px) {
+  .operator-line-top-card .operator-line-top-content {
+    grid-template-columns: clamp(220px, 27vw, 320px) minmax(0, 1fr);
   }
 
   .operator-line-top-card .operator-line-stats-shell {
-    grid-template-columns: minmax(0, 1fr) 230px;
-    gap: 0.75rem;
+    grid-template-columns: minmax(0, 1fr) clamp(130px, 19vw, 230px);
   }
 
-  .operator-line-top-card .operator-line-stats-grid,
+  .operator-line-top-card .operator-line-stats-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .operator-line-top-card .operator-line-status-grid {
-    gap: 0.75rem;
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (min-width: 900px) {
+  .operator-line-footer-actions {
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+  }
+}
+
+@container operator-runtime (max-height: 500px) {
+  .operator-line-top-card {
+    overflow: auto;
+  }
+}
+
+@media (min-aspect-ratio: 13/10) and (min-width: 1400px) {
+  .operator-line-top-card {
+    max-height: none;
+    overflow: hidden;
   }
 
-  .operator-line-top-card .operator-line-info-tile {
-    padding: 1rem;
-  }
-
-  .operator-line-top-card .operator-line-info-tile > div:first-child {
-    font-size: 0.75rem;
-  }
-
-  .operator-line-top-card .operator-line-info-tile > div:last-child {
-    margin-top: 0.625rem;
-    font-size: 2.5rem;
-  }
-
-  .operator-line-top-card .operator-line-okng-value {
-    font-size: 4.25rem;
-  }
-
-  .operator-line-top-card .operator-line-action-button {
-    height: 3rem;
-    justify-content: flex-start;
-    padding-inline: 0.875rem;
-    font-size: 0.95rem;
+  .operator-line-top-card .operator-line-top-content {
+    grid-template-columns:
+      clamp(260px, 18vw, 308px)
+      minmax(0, 1fr)
+      clamp(165px, 12vw, 190px);
   }
 
   .operator-line-top-card .operator-line-top-actions {
     display: block;
     grid-column: 3;
-    padding: 0.75rem;
+    padding: clamp(0.5rem, 1.2cqh, 0.75rem);
+  }
+
+  .operator-line-top-card .operator-line-action-button {
+    height: clamp(2.25rem, 4.6cqh, 2.75rem);
+    justify-content: flex-start;
+    font-size: clamp(0.75rem, 1.45cqh, 0.9rem);
   }
 
   .operator-line-footer-actions {
     display: none;
-  }
-
-  .operator-line-preview-heading {
-    padding-block: 0.5rem;
-    font-size: 1.75rem;
-    line-height: 1.05;
-  }
-
-  .operator-line-preview-body {
-    padding: 0.625rem;
-  }
-}
-
-@media (min-aspect-ratio: 8/5) and (min-width: 1600px) {
-  .operator-line-top-card .operator-line-top-content {
-    grid-template-columns: 292px minmax(0, 1fr) 178px;
-    gap: 0.625rem;
-    padding: 0.625rem;
-  }
-
-  .operator-line-top-card .operator-line-product-box,
-  .operator-line-top-card .operator-line-top-actions {
-    padding: 0.625rem;
-  }
-
-  .operator-line-top-card .operator-line-stats-shell {
-    grid-template-columns: minmax(0, 1fr) 210px;
-    gap: 0.625rem;
-  }
-
-  .operator-line-top-card .operator-line-stats-grid,
-  .operator-line-top-card .operator-line-status-grid {
-    gap: 0.625rem;
-  }
-
-  .operator-line-top-card .operator-line-info-tile {
-    padding: 0.875rem;
-  }
-
-  .operator-line-top-card .operator-line-info-tile > div:last-child {
-    margin-top: 0.5rem;
-    font-size: 2.125rem;
-  }
-
-  .operator-line-top-card .operator-line-okng-value {
-    font-size: 3.75rem;
-  }
-
-  .operator-line-top-card .operator-line-action-button {
-    height: 2.75rem;
-    font-size: 0.875rem;
-  }
-
-  .operator-line-preview-heading {
-    padding-block: 0.4375rem;
-    font-size: 1.625rem;
-  }
-
-  .operator-line-preview-body {
-    padding: 0.5rem;
   }
 }

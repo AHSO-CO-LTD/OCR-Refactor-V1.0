@@ -28,14 +28,23 @@ contextBridge.exposeInMainWorld("ocrDesktop", {
   getTerminalLogs() {
     return ipcRenderer.invoke("desktop:get-terminal-logs");
   },
+  getStartupSnapshot() {
+    return ipcRenderer.invoke("desktop:get-startup-snapshot");
+  },
+  exportStartupLog(context?: Record<string, unknown>) {
+    return ipcRenderer.invoke("desktop:export-startup-log", context);
+  },
+  getLanguagePreference() {
+    return ipcRenderer.invoke("desktop:get-language-preference");
+  },
+  setLanguagePreference(language: "en" | "vi") {
+    return ipcRenderer.invoke("desktop:set-language-preference", language);
+  },
+  setCloseConfirmationReady(ready: boolean) {
+    return ipcRenderer.invoke("desktop:set-close-confirmation-ready", ready);
+  },
   openTerminalWindow() {
     return ipcRenderer.invoke("desktop:open-terminal-window");
-  },
-  prepareStartupHardware(preferredProductId?: string) {
-    return ipcRenderer.invoke(
-      "desktop:prepare-startup-hardware",
-      preferredProductId,
-    );
   },
   saveTestStorageSettings(settings: Record<string, unknown>) {
     return ipcRenderer.invoke("desktop:save-test-storage-settings", settings);
@@ -62,13 +71,21 @@ contextBridge.exposeInMainWorld("ocrDesktop", {
       ipcRenderer.removeListener("desktop-shutdown-status", listener);
     };
   },
-  onStartupHardwareStatus(callback: (payload: Record<string, unknown>) => void) {
-    const listener = (_event: unknown, payload: Record<string, unknown>) =>
-      callback(payload);
-    ipcRenderer.on("desktop-startup-hardware-status", listener);
+  onCloseRequested(callback: () => void) {
+    const listener = () => callback();
+    ipcRenderer.on("desktop-close-requested", listener);
 
     return () => {
-      ipcRenderer.removeListener("desktop-startup-hardware-status", listener);
+      ipcRenderer.removeListener("desktop-close-requested", listener);
+    };
+  },
+  onStartupSnapshot(callback: (payload: Record<string, unknown>) => void) {
+    const listener = (_event: unknown, payload: Record<string, unknown>) =>
+      callback(payload);
+    ipcRenderer.on("desktop-startup-snapshot", listener);
+
+    return () => {
+      ipcRenderer.removeListener("desktop-startup-snapshot", listener);
     };
   },
   onUpdateStatus(callback: (payload: Record<string, unknown>) => void) {

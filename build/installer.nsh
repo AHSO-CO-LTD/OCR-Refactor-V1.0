@@ -111,7 +111,7 @@ Function EnvPreflightIntroPageCreate
   Pop $0
 
   !insertmacro AhsoCreateReadOnlyScrollBox 0u 32u 300u 62u $0
-  ${NSD_SetText} $0 "Setup will scan this PC for Node.js, npm, Python 3.11, and PostgreSQL first. If anything is missing, you can install it manually and check again, or click Next to let setup download and install it automatically."
+  ${NSD_SetText} $0 "Setup will scan this PC for Node.js, npm, and PostgreSQL first. Python 3.11 is already bundled with the encrypted Device Tool. If anything else is missing, you can install it manually and check again, or click Next to let setup download and install it automatically."
 
   ${NSD_CreateLabel} 0u 104u 300u 32u "Click Next to scan the environment before the actual OCR database setup starts."
   Pop $0

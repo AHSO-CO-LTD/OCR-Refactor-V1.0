@@ -689,6 +689,17 @@ function Test-PythonCommand {
   }
 }
 
+function Test-EmbeddedToolPython {
+  param([string]$Command)
+
+  try {
+    & $Command -c "import sys; raise SystemExit(0 if sys.version_info[:2] == (3, 11) else 1)" | Out-Null
+    return $LASTEXITCODE -eq 0
+  } catch {
+    return $false
+  }
+}
+
 function Get-WindowsPythonLauncherPaths {
   try {
     $output = & py -0p 2>&1
@@ -761,6 +772,23 @@ function Install-ToolPythonDependencies {
   $requirementsPath = Join-Path $toolPath "requirements.txt"
   if (-not (Test-Path $requirementsPath)) {
     throw "Tool requirements.txt was not found"
+  }
+
+  $embeddedPython = Join-Path $toolPath "python-embed\python.exe"
+  if (Test-Path -LiteralPath $embeddedPython) {
+    if (-not (Test-EmbeddedToolPython -Command $embeddedPython)) {
+      throw "The encrypted Tool embedded runtime is not Python 3.11"
+    }
+
+    Push-Location $toolPath
+    try {
+      Invoke-BootstrapCommand -Command $embeddedPython -Arguments @("-m", "pip", "install", "--upgrade", "pip") -ErrorMessage "Could not upgrade pip in embedded Tool Python"
+      Invoke-BootstrapCommand -Command $embeddedPython -Arguments @("-m", "pip", "install", "-r", $requirementsPath) -ErrorMessage "Could not install embedded Tool Python requirements"
+      Invoke-BootstrapCommand -Command $embeddedPython -Arguments @("-c", "import fastapi, uvicorn; from api.app import app") -ErrorMessage "Encrypted Tool runtime verification failed"
+    } finally {
+      Pop-Location
+    }
+    return
   }
 
   $python = Install-PythonIfBundled
@@ -864,6 +892,12 @@ try {
 
   $databasePasswordUrl = [System.Uri]::EscapeDataString($dbPassword)
   $databaseUrl = "postgresql://${dbUser}:${databasePasswordUrl}@$($dbConfig.host):$($dbConfig.port)/${dbName}"
+  $embeddedToolPython = Join-Path $runtimeRoot "tool\python-embed\python.exe"
+  $toolRuntimePython = if (Test-Path -LiteralPath $embeddedToolPython) {
+    $embeddedToolPython
+  } else {
+    Join-Path $runtimeRoot "tool\.venv\Scripts\python.exe"
+  }
   Set-Content -LiteralPath $envPath -Encoding UTF8 -Value @"
 NODE_ENV=production
 BACKEND_PORT=3979
@@ -875,11 +909,11 @@ DATABASE_URL=$databaseUrl
 JWT_SECRET=$jwtSecret
 DEVICE_TOOL_BASE_URL=http://127.0.0.1:8668
 DEVICE_TOOL_API_PREFIX=/tool/v1
-DEVICE_TOOL_PYTHON=$runtimeRoot\tool\.venv\Scripts\python.exe
+DEVICE_TOOL_PYTHON=$toolRuntimePython
 DONGLE_MOCK_MODE=false
 DONGLE_DLL_PATH=$runtimeRoot\backend\native\System8.dll
 DONGLE_HELPER_PATH=$runtimeRoot\backend\native\dongle-checker.exe
-DONGLE_PYTHON_COMMAND=$runtimeRoot\tool\.venv\Scripts\python.exe
+DONGLE_PYTHON_COMMAND=$toolRuntimePython
 DONGLE_RETRY_COUNT=3
 DONGLE_RETRY_INTERVAL_MS=1000
 DONGLE_CHECK_TIMEOUT_MS=7000

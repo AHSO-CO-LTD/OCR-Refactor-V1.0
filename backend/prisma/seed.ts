@@ -4,6 +4,7 @@ import * as bcrypt from 'bcrypt';
 const prisma = new PrismaClient();
 
 const permissions = [
+  { key: 'dashboard.view', name: 'View dashboard', group: 'dashboard' },
   { key: 'user.manage', name: 'Manage users', group: 'user' },
   { key: 'role.manage', name: 'Manage roles', group: 'role' },
   { key: 'permission.manage', name: 'Manage permissions', group: 'role' },
@@ -37,6 +38,7 @@ const rolePermissionMap: Record<RoleCode, string[]> = {
     .filter((permission) => !permission.devOnly)
     .map((permission) => permission.key),
   engineer: [
+    'dashboard.view',
     'product.manage',
     'camera.manage',
     'camera.identity.manage',
@@ -47,6 +49,7 @@ const rolePermissionMap: Record<RoleCode, string[]> = {
     'report.view',
   ],
   operator: [
+    'dashboard.view',
     'inspection.start',
     'inspection.stop',
     'plc.manage',

@@ -106,6 +106,8 @@ const translations = {
     "auth.subtitle": "Use your local operator account to continue.",
     "auth.username": "Username",
     "auth.password": "Password",
+    "auth.showPassword": "Show password",
+    "auth.hidePassword": "Hide password",
     "auth.rememberLogin": "Remember login",
     "auth.login": "Login",
     "auth.loginSuccess": "Signed in successfully.",
@@ -137,9 +139,79 @@ const translations = {
     "login.startupStatus.done": "Completed",
     "login.startupStatus.skipped": "Skipped",
     "login.startupStatus.failed": "Unavailable",
+    "startup.title": "Starting the inspection station",
+    "startup.subtitle":
+      "The application is validating local services, security, and configured machine hardware.",
+    "startup.current": "Current check",
+    "startup.progress": "Startup progress",
+    "startup.completed": "Startup checks completed",
+    "startup.completedMessage": "Opening the sign-in screen.",
+    "startup.blocked": "Startup is blocked",
+    "startup.blockedMessage":
+      "Resolve the application or license error before continuing.",
+    "startup.hardwareWarning": "Machine hardware needs attention",
+    "startup.hardwareWarningMessage":
+      "PLC-related errors were recorded. You can still continue to sign in.",
+    "startup.retry": "Check again",
+    "startup.retrying": "Running startup checks again...",
+    "startup.exportLog": "Export log",
+    "startup.exportSuccess": "Startup log was saved.",
+    "startup.exportCanceled": "Log export was canceled.",
+    "startup.exportFailed": "Cannot export the startup log.",
+    "startup.serviceUnavailable": "Desktop startup information is unavailable.",
+    "startup.group.system": "Application and security",
+    "startup.group.machine": "Machine hardware",
+    "startup.stage.deviceTool": "Check Device Tool",
+    "startup.stage.deviceToolDescription": "Local hardware control service",
+    "startup.stage.backend": "Check backend service",
+    "startup.stage.backendDescription": "Local API and application services",
+    "startup.stage.frontend": "Initialize interface",
+    "startup.stage.frontendDescription": "Next.js desktop renderer",
+    "startup.stage.database": "Check database and system",
+    "startup.stage.databaseDescription": "Migration, database, admin, and API",
+    "startup.stage.license": "Check license",
+    "startup.stage.licenseDescription": "Physical USB license dongle",
+    "startup.stage.plc": "Connect PLC",
+    "startup.stage.plcDescription": "Configured PLC runtime connection",
+    "startup.stage.cameraPower": "Enable camera power",
+    "startup.stage.cameraPowerDescription": "Configured PLC camera power output",
+    "startup.stage.cameraLight": "Enable inspection light",
+    "startup.stage.cameraLightDescription": "Configured PLC light output",
+    "startup.stage.camera": "Verify camera",
+    "startup.stage.cameraDescription": "Connect and receive a valid frame",
+    "startup.stage.plcSignals": "Test PLC signals",
+    "startup.stage.plcSignalsDescription": "Configured result outputs and input monitors",
+    "startup.status.pending": "Pending",
+    "startup.status.running": "Checking",
+    "startup.status.done": "Ready",
+    "startup.status.warning": "Attention",
+    "startup.status.skipped": "Skipped",
+    "startup.status.failed": "Error",
+    "startup.signal.ngResult": "NG result",
+    "startup.signal.okResult": "OK result",
+    "startup.signal.waitingChecking": "Waiting for check",
+    "startup.signal.captureTrigger": "Capture trigger monitor",
+    "startup.signal.stopTrigger": "Stop trigger monitor",
+    "startup.signal.startTrigger": "Start trigger monitor",
+    "startup.signal.custom": "Custom signal",
+    "startup.signal.customSafety": "Configured only, not actuated automatically",
     "nav.dashboard": "Dashboard",
-    "nav.line": "Line",
-    "nav.lineTest": "Line test",
+    "cameraPreview.connecting": "Connecting to camera",
+    "cameraPreview.connectingDescription":
+      "Establishing the live camera stream.",
+    "cameraPreview.connected": "Camera connected",
+    "cameraPreview.disconnected": "Camera disconnected",
+    "cameraPreview.disconnectedDescription":
+      "Check camera power and cable, then try again.",
+    "cameraPreview.mismatch": "Camera does not match configuration",
+    "cameraPreview.mismatchDescription":
+      "The connected camera does not match this product configuration.",
+    "cameraPreview.error": "Cannot connect to camera",
+    "cameraPreview.errorDescription":
+      "Camera connection failed. Check the device and try again.",
+    "cameraPreview.reconnect": "Reconnect",
+    "nav.line": "Operation screen",
+    "nav.lineTest": "Testing",
     "nav.lineAnimationTest": "Line animation test",
     "nav.users": "Users",
     "nav.roles": "Roles",
@@ -190,13 +262,14 @@ const translations = {
     "plc.startTrigger": "Machine start trigger",
     "plc.cameraPower": "Camera power",
     "plc.cameraLight": "Camera inspection light",
-    "plc.errorPulse": "NG error pulse",
-    "plc.okResult": "Green OK result light",
+    "plc.errorPulse": "NG result pulse",
+    "plc.okResult": "OK result pulse",
     "plc.waitingChecking": "Yellow waiting/checking light",
     "plc.plcToApp": "PLC to App · rising edge",
     "plc.appToPlcWrite": "App to PLC · retained state",
     "plc.appToPlcPulse": "App to PLC · pulse",
-    "plc.pulseDuration": "Pulse duration (ms)",
+    "plc.ngPulseDuration": "NG pulse duration (ms)",
+    "plc.okPulseDuration": "OK pulse duration (ms)",
     "plc.sleepTime": "SleepTime without PLC latch (seconds)",
     "plc.sleepTimeHint":
       "Default 300 seconds. Manual app latches also reset this timer.",
@@ -222,6 +295,8 @@ const translations = {
     "plc.validationPort": "Enter a port from 1 to 65535.",
     "plc.validationRequired": "Enter all six required signal addresses.",
     "plc.validationAddress": "PLC addresses must be non-negative integers.",
+    "plc.validationPulseDuration":
+      "Each pulse duration must be from 50 to 10000 ms.",
     "plc.validationSleepTime": "SleepTime must be from 1 to 86400 seconds.",
     "plc.validationUnique": "Configured fixed signal addresses must be unique.",
     "plc.validationCustomName": "Every enabled custom key needs a name.",
@@ -297,6 +372,7 @@ const translations = {
     "common.undo": "Undo",
     "common.redo": "Redo",
     "navGroup.overview": "Overview",
+    "navGroup.operation": "Operation",
     "navGroup.management": "Management",
     "navGroup.configuration": "Configuration",
     "navGroup.inspection": "Inspection",
@@ -350,6 +426,7 @@ const translations = {
     "settings.title": "Settings",
     "settings.description":
       "Configure the local desktop window and station display.",
+    "settings.backToOperation": "Back to operation",
     "settings.tabDesktop": "Desktop",
     "settings.tabLanguage": "Language",
     "settings.tabVolume": "Volume",
@@ -480,7 +557,7 @@ const translations = {
       "No completed detection is waiting for a PLC trigger.",
     "lineTest.plcLatchCommitted":
       "PLC trigger latched the latest completed detection.",
-    "operator.productToday": "Today's product",
+    "operator.productToday": "Product",
     "operator.sourceApi": "API",
     "operator.sourceDemo": "Sample",
     "operator.demoCamera": "Line camera simulator",
@@ -502,6 +579,19 @@ const translations = {
     "operator.cameraOff": "Camera off",
     "operator.aiOn": "AI on",
     "operator.aiOff": "AI off",
+    "operator.on": "On",
+    "operator.off": "Off",
+    "operator.currentMode": "Current mode",
+    "operator.aiStatus": "AI status",
+    "operator.liveEnabled": "Live camera enabled.",
+    "operator.liveDisabled": "Live camera paused on the last frame.",
+    "operator.aiEnabled": "Real-time AI enabled.",
+    "operator.aiDisabled": "Real-time AI disabled. Results will not be latched.",
+    "operator.autoEnabled": "Automatic mode enabled.",
+    "operator.manualEnabled": "Manual mode enabled.",
+    "operator.frameCaptured": "Frame captured without inspection or latching.",
+    "operator.unknownIgnored":
+      "The result is UNKNOWN, so no counter or PLC output was changed.",
     "operator.counter": "Counter",
     "operator.ok": "OK",
     "operator.ng": "NG",
@@ -1031,6 +1121,7 @@ const translations = {
     "vk.telex": "Telex",
     "vk.vni": "VNI",
     "vk.close": "Close",
+    "vk.clear": "Clear",
     "vk.empty": "No content yet",
     "vk.space": "Space",
     "vk.backspace": "Backspace",
@@ -1041,6 +1132,7 @@ const translations = {
     "role.admin": "Admin",
     "role.engineer": "Engineer",
     "role.operator": "Operator",
+    "permission.dashboard.view": "View dashboard",
     "permission.user.manage": "Manage users",
     "permission.role.manage": "Manage roles",
     "permission.permission.manage": "Manage permissions",
@@ -1066,6 +1158,7 @@ const translations = {
     "permission.group.inspection": "Inspection",
     "permission.group.report": "Report",
     "permission.group.system": "System",
+    "permission.group.dashboard": "Dashboard",
   },
   vi: {
     "app.brand": "Metalcore AI",
@@ -1161,6 +1254,8 @@ const translations = {
     "auth.subtitle": "Dùng tài khoản vận hành nội bộ để tiếp tục.",
     "auth.username": "Tên đăng nhập",
     "auth.password": "Mật khẩu",
+    "auth.showPassword": "Hiện mật khẩu",
+    "auth.hidePassword": "Ẩn mật khẩu",
     "auth.rememberLogin": "Ghi nhớ đăng nhập",
     "auth.login": "Đăng nhập",
     "auth.checking": "Đang kiểm tra...",
@@ -1185,8 +1280,78 @@ const translations = {
     "login.startupStatus.done": "Hoàn tất",
     "login.startupStatus.skipped": "Bỏ qua",
     "login.startupStatus.failed": "Không khả dụng",
+    "startup.title": "Đang khởi động trạm kiểm tra",
+    "startup.subtitle":
+      "Ứng dụng đang xác thực dịch vụ nội bộ, bảo mật và phần cứng máy đã cấu hình.",
+    "startup.current": "Mục đang kiểm tra",
+    "startup.progress": "Tiến trình khởi động",
+    "startup.completed": "Đã hoàn tất kiểm tra khởi động",
+    "startup.completedMessage": "Đang mở màn hình đăng nhập.",
+    "startup.blocked": "Không thể tiếp tục khởi động",
+    "startup.blockedMessage":
+      "Hãy xử lý lỗi ứng dụng hoặc bản quyền trước khi tiếp tục.",
+    "startup.hardwareWarning": "Phần cứng máy cần được kiểm tra",
+    "startup.hardwareWarningMessage":
+      "Lỗi liên quan đến PLC đã được ghi nhận. Bạn vẫn có thể tiếp tục đăng nhập.",
+    "startup.retry": "Kiểm tra lại",
+    "startup.retrying": "Đang chạy lại các bước kiểm tra khởi động...",
+    "startup.exportLog": "Xuất nhật ký",
+    "startup.exportSuccess": "Đã lưu nhật ký khởi động.",
+    "startup.exportCanceled": "Đã hủy xuất nhật ký.",
+    "startup.exportFailed": "Không thể xuất nhật ký khởi động.",
+    "startup.serviceUnavailable": "Không có thông tin khởi động từ ứng dụng desktop.",
+    "startup.group.system": "Ứng dụng và bảo mật",
+    "startup.group.machine": "Phần cứng máy",
+    "startup.stage.deviceTool": "Kiểm tra Device Tool",
+    "startup.stage.deviceToolDescription": "Dịch vụ điều khiển phần cứng nội bộ",
+    "startup.stage.backend": "Kiểm tra dịch vụ backend",
+    "startup.stage.backendDescription": "API nội bộ và dịch vụ ứng dụng",
+    "startup.stage.frontend": "Khởi tạo giao diện",
+    "startup.stage.frontendDescription": "Giao diện desktop Next.js",
+    "startup.stage.database": "Kiểm tra cơ sở dữ liệu và hệ thống",
+    "startup.stage.databaseDescription": "Migration, dữ liệu, tài khoản admin và API",
+    "startup.stage.license": "Kiểm tra bản quyền",
+    "startup.stage.licenseDescription": "USB dongle bản quyền vật lý",
+    "startup.stage.plc": "Kết nối PLC",
+    "startup.stage.plcDescription": "Kết nối PLC theo cấu hình đã lưu",
+    "startup.stage.cameraPower": "Bật nguồn camera",
+    "startup.stage.cameraPowerDescription": "Ngõ ra nguồn camera trên PLC",
+    "startup.stage.cameraLight": "Bật đèn kiểm tra",
+    "startup.stage.cameraLightDescription": "Ngõ ra đèn chiếu sáng trên PLC",
+    "startup.stage.camera": "Kiểm tra camera",
+    "startup.stage.cameraDescription": "Kết nối và nhận một frame hợp lệ",
+    "startup.stage.plcSignals": "Kiểm tra tín hiệu PLC",
+    "startup.stage.plcSignalsDescription": "Ngõ ra kết quả và ngõ vào đã cấu hình",
+    "startup.status.pending": "Đang chờ",
+    "startup.status.running": "Đang kiểm tra",
+    "startup.status.done": "Sẵn sàng",
+    "startup.status.warning": "Cần chú ý",
+    "startup.status.skipped": "Bỏ qua",
+    "startup.status.failed": "Lỗi",
+    "startup.signal.ngResult": "Kết quả NG",
+    "startup.signal.okResult": "Kết quả OK",
+    "startup.signal.waitingChecking": "Chờ kiểm tra",
+    "startup.signal.captureTrigger": "Theo dõi tín hiệu chụp",
+    "startup.signal.stopTrigger": "Theo dõi tín hiệu dừng",
+    "startup.signal.startTrigger": "Theo dõi tín hiệu chạy",
+    "startup.signal.custom": "Tín hiệu tùy chỉnh",
+    "startup.signal.customSafety": "Chỉ xác nhận cấu hình, không tự động kích",
     "nav.dashboard": "Tổng quan",
-    "nav.line": "Line",
+    "cameraPreview.connecting": "Đang kết nối camera",
+    "cameraPreview.connectingDescription":
+      "Đang thiết lập luồng hình ảnh trực tiếp.",
+    "cameraPreview.connected": "Camera đã kết nối",
+    "cameraPreview.disconnected": "Camera chưa kết nối",
+    "cameraPreview.disconnectedDescription":
+      "Kiểm tra nguồn và cáp camera, sau đó thử lại.",
+    "cameraPreview.mismatch": "Camera không khớp cấu hình",
+    "cameraPreview.mismatchDescription":
+      "Camera đang kết nối không đúng với cấu hình sản phẩm.",
+    "cameraPreview.error": "Không thể kết nối camera",
+    "cameraPreview.errorDescription":
+      "Kết nối camera thất bại. Kiểm tra thiết bị và thử lại.",
+    "cameraPreview.reconnect": "Kết nối lại",
+    "nav.line": "Màn hình",
     "nav.users": "Người dùng",
     "nav.roles": "Vai trò",
     "nav.products": "Sản phẩm",
@@ -1235,13 +1400,14 @@ const translations = {
     "plc.startTrigger": "Tín hiệu khởi động máy",
     "plc.cameraPower": "Nguồn camera",
     "plc.cameraLight": "Đèn chiếu sáng camera soi",
-    "plc.errorPulse": "Xung báo lỗi NG",
-    "plc.okResult": "Đèn xanh báo kết quả OK",
+    "plc.errorPulse": "Xung kết quả NG",
+    "plc.okResult": "Xung kết quả OK",
     "plc.waitingChecking": "Đèn vàng chờ/đang kiểm tra",
     "plc.plcToApp": "PLC sang App · cạnh lên",
     "plc.appToPlcWrite": "App sang PLC · ghi trạng thái giữ",
     "plc.appToPlcPulse": "App sang PLC · phát xung",
-    "plc.pulseDuration": "Thời gian xung (ms)",
+    "plc.ngPulseDuration": "Thời gian xung NG (ms)",
+    "plc.okPulseDuration": "Thời gian xung OK (ms)",
     "plc.sleepTime": "SleepTime không nhận tín hiệu chốt (giây)",
     "plc.sleepTimeHint":
       "Mặc định 300 giây. Chốt tay trên ứng dụng cũng đặt lại bộ đếm này.",
@@ -1268,6 +1434,8 @@ const translations = {
     "plc.validationRequired":
       "Vui lòng nhập đầy đủ sáu địa chỉ tín hiệu bắt buộc.",
     "plc.validationAddress": "Địa chỉ PLC phải là số nguyên không âm.",
+    "plc.validationPulseDuration":
+      "Thời gian của mỗi xung phải nằm trong khoảng 50 đến 10000 ms.",
     "plc.validationSleepTime":
       "SleepTime phải nằm trong khoảng 1 đến 86400 giây.",
     "plc.validationUnique":
@@ -1344,6 +1512,7 @@ const translations = {
     "common.undo": "Hoàn tác",
     "common.redo": "Làm lại",
     "navGroup.overview": "Tổng quan",
+    "navGroup.operation": "Vận hành",
     "navGroup.management": "Quản trị",
     "navGroup.configuration": "Cấu hình",
     "navGroup.inspection": "Theo dõi",
@@ -1388,6 +1557,7 @@ const translations = {
     "settings.title": "Cài đặt",
     "settings.description":
       "Cấu hình cửa sổ desktop local và màn hình hiển thị của trạm.",
+    "settings.backToOperation": "Quay lại Vận hành",
     "settings.tabDesktop": "Desktop",
     "settings.tabLanguage": "Ngôn ngữ",
     "settings.tabVolume": "Âm lượng",
@@ -1504,7 +1674,7 @@ const translations = {
     "operator.title": "Vận hành line",
     "operator.description":
       "Chọn sản phẩm chạy trong ngày, xem preview line và bắt đầu kiểm tra.",
-    "operator.productToday": "Sản phẩm hôm nay",
+    "operator.productToday": "Sản phẩm",
     "operator.sourceApi": "API",
     "operator.sourceDemo": "Mẫu",
     "operator.demoCamera": "Camera line mô phỏng",
@@ -1526,6 +1696,19 @@ const translations = {
     "operator.cameraOff": "Camera tắt",
     "operator.aiOn": "AI bật",
     "operator.aiOff": "AI tắt",
+    "operator.on": "Bật",
+    "operator.off": "Tắt",
+    "operator.currentMode": "Chế độ hiện tại",
+    "operator.aiStatus": "Trạng thái AI",
+    "operator.liveEnabled": "Đã bật camera live.",
+    "operator.liveDisabled": "Đã tắt camera live và giữ lại frame cuối.",
+    "operator.aiEnabled": "Đã bật AI thời gian thực.",
+    "operator.aiDisabled": "Đã tắt AI; kết quả sẽ không được chốt.",
+    "operator.autoEnabled": "Đã bật chế độ tự động.",
+    "operator.manualEnabled": "Đã bật chế độ thủ công.",
+    "operator.frameCaptured": "Đã chụp frame, không kiểm tra và không chốt.",
+    "operator.unknownIgnored":
+      "Kết quả UNKNOWN nên không đổi bộ đếm và không phát tín hiệu PLC.",
     "operator.counter": "Bộ đếm",
     "operator.ok": "OK",
     "operator.ng": "NG",
@@ -1996,6 +2179,7 @@ const translations = {
     "role.admin": "Admin",
     "role.engineer": "Kỹ sư",
     "role.operator": "Vận hành",
+    "permission.dashboard.view": "Xem trang tổng quan",
     "permission.user.manage": "Quản lý người dùng",
     "permission.role.manage": "Quản lý vai trò",
     "permission.permission.manage": "Quản lý quyền",
@@ -2021,6 +2205,7 @@ const translations = {
     "permission.group.inspection": "Kiểm tra",
     "permission.group.report": "Báo cáo",
     "permission.group.system": "Hệ thống",
+    "permission.group.dashboard": "Tổng quan",
   },
 } as const;
 
@@ -2853,7 +3038,7 @@ const translationOverrides: Record<Language, Record<string, string>> = {
     "lineTest.debugNaturalImage": "g\u1ed1c \u1ea3nh",
     "lineTest.debugDisplayedImage": "hi\u1ec3n \u1ea3nh",
     "lineTest.debugImageOffset": "l\u1ec7ch \u1ea3nh",
-    "nav.lineTest": "Test line",
+    "nav.lineTest": "Kiểm thử",
     "lineTest.title": "Test line",
     "lineTest.description":
       "Test Tool v\u00e0 AI trong m\u00e0n h\u00ecnh ri\u00eang, kh\u00f4ng l\u00e0m \u1ea3nh h\u01b0\u1edfng trang v\u1eadn h\u00e0nh line.",
@@ -2969,6 +3154,7 @@ const translationOverrides: Record<Language, Record<string, string>> = {
     "vk.telex": "Telex",
     "vk.vni": "VNI",
     "vk.close": "Đóng",
+    "vk.clear": "Xóa nội dung",
     "vk.empty": "Chưa có nội dung",
     "vk.space": "Dấu cách",
     "vk.backspace": "Xóa lùi",
@@ -2994,19 +3180,35 @@ export function I18nProvider({ children }: { children: ReactNode }) {
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
-    const timeoutId = window.setTimeout(() => {
+    let cancelled = false;
+
+    async function loadLanguage() {
       const storedLanguage = localStorage.getItem(
         LANGUAGE_KEY,
       ) as Language | null;
 
       if (storedLanguage === "en" || storedLanguage === "vi") {
-        setLanguageState(storedLanguage);
+        if (!cancelled) setLanguageState(storedLanguage);
+      } else {
+        const desktopPreference = await window.ocrDesktop
+          ?.getLanguagePreference()
+          .catch(() => undefined);
+        if (
+          !cancelled &&
+          (desktopPreference === "en" || desktopPreference === "vi")
+        ) {
+          setLanguageState(desktopPreference);
+        }
       }
 
-      setReady(true);
-    }, 0);
+      if (!cancelled) setReady(true);
+    }
 
-    return () => window.clearTimeout(timeoutId);
+    void loadLanguage();
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => {
@@ -3016,6 +3218,7 @@ export function I18nProvider({ children }: { children: ReactNode }) {
 
     localStorage.setItem(LANGUAGE_KEY, language);
     document.documentElement.lang = language;
+    void window.ocrDesktop?.setLanguagePreference(language).catch(() => undefined);
   }, [language, ready]);
 
   const value = useMemo<I18nContextValue>(

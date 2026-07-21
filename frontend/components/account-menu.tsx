@@ -60,7 +60,7 @@ export function AccountMenu({
   const roleLabel = t(`role.${user.role}`);
 
   return (
-    <div className="relative" ref={containerRef}>
+    <div className="relative min-w-0" ref={containerRef}>
       <Button
         type="button"
         variant="outline"
@@ -68,7 +68,7 @@ export function AccountMenu({
         aria-controls={menuId}
         aria-expanded={open}
         aria-haspopup="menu"
-        className="h-auto min-w-[210px] justify-between gap-3 px-3 py-1.5 text-left"
+        className="h-auto w-[clamp(150px,42vw,210px)] min-w-0 justify-between gap-2 px-2 py-1.5 text-left sm:gap-3 sm:px-3"
         onClick={() => setOpen((current) => !current)}
       >
         <span
