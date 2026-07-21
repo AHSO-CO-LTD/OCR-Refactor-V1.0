@@ -7,6 +7,7 @@ import { CameraStreamGateway } from './camera/camera-stream.gateway';
 
 async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
+  app.enableShutdownHooks();
   const frontendPort = readPortEnv('FRONTEND_PORT', 3969);
   const frontendFallbackStart = readPortEnv(
     'FRONTEND_FALLBACK_PORT_START',

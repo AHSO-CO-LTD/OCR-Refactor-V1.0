@@ -2,7 +2,7 @@
 
 import { FormEvent, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { UserPlus } from "lucide-react";
+import { FolderOpen, UserPlus } from "lucide-react";
 import { toast } from "sonner";
 import { LanguageToggle } from "@/components/language-toggle";
 import { Button } from "@/components/ui/button";
@@ -14,6 +14,7 @@ import {
   getSetupStatus,
   type InitialAdminPayload,
 } from "@/lib/api";
+import { getDesktopBridge } from "@/lib/desktop";
 import { useI18n } from "@/lib/i18n";
 
 const initialForm: InitialAdminPayload & { confirmPassword: string } = {
@@ -23,11 +24,13 @@ const initialForm: InitialAdminPayload & { confirmPassword: string } = {
   fullName: "",
   department: "",
   employeeNo: "",
+  lineResultSaveFolderPath: "",
 };
 
 export default function SetupPage() {
   const router = useRouter();
   const { apiError, t } = useI18n();
+  const bridge = getDesktopBridge();
   const [form, setForm] = useState(initialForm);
   const [checking, setChecking] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -86,6 +89,13 @@ export default function SetupPage() {
       return;
     }
 
+    if (!form.lineResultSaveFolderPath.trim()) {
+      const message = t("setup.lineResultFolderRequired");
+      setError(message);
+      toast.error(message);
+      return;
+    }
+
     setSaving(true);
 
     try {
@@ -95,6 +105,7 @@ export default function SetupPage() {
         fullName: form.fullName.trim(),
         department: form.department?.trim() || undefined,
         employeeNo: form.employeeNo?.trim() || undefined,
+        lineResultSaveFolderPath: form.lineResultSaveFolderPath.trim(),
       });
       toast.success(t("setup.adminCreated"));
       router.replace("/login");
@@ -112,6 +123,25 @@ export default function SetupPage() {
 
   function updateField(name: keyof typeof form, value: string) {
     setForm((current) => ({ ...current, [name]: value }));
+  }
+
+  async function handlePickLineResultFolder() {
+    if (!bridge) {
+      toast.warning(t("setup.desktopFolderPickerOnly"));
+      return;
+    }
+
+    try {
+      const result = await bridge.selectFolder();
+
+      if (result.canceled || !result.folderPath) {
+        return;
+      }
+
+      updateField("lineResultSaveFolderPath", result.folderPath);
+    } catch {
+      toast.error(t("setup.lineResultFolderPickError"));
+    }
   }
 
   return (
@@ -194,6 +224,41 @@ export default function SetupPage() {
                       type="password"
                       autoComplete="new-password"
                     />
+                  </div>
+
+                  <div className="grid gap-2">
+                    <label
+                      htmlFor="line-result-save-folder"
+                      className="block text-sm font-medium text-slate-700"
+                    >
+                      {t("setup.lineResultFolder")}
+                    </label>
+                    <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto]">
+                      <Input
+                        id="line-result-save-folder"
+                        required
+                        value={form.lineResultSaveFolderPath}
+                        onChange={(event) =>
+                          updateField(
+                            "lineResultSaveFolderPath",
+                            event.target.value,
+                          )
+                        }
+                        className="h-12 text-base"
+                      />
+                      <Button
+                        type="button"
+                        variant="outline"
+                        className="h-12"
+                        onClick={() => void handlePickLineResultFolder()}
+                      >
+                        <FolderOpen className="h-4 w-4" />
+                        {t("setup.chooseFolder")}
+                      </Button>
+                    </div>
+                    <p className="text-xs text-slate-500">
+                      {t("setup.lineResultFolderHint")}
+                    </p>
                   </div>
 
                   {error ? (

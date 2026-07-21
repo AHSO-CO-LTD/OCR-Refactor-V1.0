@@ -3,10 +3,12 @@ import {
   ConflictException,
   Injectable,
 } from '@nestjs/common';
-import { RoleCode } from '@prisma/client';
+import { LineResultSavePolicy, RoleCode } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 import { PrismaService } from '../database/prisma.service';
 import { CreateInitialAdminDto } from './dto/create-initial-admin.dto';
+
+const LINE_RESULT_SETTINGS_ID = 'default';
 
 @Injectable()
 export class SetupService {
@@ -60,18 +62,47 @@ export class SetupService {
       throw new ConflictException('Username already exists');
     }
 
+    const lineResultSaveFolderPath = dto.lineResultSaveFolderPath.trim();
+
+    if (!lineResultSaveFolderPath) {
+      throw new BadRequestException('Line result save folder is required');
+    }
+
     const passwordHash = await bcrypt.hash(dto.password, 12);
-    const user = await this.prisma.user.create({
-      data: {
-        username,
-        passwordHash,
-        fullName: dto.fullName.trim(),
-        department: dto.department?.trim() || null,
-        employeeNo: dto.employeeNo?.trim() || null,
-        roleCode: RoleCode.admin,
-        active: true,
-        failedAttempts: 0,
-      },
+    const user = await this.prisma.$transaction(async (tx) => {
+      const createdUser = await tx.user.create({
+        data: {
+          username,
+          passwordHash,
+          fullName: dto.fullName.trim(),
+          department: dto.department?.trim() || null,
+          employeeNo: dto.employeeNo?.trim() || null,
+          roleCode: RoleCode.admin,
+          active: true,
+          failedAttempts: 0,
+        },
+      });
+
+      await tx.lineResultSettings.upsert({
+        where: { id: LINE_RESULT_SETTINGS_ID },
+        create: {
+          id: LINE_RESULT_SETTINGS_ID,
+          saveFolderPath: lineResultSaveFolderPath,
+          savePolicy: LineResultSavePolicy.all,
+          saveBySession: true,
+          newSessionOnLineStop: true,
+          newSessionOnProductChange: true,
+        },
+        update: {
+          saveFolderPath: lineResultSaveFolderPath,
+          savePolicy: LineResultSavePolicy.all,
+          saveBySession: true,
+          newSessionOnLineStop: true,
+          newSessionOnProductChange: true,
+        },
+      });
+
+      return createdUser;
     });
 
     return {

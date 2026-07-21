@@ -10,7 +10,7 @@ Current responsibilities:
 - start Device Tool, NestJS backend, and Next.js frontend when missing
 - run the backend without Nest watch mode so runtime restarts do not trigger
   Windows `taskkill` failures from the Nest CLI watcher
-- fall back to the next free Device Tool, backend, or frontend port when the default port is occupied or not healthy
+- fall back to the next free backend or frontend port when the default port is occupied or not healthy
 - wait for service health checks before opening the renderer
 - keep service logs in a background buffer and open the terminal window only on demand
 - stop only child processes started by Electron
@@ -31,7 +31,7 @@ dev session must test the UAC path.
 Default local services:
 
 ```text
-Device Tool  http://127.0.0.1:8000
+Device Tool  http://127.0.0.1:8668
 Backend      http://127.0.0.1:3979
 Frontend     http://localhost:3969
 ```
@@ -43,10 +43,13 @@ the Device Tool routes intentionally change.
 Fallback ranges:
 
 ```text
-Device Tool  8001-8099
 Backend      3980-4078
 Frontend     3970-4068
 ```
+
+Device Tool port fallback is intentionally disabled because the Tool owns its
+server port through `tool/config.json`. Keep Tool source changes separate from
+Electron/backend runtime changes.
 
 Electron keeps stdout/stderr from the Device Tool, backend, and frontend in a
 background log buffer. It does not open the `OCR Terminal` window at startup.

@@ -42,6 +42,7 @@ type CameraImageViewerProps = {
   onTransformChange?: (transform: CameraViewTransform) => void;
   footerAction?: ReactNode;
   liveStats?: CameraLiveStats | null;
+  overlay?: ReactNode;
   title: string;
 };
 
@@ -73,6 +74,7 @@ export function CameraImageViewer({
   onTransformChange,
   footerAction,
   liveStats,
+  overlay,
   title,
 }: CameraImageViewerProps) {
   const { t } = useI18n();
@@ -243,6 +245,7 @@ export function CameraImageViewer({
               })
             }
           />
+          {overlay}
         </CameraPreviewTransformLayer>
       ) : (
         <div className="flex flex-col items-center gap-3 text-slate-400">

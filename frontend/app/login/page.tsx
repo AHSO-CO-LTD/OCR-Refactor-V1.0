@@ -1,12 +1,13 @@
 "use client";
 
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import {
   LoginSystemStatus,
   type LoginGateStatus,
 } from "@/components/auth/login-system-status";
+import { LoginStartupHardwareStatus } from "@/components/auth/login-startup-hardware-status";
 import { LanguageToggle } from "@/components/language-toggle";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
@@ -14,12 +15,19 @@ import { useVirtualKeyboard } from "@/components/ui/virtual-keyboard";
 import {
   ApiError,
   disconnectCamera,
-  getCurrentSession,
   getSetupStatus,
   login,
+  restoreRememberedSession,
 } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
-import { getPostLoginRoute } from "@/lib/operator-startup-preferences";
+import {
+  getOperatorStartupPreferences,
+  getPostLoginRoute,
+} from "@/lib/operator-startup-preferences";
+import {
+  getDesktopBridge,
+  type DesktopStartupHardwareStage,
+} from "@/lib/desktop";
 import {
   clearSession,
   getRememberedAccessToken,
@@ -35,53 +43,133 @@ export default function LoginPage() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [rememberLogin, setRememberLogin] = useState(false);
+  const [setupState, setSetupState] = useState<
+    "checking" | "ready" | "required"
+  >("checking");
   const [gateStatus, setGateStatus] = useState<LoginGateStatus>({
     checking: true,
     apiConnected: false,
     licenseReady: false,
   });
+  const [startupMode, setStartupMode] = useState<
+    "system" | "autoLogin" | "hardware" | "manual"
+  >("system");
+  const [startupHardwareStages, setStartupHardwareStages] = useState(
+    createPendingStartupHardwareStages,
+  );
+  const startupAttemptedRef = useRef(false);
 
   useEffect(() => {
     let cancelled = false;
 
     getSetupStatus()
       .then((response) => {
-        if (!cancelled && response.data.requiresAdminSetup) {
+        if (cancelled) return;
+        if (response.data.requiresAdminSetup) {
+          setSetupState("required");
           router.replace("/setup");
-        }
-      })
-      .catch(() => undefined);
-
-    const token = getRememberedAccessToken();
-
-    if (!token) {
-      return () => {
-        cancelled = true;
-      };
-    }
-
-    getCurrentSessionWithTimeout(token)
-      .then((response) => {
-        if (cancelled) {
           return;
         }
-
-        saveSession(token, response.data.user, { remember: true });
-        router.replace(getPostLoginRoute(response.data.user));
+        setSetupState("ready");
       })
       .catch(() => {
-        if (cancelled) {
-          return;
-        }
-
-        silentlyDisconnectCamera(token);
-        clearSession();
+        if (!cancelled) setSetupState("ready");
       });
 
     return () => {
       cancelled = true;
     };
   }, [router]);
+
+  useEffect(() => {
+    if (
+      gateStatus.checking ||
+      !gateStatus.apiConnected ||
+      !gateStatus.licenseReady ||
+      setupState !== "ready" ||
+      startupAttemptedRef.current
+    ) {
+      if (!gateStatus.checking && !gateStatus.licenseReady) {
+        const timerId = window.setTimeout(() => setStartupMode("manual"), 0);
+        return () => window.clearTimeout(timerId);
+      }
+      return;
+    }
+
+    startupAttemptedRef.current = true;
+    let cancelled = false;
+
+    async function runStartupFlow() {
+      const rememberedToken = getRememberedAccessToken();
+
+      if (rememberedToken) {
+        setStartupMode("autoLogin");
+        try {
+          const response = await getCurrentSessionWithTimeout(rememberedToken);
+          if (cancelled) return;
+          saveSession(rememberedToken, response.data.user, { remember: true });
+          router.replace(getPostLoginRoute(response.data.user));
+          return;
+        } catch {
+          if (cancelled) return;
+          silentlyDisconnectCamera(rememberedToken);
+          clearSession();
+        }
+      }
+
+      if (cancelled) return;
+      const bridge = getDesktopBridge();
+      if (!bridge) {
+        setStartupMode("manual");
+        return;
+      }
+
+      setStartupMode("hardware");
+      setStartupHardwareStages(createPendingStartupHardwareStages());
+      const unsubscribe = bridge.onStartupHardwareStatus((nextStage) => {
+        if (cancelled) return;
+        setStartupHardwareStages((current) =>
+          current.map((stage) =>
+            stage.id === nextStage.id ? nextStage : stage,
+          ),
+        );
+      });
+
+      try {
+        const preferences = getOperatorStartupPreferences();
+        const result = await bridge.prepareStartupHardware(
+          preferences?.productId,
+        );
+        if (!cancelled) setStartupHardwareStages(result.stages);
+      } catch {
+        if (!cancelled) {
+          setStartupHardwareStages((current) =>
+            current.map((stage) =>
+              stage.status === "running"
+                ? { ...stage, status: "failed" }
+                : stage.status === "pending"
+                  ? { ...stage, status: "skipped" }
+                  : stage,
+            ),
+          );
+        }
+      } finally {
+        unsubscribe();
+        if (!cancelled) setStartupMode("manual");
+      }
+    }
+
+    void runStartupFlow();
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    gateStatus.apiConnected,
+    gateStatus.checking,
+    gateStatus.licenseReady,
+    router,
+    setupState,
+  ]);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -160,38 +248,54 @@ export default function LoginPage() {
             </CardHeader>
 
             <CardContent>
-              <label className="block text-sm font-medium text-slate-700">
-                {t("auth.username")}
-                <input
-                  value={username}
-                  onChange={(event) => setUsername(event.target.value)}
-                  className="mt-2 h-11 w-full border border-slate-300 px-3 text-slate-950 outline-none transition focus:border-cyan-600"
-                  autoComplete="username"
-                />
-              </label>
-
-              <label className="mt-5 block text-sm font-medium text-slate-700">
-                {t("auth.password")}
-                <input
-                  value={password}
-                  onChange={(event) => setPassword(event.target.value)}
-                  className="mt-2 h-11 w-full border border-slate-300 px-3 text-slate-950 outline-none transition focus:border-cyan-600"
-                  type="password"
-                  autoComplete="current-password"
-                />
-              </label>
-
-              <label className="mt-5 flex min-h-11 items-center gap-3 text-sm font-medium text-slate-700">
-                <input
-                  checked={rememberLogin}
-                  onChange={(event) => setRememberLogin(event.target.checked)}
-                  className="h-5 w-5 border border-slate-300 accent-cyan-700"
-                  type="checkbox"
-                />
-                <span>{t("auth.rememberLogin")}</span>
-              </label>
-
               <LoginSystemStatus onChange={setGateStatus} />
+
+              {startupMode === "autoLogin" ? (
+                <div className="mt-5 border border-cyan-200 bg-cyan-50 px-3 py-3 text-sm font-medium text-cyan-900">
+                  {t("login.autoLoginChecking")}
+                </div>
+              ) : null}
+
+              {startupMode === "hardware" ? (
+                <LoginStartupHardwareStatus stages={startupHardwareStages} />
+              ) : null}
+
+              {startupMode === "manual" ? (
+                <>
+                  <label className="mt-5 block text-sm font-medium text-slate-700">
+                    {t("auth.username")}
+                    <input
+                      value={username}
+                      onChange={(event) => setUsername(event.target.value)}
+                      className="mt-2 h-11 w-full border border-slate-300 px-3 text-slate-950 outline-none transition focus:border-cyan-600"
+                      autoComplete="username"
+                    />
+                  </label>
+
+                  <label className="mt-5 block text-sm font-medium text-slate-700">
+                    {t("auth.password")}
+                    <input
+                      value={password}
+                      onChange={(event) => setPassword(event.target.value)}
+                      className="mt-2 h-11 w-full border border-slate-300 px-3 text-slate-950 outline-none transition focus:border-cyan-600"
+                      type="password"
+                      autoComplete="current-password"
+                    />
+                  </label>
+
+                  <label className="mt-5 flex min-h-11 items-center gap-3 text-sm font-medium text-slate-700">
+                    <input
+                      checked={rememberLogin}
+                      onChange={(event) =>
+                        setRememberLogin(event.target.checked)
+                      }
+                      className="h-5 w-5 border border-slate-300 accent-cyan-700"
+                      type="checkbox"
+                    />
+                    <span>{t("auth.rememberLogin")}</span>
+                  </label>
+                </>
+              ) : null}
 
               {error ? (
                 <div className="mt-5 border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
@@ -199,18 +303,29 @@ export default function LoginPage() {
                 </div>
               ) : null}
 
-              <Button
-                disabled={loading || gateStatus.checking || !gateStatus.licenseReady}
-                className="mt-7 w-full"
-              >
-                {loading ? t("auth.signingIn") : t("auth.login")}
-              </Button>
+              {startupMode === "manual" ? (
+                <Button
+                  disabled={
+                    loading || gateStatus.checking || !gateStatus.licenseReady
+                  }
+                  className="mt-7 w-full"
+                >
+                  {loading ? t("auth.signingIn") : t("auth.login")}
+                </Button>
+              ) : null}
             </CardContent>
           </Card>
         </form>
       </section>
     </main>
   );
+}
+
+function createPendingStartupHardwareStages(): DesktopStartupHardwareStage[] {
+  return ["plc", "cameraPower", "cameraLight", "camera"].map((id) => ({
+    id: id as DesktopStartupHardwareStage["id"],
+    status: "pending",
+  }));
 }
 
 function silentlyDisconnectCamera(accessToken: string | null | undefined) {
@@ -225,7 +340,7 @@ function getCurrentSessionWithTimeout(accessToken: string) {
   const controller = new AbortController();
   const timeoutId = window.setTimeout(() => controller.abort(), 8000);
 
-  return getCurrentSession(accessToken, { signal: controller.signal }).finally(
-    () => window.clearTimeout(timeoutId),
-  );
+  return restoreRememberedSession(accessToken, {
+    signal: controller.signal,
+  }).finally(() => window.clearTimeout(timeoutId));
 }

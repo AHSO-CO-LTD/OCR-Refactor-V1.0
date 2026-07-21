@@ -2,6 +2,7 @@
 
 import { AppShell } from "@/components/app-shell";
 import { TestSessionReportsPanel } from "@/components/reports/test-session-reports-panel";
+import { LineOperationReportsPanel } from "@/components/reports/line-operation-reports-panel";
 
 export default function ReportsPage() {
   return (
@@ -9,7 +10,10 @@ export default function ReportsPage() {
       titleKey="reports.title"
       descriptionKey="reports.description"
     >
-      <TestSessionReportsPanel />
+      <div className="grid gap-5">
+        <LineOperationReportsPanel />
+        <TestSessionReportsPanel />
+      </div>
     </AppShell>
   );
 }

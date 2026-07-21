@@ -5,6 +5,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { ReactNode, useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { AccountMenu } from "@/components/account-menu";
+import { MachineRuntimeOverlay } from "@/components/plc/machine-runtime-overlay";
 import { ConfirmModal } from "@/components/ui/confirm-modal";
 import type { SessionUser, SystemLicenseState } from "@/lib/api";
 import {
@@ -61,22 +62,15 @@ const menuItems = [
   { labelKey: "nav.users", href: "/dashboard/users", permission: "user.manage", groupKey: "navGroup.management" },
   { labelKey: "nav.roles", href: "/dashboard/roles", permission: "role.manage", groupKey: "navGroup.management" },
   {
-    labelKey: "nav.products",
-    href: "/dashboard/products",
-    permission: "product.manage",
-    groupKey: "navGroup.configuration",
-  },
-  { labelKey: "nav.camera", href: "/dashboard/camera", permission: "camera.manage", groupKey: "navGroup.configuration" },
-  {
-    labelKey: "nav.cameraIdentity",
-    href: "/dashboard/camera-identities",
-    permission: "camera.identity.manage",
+    labelKey: "nav.productCamera",
+    href: "/dashboard/configuration",
+    permission: ["product.manage", "roi.edit", "camera.manage", "camera.identity.manage"],
     groupKey: "navGroup.configuration",
   },
   {
-    labelKey: "nav.cameraDebug",
-    href: "/dashboard/camera-debug",
-    permission: "camera.debug.view",
+    labelKey: "nav.plc",
+    href: "/dashboard/configuration/plc",
+    permission: "plc.manage",
     groupKey: "navGroup.configuration",
   },
   {
@@ -88,7 +82,7 @@ const menuItems = [
 ] satisfies Array<{
   labelKey: TranslationKey;
   href: string;
-  permission: string | null;
+  permission: string | string[] | null;
   groupKey: NavGroupKey;
 }>;
 
@@ -110,6 +104,7 @@ const cameraRuntimePathPrefixes = [
   "/dashboard/camera-identities",
   "/dashboard/camera-debug",
   "/dashboard/products",
+  "/dashboard/configuration",
 ];
 
 export function AppShell({ children }: AppShellProps) {
@@ -139,6 +134,20 @@ export function AppShell({ children }: AppShellProps) {
     onLicenseLost: handleLicenseLost,
   });
   const isOperatorLinePage = pathname === "/dashboard/line";
+  const isConfigurationPage = pathname === "/dashboard/configuration";
+
+  useEffect(() => {
+    const previousHtmlOverflow = document.documentElement.style.overflow;
+    const previousBodyOverflow = document.body.style.overflow;
+
+    document.documentElement.style.overflow = "hidden";
+    document.body.style.overflow = "hidden";
+
+    return () => {
+      document.documentElement.style.overflow = previousHtmlOverflow;
+      document.body.style.overflow = previousBodyOverflow;
+    };
+  }, []);
 
   useEffect(() => {
     const token = getAccessToken();
@@ -406,6 +415,25 @@ export function AppShell({ children }: AppShellProps) {
                       const active = group.groupKey === matchedAdminGroup?.groupKey;
                       const opened = group.groupKey === selectedAdminGroup;
 
+                      if (group.items.length === 1) {
+                        const item = group.items[0];
+                        return (
+                          <Link
+                            key={group.groupKey}
+                            href={item.href}
+                            onClick={() => setSelectedAdminGroup(null)}
+                            className={[
+                              "flex h-9 items-center border px-3 text-sm font-medium transition",
+                              active
+                                ? "border-cyan-200 bg-cyan-50 text-cyan-900"
+                                : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50",
+                            ].join(" ")}
+                          >
+                            {t(group.labelKey)}
+                          </Link>
+                        );
+                      }
+
                       return (
                         <button
                           key={group.groupKey}
@@ -482,6 +510,7 @@ export function AppShell({ children }: AppShellProps) {
                 className={[
                   "min-h-0 min-w-0 flex-1 overflow-x-hidden p-4 sm:p-5 lg:p-5 xl:p-6",
                   isOperatorLinePage ? "overflow-y-hidden" : "overflow-y-auto",
+                  isConfigurationPage ? "[scrollbar-gutter:stable]" : "",
                 ].join(" ")}
               >
                 {children}
@@ -494,6 +523,7 @@ export function AppShell({ children }: AppShellProps) {
               className={[
                 "min-h-0 min-w-0 flex-1 overflow-x-hidden p-4 sm:p-5 lg:p-6",
                 isOperatorLinePage ? "overflow-y-hidden" : "overflow-y-auto",
+                isConfigurationPage ? "[scrollbar-gutter:stable]" : "",
               ].join(" ")}
             >
               {children}
@@ -534,6 +564,13 @@ export function AppShell({ children }: AppShellProps) {
             }
           />
         ) : null}
+        <MachineRuntimeOverlay
+          enabled={
+            user?.isDev === true ||
+            user?.permissions.includes("plc.manage") === true ||
+            user?.permissions.includes("plc.operate") === true
+          }
+        />
       </div>
     </main>
   );
@@ -619,6 +656,10 @@ function isActivePath(pathname: string, href: string) {
     return pathname === href;
   }
 
+  if (href === "/dashboard/configuration") {
+    return pathname === href;
+  }
+
   return pathname === href || pathname.startsWith(`${href}/`);
 }
 
@@ -642,12 +683,18 @@ function canAccessMenuItem(
   const permissionAllowed =
     item.permission === null ||
     user.isDev ||
-    user.permissions.includes(item.permission);
+    (Array.isArray(item.permission)
+      ? item.permission.some((permission) => user.permissions.includes(permission))
+      : user.permissions.includes(item.permission));
 
   return permissionAllowed;
 }
 
 function requiresCameraRuntime(pathname: string) {
+  if (pathname === "/dashboard/configuration/plc") {
+    return false;
+  }
+
   return cameraRuntimePathPrefixes.some(
     (prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`),
   );

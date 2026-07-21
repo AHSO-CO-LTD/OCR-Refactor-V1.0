@@ -10,7 +10,10 @@ import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { registerAutoUpdater } from "./auto-updater";
-import { ServiceManager } from "./service-manager";
+import {
+  ServiceManager,
+  type StartupHardwareStageUpdate,
+} from "./service-manager";
 
 type WindowPreset = "factory" | "hd" | "fullHd" | "fourThree" | "custom";
 
@@ -168,6 +171,18 @@ function registerDesktopIpc() {
   ipcMain.handle("desktop:get-test-storage-settings", () => testStorageSettings);
   ipcMain.handle("desktop:get-window-settings", () => windowSettings);
   ipcMain.handle("desktop:get-terminal-logs", () => [...terminalLogs]);
+  ipcMain.handle(
+    "desktop:prepare-startup-hardware",
+    (_event, preferredProductId?: string) => {
+      if (!serviceManager) {
+        return { stages: [] };
+      }
+      return serviceManager.prepareStartupHardware(
+        preferredProductId,
+        emitStartupHardwareStage,
+      );
+    },
+  );
   ipcMain.handle("desktop:open-terminal-window", () => {
     createTerminalWindow();
     showTerminalLog("[terminal] Opened from dev settings.");
@@ -233,6 +248,11 @@ function registerDesktopIpc() {
   ipcMain.handle("desktop:restart-app", () => {
     return requestAppRestart();
   });
+}
+
+function emitStartupHardwareStage(stage: StartupHardwareStageUpdate) {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  mainWindow.webContents.send("desktop-startup-hardware-status", stage);
 }
 
 function getRuntimeRoot() {

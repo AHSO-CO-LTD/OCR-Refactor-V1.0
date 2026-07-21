@@ -6,10 +6,17 @@ import { DeviceToolModule } from '../device-tool/device-tool.module';
 import { UsersModule } from '../users/users.module';
 import { InspectionsController } from './inspections.controller';
 import { InspectionsService } from './inspections.service';
+import { LineOperationReportService } from './line-operation-report.service';
 
 @Module({
   imports: [JwtModule.register({}), UsersModule, DeviceToolModule],
   controllers: [InspectionsController],
-  providers: [InspectionsService, JwtAuthGuard, PermissionsGuard],
+  providers: [
+    InspectionsService,
+    LineOperationReportService,
+    JwtAuthGuard,
+    PermissionsGuard,
+  ],
+  exports: [InspectionsService],
 })
 export class InspectionsModule {}

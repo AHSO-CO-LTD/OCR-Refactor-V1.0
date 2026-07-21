@@ -44,9 +44,9 @@ Copy-Item -LiteralPath (Join-Path $repoRoot "backend\dist") -Destination $backen
 Copy-Item -LiteralPath (Join-Path $repoRoot "backend\prisma") -Destination $backendRuntime -Recurse
 Copy-Item -LiteralPath (Join-Path $repoRoot "backend\package.json") -Destination $backendRuntime
 Copy-Item -LiteralPath (Join-Path $repoRoot "backend\native") -Destination $backendRuntime -Recurse
-Copy-Item -LiteralPath (Join-Path $repoRoot "backend\scripts") -Destination $backendRuntime -Recurse
 
-$dongleHelperRuntime = Join-Path $backendRuntime "scripts\check-dongle.py"
+$dongleHelperRuntime = Join-Path $backendRuntime "native\dongle-checker.exe"
+& (Join-Path $repoRoot "scripts\release\build-dongle-helper.ps1") -OutputPath $dongleHelperRuntime
 if (-not (Test-Path $dongleHelperRuntime)) {
   throw "Dongle helper was not staged at $dongleHelperRuntime"
 }

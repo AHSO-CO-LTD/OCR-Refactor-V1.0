@@ -7,6 +7,7 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Buffer } from 'node:buffer';
+import sharp from 'sharp';
 import WebSocket, { type RawData } from 'ws';
 import { PrismaService } from '../database/prisma.service';
 import {
@@ -171,6 +172,41 @@ export class DeviceToolService {
     return { data: this.toCameraIdentity(identity) };
   }
 
+  async testCameraIdentityConnection(id: string) {
+    const identity = await this.prisma.cameraIdentity.findUnique({
+      where: { id },
+    });
+
+    this.assertCameraIdentityConnectable(identity, id);
+    await this.disconnectCamera();
+
+    try {
+      const camera = await this.requestToolJson<ToolCameraStatus>(
+        this.getToolPath('/basler_area/connect'),
+        {
+          method: 'POST',
+          body: JSON.stringify({
+            exposure: 3500,
+            interface: identity.interfaceName ?? 'GigE',
+            serial: identity.serial,
+          }),
+        },
+        'test camera connection',
+      );
+      this.activeCameraSerial = identity.serial;
+
+      return {
+        data: {
+          connected: true,
+          identity: this.toCameraIdentity(identity),
+          runtime: this.toRuntimeStatusData(camera, identity),
+        },
+      };
+    } finally {
+      await this.disconnectCamera().catch(() => undefined);
+    }
+  }
+
   async listCameraDevices() {
     const identities = await this.discoverAndUpsertCameraIdentities();
 
@@ -213,16 +249,16 @@ export class DeviceToolService {
     };
   }
 
-  async ensureCameraReady(camera: CameraProfileDto) {
-    return this.ensureCameraConnected(camera);
+  async ensureCameraReady(camera: CameraProfileDto, signal?: AbortSignal) {
+    return this.ensureCameraConnected(camera, signal);
   }
 
   async ensureCameraPreviewReady(camera: CameraProfileDto) {
     return this.ensureCameraConnected(camera);
   }
 
-  async disconnectCamera() {
-    const serial = await this.getActiveCameraSerial();
+  async disconnectCamera(signal?: AbortSignal) {
+    const serial = await this.getActiveCameraSerial(signal);
 
     if (!serial) {
       return { success: true };
@@ -230,7 +266,7 @@ export class DeviceToolService {
 
     await this.requestToolJson<null>(
       this.getToolPath(`/basler_area/${encodeURIComponent(serial)}/disconnect`),
-      { method: 'POST' },
+      { method: 'POST', signal },
       'disconnect camera',
     );
     this.activeCameraSerial = null;
@@ -238,19 +274,25 @@ export class DeviceToolService {
     return { success: true };
   }
 
-  async grabCameraFrame(request: {
-    encodeFormat?: string;
-    jpegQuality?: number;
-  }) {
+  async grabCameraFrame(
+    request: {
+      encodeFormat?: string;
+      jpegQuality?: number;
+    },
+    signal?: AbortSignal,
+  ) {
     void request;
 
-    const serial = await this.requireActiveCameraSerial('grab camera frame');
+    const serial = await this.requireActiveCameraSerial(
+      'grab camera frame',
+      signal,
+    );
     const buffer = await this.requestToolBinary(
       this.getToolPath(`/camera/${encodeURIComponent(serial)}/grab`),
-      { method: 'GET' },
+      { method: 'GET', signal },
       'grab camera frame',
     );
-    const status = await this.getActiveCameraSession();
+    const status = await this.getActiveCameraSession(signal);
     const geometry = status?.geometry ?? {};
 
     return {
@@ -355,20 +397,81 @@ export class DeviceToolService {
   }
 
   async inspectProductImage(request: DeviceToolImageInspectionRequest) {
-    await this.loadOcrModel({
-      modelPath: request.modelPath,
-      thresholdAccept: request.thresholdAccept,
-      thresholdMns: request.thresholdMns,
-      rowThreshold: request.rowThreshold,
-    });
+    return this.inspectProductImageWithSignal(request);
+  }
+
+  async inspectProductFrame(
+    request: DeviceToolInspectionRequest,
+    imageBase64: string,
+    signal?: AbortSignal,
+  ) {
+    signal?.throwIfAborted();
+    const imageBuffer = this.decodeBase64Image(imageBase64);
+    const metadata = await sharp(imageBuffer).metadata();
+    const imageWidth = metadata.width ?? 0;
+    const imageHeight = metadata.height ?? 0;
+
+    if (imageWidth <= 0 || imageHeight <= 0) {
+      throw new BadRequestException('Captured camera frame has invalid size');
+    }
+
+    const crops = await Promise.all(
+      request.roiRegions.map(async (region) => ({
+        slotIndex: region.index,
+        imageBase64: await this.cropFrameRoi(
+          imageBuffer,
+          imageWidth,
+          imageHeight,
+          request.camera,
+          region,
+          request.rotateImageClockwise,
+        ),
+      })),
+    );
+    signal?.throwIfAborted();
+    const scan = await this.inspectProductImageWithSignal(
+      {
+        modelPath: request.modelPath,
+        crops,
+        roiRegions: request.roiRegions,
+        thresholdAccept: request.thresholdAccept,
+        thresholdMns: request.thresholdMns,
+        rowThreshold: request.rowThreshold,
+        rotateImageClockwise: request.rotateImageClockwise,
+      },
+      signal,
+    );
+
+    return {
+      ...scan,
+      image_width: imageWidth,
+      image_height: imageHeight,
+    };
+  }
+
+  private async inspectProductImageWithSignal(
+    request: DeviceToolImageInspectionRequest,
+    signal?: AbortSignal,
+  ) {
+    signal?.throwIfAborted();
+    await this.loadOcrModel(
+      {
+        modelPath: request.modelPath,
+        thresholdAccept: request.thresholdAccept,
+        thresholdMns: request.thresholdMns,
+        rowThreshold: request.rowThreshold,
+      },
+      signal,
+    );
 
     const startedAt = Date.now();
     const results = await Promise.all(
       request.crops.map(async (crop) => {
+        signal?.throwIfAborted();
         const roi = request.roiRegions.find(
           (region) => region.index === crop.slotIndex,
         );
-        const prediction = await this.predictOcrCrop(crop.imageBase64);
+        const prediction = await this.predictOcrCrop(crop.imageBase64, signal);
         const rows = (prediction.rows ?? []).map((row) => String(row));
 
         return {
@@ -442,8 +545,8 @@ export class DeviceToolService {
     return this.activeCameraSerial;
   }
 
-  async requireActiveCameraSerial(action: string) {
-    const serial = await this.getActiveCameraSerial();
+  async requireActiveCameraSerial(action: string, signal?: AbortSignal) {
+    const serial = await this.getActiveCameraSerial(signal);
 
     if (!serial) {
       throw new BadRequestException(
@@ -475,18 +578,22 @@ export class DeviceToolService {
     return serial;
   }
 
-  private async ensureCameraConnected(camera: CameraProfileDto) {
+  private async ensureCameraConnected(
+    camera: CameraProfileDto,
+    signal?: AbortSignal,
+  ) {
     if (camera.sourceType !== 'usb') {
       throw new BadRequestException(
         'Current device tool integration supports usb camera profiles only',
       );
     }
 
-    const identity = await this.resolveCameraIdentity(camera);
-    const activeSession = await this.getActiveCameraSession();
+    signal?.throwIfAborted();
+    const identity = await this.resolveCameraIdentity(camera, signal);
+    const activeSession = await this.getActiveCameraSession(signal);
 
     if (activeSession && activeSession.id !== identity.serial) {
-      await this.disconnectCamera();
+      await this.disconnectCamera(signal);
     }
 
     if (!activeSession || activeSession.id !== identity.serial) {
@@ -494,6 +601,7 @@ export class DeviceToolService {
         this.getToolPath('/basler_area/connect'),
         {
           method: 'POST',
+          signal,
           body: JSON.stringify({
             serial: identity.serial,
             interface: identity.interfaceName ?? 'GigE',
@@ -513,6 +621,7 @@ export class DeviceToolService {
       ),
       {
         method: 'POST',
+        signal,
         body: JSON.stringify({
           exposure: camera.exposure,
           width: camera.imageWidth,
@@ -528,10 +637,10 @@ export class DeviceToolService {
     return identity.serial;
   }
 
-  private async discoverAndUpsertCameraIdentities() {
+  private async discoverAndUpsertCameraIdentities(signal?: AbortSignal) {
     const devices = await this.requestToolJson<ToolBaslerDevice[]>(
       this.getToolPath('/basler_area/devices'),
-      { method: 'GET' },
+      { method: 'GET', signal },
       'list camera devices',
     );
     const now = new Date();
@@ -569,7 +678,10 @@ export class DeviceToolService {
     });
   }
 
-  private async resolveCameraIdentity(camera: CameraProfileDto) {
+  private async resolveCameraIdentity(
+    camera: CameraProfileDto,
+    signal?: AbortSignal,
+  ) {
     if (camera.cameraIdentityId) {
       const identity = await this.prisma.cameraIdentity.findUnique({
         where: { id: camera.cameraIdentityId },
@@ -592,7 +704,7 @@ export class DeviceToolService {
       return fromSaved;
     }
 
-    const discovered = await this.discoverAndUpsertCameraIdentities();
+    const discovered = await this.discoverAndUpsertCameraIdentities(signal);
     const fromDiscovered = this.findMatchingIdentity(
       discovered.filter((identity) =>
         this.isCameraIdentityConnectable(identity),
@@ -694,17 +806,20 @@ export class DeviceToolService {
     );
   }
 
-  private async getActiveCameraSerial() {
-    const session = await this.getActiveCameraSession();
+  private async getActiveCameraSerial(signal?: AbortSignal) {
+    const session = await this.getActiveCameraSession(signal);
     return session?.id ?? null;
   }
 
-  private async getActiveCameraSession() {
+  private async getActiveCameraSession(signal?: AbortSignal) {
     const sessions = await this.requestToolJson<ToolCameraStatus[]>(
       this.getToolPath('/camera/list'),
-      { method: 'GET' },
+      { method: 'GET', signal },
       'list connected cameras',
-    ).catch((): ToolCameraStatus[] => []);
+    ).catch((error): ToolCameraStatus[] => {
+      if (signal?.aborted) throw error;
+      return [];
+    });
 
     if (this.activeCameraSerial) {
       const activeSession = sessions.find(
@@ -725,16 +840,20 @@ export class DeviceToolService {
     return this.prisma.cameraIdentity.findUnique({ where: { serial } });
   }
 
-  private async loadOcrModel(request: {
-    modelPath: string;
-    thresholdAccept: number;
-    thresholdMns: number;
-    rowThreshold: number;
-  }) {
+  private async loadOcrModel(
+    request: {
+      modelPath: string;
+      thresholdAccept: number;
+      thresholdMns: number;
+      rowThreshold: number;
+    },
+    signal?: AbortSignal,
+  ) {
     await this.requestToolJson<Record<string, unknown>>(
       this.getToolPath('/AI/yolo_ocr/load_model'),
       {
         method: 'POST',
+        signal,
         body: JSON.stringify({
           model_path: request.modelPath,
           conf: request.thresholdAccept,
@@ -746,7 +865,7 @@ export class DeviceToolService {
     );
   }
 
-  private predictOcrCrop(imageBase64: string) {
+  private predictOcrCrop(imageBase64: string, signal?: AbortSignal) {
     return this.requestToolJson<ToolPredictResponse>(
       this.getToolPath('/AI/yolo_ocr/predict'),
       {
@@ -754,6 +873,7 @@ export class DeviceToolService {
         headers: {
           'Content-Type': 'application/octet-stream',
         },
+        signal,
         body: this.decodeBase64Image(imageBase64),
       },
       'predict OCR crop',
@@ -869,6 +989,58 @@ export class DeviceToolService {
     return Buffer.from(payload, 'base64');
   }
 
+  private async cropFrameRoi(
+    imageBuffer: Buffer,
+    imageWidth: number,
+    imageHeight: number,
+    camera: CameraProfileDto,
+    region: RoiRegionDto,
+    rotateImageClockwise: boolean,
+  ) {
+    const configuredWidth = Math.max(1, camera.imageWidth || imageWidth);
+    const configuredHeight = Math.max(1, camera.imageHeight || imageHeight);
+    const containScale = Math.min(
+      configuredWidth / imageWidth,
+      configuredHeight / imageHeight,
+    );
+    const displayedWidth = imageWidth * containScale;
+    const displayedHeight = imageHeight * containScale;
+    const offsetX = (configuredWidth - displayedWidth) / 2;
+    const offsetY = (configuredHeight - displayedHeight) / 2;
+    const scaleX = imageWidth / displayedWidth;
+    const scaleY = imageHeight / displayedHeight;
+    const centerX = (region.x - offsetX) * scaleX;
+    const centerY = (region.y - offsetY) * scaleY;
+    const targetWidth = Math.max(1, Math.round(region.width * scaleX));
+    const targetHeight = Math.max(1, Math.round(region.height * scaleY));
+    const left = Math.max(
+      0,
+      Math.min(imageWidth - 1, Math.round(centerX - targetWidth / 2)),
+    );
+    const top = Math.max(
+      0,
+      Math.min(imageHeight - 1, Math.round(centerY - targetHeight / 2)),
+    );
+    const width = Math.max(1, Math.min(targetWidth, imageWidth - left));
+    const height = Math.max(1, Math.min(targetHeight, imageHeight - top));
+    const rotation = rotateImageClockwise
+      ? 90
+      : this.toToolRotation(region.rotation);
+
+    let pipeline = sharp(imageBuffer).extract({ left, top, width, height });
+    if (rotation !== 0) pipeline = pipeline.rotate(rotation);
+
+    const output = await pipeline
+      .resize(targetWidth, targetHeight, {
+        fit: 'contain',
+        background: { r: 0, g: 0, b: 0, alpha: 1 },
+      })
+      .jpeg({ quality: 88 })
+      .toBuffer();
+
+    return `data:image/jpeg;base64,${output.toString('base64')}`;
+  }
+
   private async requestRawJson<T>(path: string, init: RequestInit): Promise<T> {
     const response = await this.fetchTool(
       path,
@@ -919,10 +1091,14 @@ export class DeviceToolService {
     }
 
     try {
+      const timeoutSignal = AbortSignal.timeout(15000);
+      const signal = init.signal
+        ? AbortSignal.any([init.signal, timeoutSignal])
+        : timeoutSignal;
       const response = await fetch(`${this.getBaseUrl()}${path}`, {
         ...init,
         headers,
-        signal: AbortSignal.timeout(15000),
+        signal,
       });
 
       if (!response.ok) {
@@ -984,7 +1160,7 @@ export class DeviceToolService {
   private getBaseUrl() {
     const value =
       this.configService.get<string>('DEVICE_TOOL_BASE_URL') ??
-      'http://localhost:8000';
+      'http://localhost:8668';
 
     return value.replace(/\/+$/, '');
   }

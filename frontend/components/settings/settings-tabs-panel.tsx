@@ -4,6 +4,7 @@ import { useState } from "react";
 import { AiSettingsPanel } from "@/components/settings/ai-settings-panel";
 import { DesktopSettingsPanel } from "@/components/settings/desktop-settings-panel";
 import { LanguageSettingsPanel } from "@/components/settings/language-settings-panel";
+import { LineResultSettingsPanel } from "@/components/settings/line-result-settings-panel";
 import { OcrTestSettingsPanel } from "@/components/settings/ocr-test-settings-panel";
 import { RuntimeTestSettingsPanel } from "@/components/settings/runtime-test-settings-panel";
 import { TerminalSettingsPanel } from "@/components/settings/terminal-settings-panel";
@@ -16,6 +17,7 @@ type SettingsTab =
   | "language"
   | "volume"
   | "ai"
+  | "line-result"
   | "ocr-test"
   | "runtime-test"
   | "terminal";
@@ -28,6 +30,7 @@ export function SettingsTabsPanel() {
     currentRole === "dev" ||
     currentRole === "admin" ||
     currentRole === "engineer";
+  const canManageLineResultSettings = canManageAiSettings;
   const canManageOcrTestSettings = currentRole === "dev";
   const canManageRuntimeTestSettings = currentRole === "dev";
   const canManageTerminalSettings = currentRole === "dev";
@@ -58,6 +61,13 @@ export function SettingsTabsPanel() {
             onClick={() => setActiveTab("ai")}
           />
         ) : null}
+        {canManageLineResultSettings ? (
+          <TabButton
+            active={activeTab === "line-result"}
+            label={t("settings.tabLineResult")}
+            onClick={() => setActiveTab("line-result")}
+          />
+        ) : null}
         {canManageOcrTestSettings ? (
           <TabButton
             active={activeTab === "ocr-test"}
@@ -85,6 +95,9 @@ export function SettingsTabsPanel() {
       {activeTab === "language" ? <LanguageSettingsPanel /> : null}
       {activeTab === "volume" ? <VolumeSettingsPanel /> : null}
       {canManageAiSettings && activeTab === "ai" ? <AiSettingsPanel /> : null}
+      {canManageLineResultSettings && activeTab === "line-result" ? (
+        <LineResultSettingsPanel />
+      ) : null}
       {canManageOcrTestSettings && activeTab === "ocr-test" ? (
         <OcrTestSettingsPanel />
       ) : null}

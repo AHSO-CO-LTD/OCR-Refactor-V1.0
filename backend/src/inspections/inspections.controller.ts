@@ -3,8 +3,10 @@ import {
   Controller,
   Get,
   Param,
+  Patch,
   Post,
   Query,
+  StreamableFile,
   UseGuards,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
@@ -17,16 +19,22 @@ import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { PermissionsGuard } from '../auth/permissions.guard';
 import { PERMISSIONS } from '../common/constants/permissions';
 import { CreateTestSessionReportDto } from './dto/create-test-session-report.dto';
+import { UpdateLineResultSettingsDto } from './dto/line-result-settings.dto';
 import { StartInspectionDto } from './dto/start-inspection.dto';
+import { StopInspectionDto } from './dto/stop-inspection.dto';
 import { TestInspectionImageDto } from './dto/test-inspection-image.dto';
 import { InspectionsService } from './inspections.service';
+import { LineOperationReportService } from './line-operation-report.service';
 
 @ApiTags('inspections')
 @ApiBearerAuth()
 @Controller('inspections')
 @UseGuards(JwtAuthGuard, PermissionsGuard)
 export class InspectionsController {
-  constructor(private readonly inspectionsService: InspectionsService) {}
+  constructor(
+    private readonly inspectionsService: InspectionsService,
+    private readonly lineOperationReportService: LineOperationReportService,
+  ) {}
 
   @ApiOperation({
     summary: 'Start an inspection job and run the first OCR scan',
@@ -38,6 +46,19 @@ export class InspectionsController {
     @CurrentUser() user: { id: string; username: string; role: string },
   ) {
     return this.inspectionsService.startInspection(dto, user);
+  }
+
+  @ApiOperation({
+    summary:
+      'Open an inspection session for continuous detection and PLC result latching',
+  })
+  @Post('begin')
+  @RequirePermissions(PERMISSIONS.INSPECTION_START)
+  beginInspectionSession(
+    @Body() dto: StartInspectionDto,
+    @CurrentUser() user: { id: string; username: string; role: string },
+  ) {
+    return this.inspectionsService.beginInspectionSession(dto, user);
   }
 
   @ApiOperation({
@@ -89,6 +110,60 @@ export class InspectionsController {
     );
   }
 
+  @ApiOperation({ summary: 'Summarize latched Line results by date range' })
+  @Get('line-reports/summary')
+  @RequirePermissions(PERMISSIONS.REPORT_VIEW)
+  getLineReportSummary(
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+    @Query('groupBy') groupBy?: string,
+  ) {
+    return this.lineOperationReportService.getSummary(from, to, groupBy);
+  }
+
+  @ApiOperation({ summary: 'Export latched Line results as XLSX' })
+  @Get('line-reports/export')
+  @RequirePermissions(PERMISSIONS.REPORT_VIEW)
+  async exportLineReport(
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+    @Query('groupBy') groupBy?: string,
+  ) {
+    const buffer = await this.lineOperationReportService.exportWorkbook(
+      from,
+      to,
+      groupBy,
+    );
+    return new StreamableFile(buffer, {
+      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      disposition: `attachment; filename="line-report-${new Date()
+        .toISOString()
+        .slice(0, 10)}.xlsx"`,
+    });
+  }
+
+  @ApiOperation({ summary: 'Get line result save settings' })
+  @Get('line-result-settings')
+  @RequireAnyPermission(
+    PERMISSIONS.PRODUCT_MANAGE,
+    PERMISSIONS.INSPECTION_TEST,
+    PERMISSIONS.SYSTEM_DEBUG,
+  )
+  getLineResultSettings() {
+    return this.inspectionsService.getLineResultSettings();
+  }
+
+  @ApiOperation({ summary: 'Update line result save settings' })
+  @Patch('line-result-settings')
+  @RequireAnyPermission(
+    PERMISSIONS.PRODUCT_MANAGE,
+    PERMISSIONS.INSPECTION_TEST,
+    PERMISSIONS.SYSTEM_DEBUG,
+  )
+  updateLineResultSettings(@Body() dto: UpdateLineResultSettingsDto) {
+    return this.inspectionsService.updateLineResultSettings(dto);
+  }
+
   @ApiOperation({ summary: 'Get the current running inspection job' })
   @Get('current')
   @RequireAnyPermission(
@@ -102,7 +177,10 @@ export class InspectionsController {
   @ApiOperation({ summary: 'Stop an inspection job' })
   @Post(':jobId/stop')
   @RequirePermissions(PERMISSIONS.INSPECTION_STOP)
-  stopInspection(@Param('jobId') jobId: string) {
-    return this.inspectionsService.stopInspection(jobId);
+  stopInspection(
+    @Param('jobId') jobId: string,
+    @Body() dto?: StopInspectionDto,
+  ) {
+    return this.inspectionsService.stopInspection(jobId, dto?.endReason);
   }
 }

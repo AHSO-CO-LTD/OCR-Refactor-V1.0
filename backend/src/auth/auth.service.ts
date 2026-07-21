@@ -69,6 +69,26 @@ export class AuthService {
   }
 
   async me(userId: string) {
+    const licenseAllowed = await this.systemService.assertLoginAllowed();
+
+    if (!licenseAllowed) {
+      throw new UnauthorizedException('License dongle is missing');
+    }
+
+    return this.resolveSession(userId);
+  }
+
+  async restore(userId: string) {
+    const licenseAllowed = await this.systemService.assertAutoLoginAllowed();
+
+    if (!licenseAllowed) {
+      throw new UnauthorizedException('Physical license dongle is required');
+    }
+
+    return this.resolveSession(userId);
+  }
+
+  private async resolveSession(userId: string) {
     const user = await this.usersService.findById(userId);
 
     if (!user || !user.active) {

@@ -35,6 +35,7 @@ export class CameraController {
   @Get('status')
   @RequireAnyPermission(
     PERMISSIONS.CAMERA_MANAGE,
+    PERMISSIONS.ROI_EDIT,
     PERMISSIONS.INSPECTION_START,
     PERMISSIONS.INSPECTION_TEST,
   )
@@ -47,6 +48,7 @@ export class CameraController {
   @RequireAnyPermission(
     PERMISSIONS.CAMERA_MANAGE,
     PERMISSIONS.CAMERA_IDENTITY_MANAGE,
+    PERMISSIONS.ROI_EDIT,
     PERMISSIONS.INSPECTION_START,
     PERMISSIONS.INSPECTION_TEST,
   )
@@ -56,9 +58,22 @@ export class CameraController {
 
   @ApiOperation({ summary: 'List saved camera identities mapped by serial' })
   @Get('identities')
-  @RequireAnyPermission(PERMISSIONS.CAMERA_IDENTITY_MANAGE)
+  @RequireAnyPermission(
+    PERMISSIONS.CAMERA_MANAGE,
+    PERMISSIONS.CAMERA_IDENTITY_MANAGE,
+  )
   listIdentities() {
     return this.deviceToolService.listCameraIdentities();
+  }
+
+  @ApiOperation({ summary: 'Test a saved camera identity connection' })
+  @Post('identities/:id/test-connection')
+  @RequireAnyPermission(
+    PERMISSIONS.CAMERA_MANAGE,
+    PERMISSIONS.CAMERA_IDENTITY_MANAGE,
+  )
+  testIdentityConnection(@Param('id') id: string) {
+    return this.deviceToolService.testCameraIdentityConnection(id);
   }
 
   @ApiOperation({
@@ -100,6 +115,7 @@ export class CameraController {
   @Get('ranges')
   @RequireAnyPermission(
     PERMISSIONS.CAMERA_MANAGE,
+    PERMISSIONS.ROI_EDIT,
     PERMISSIONS.INSPECTION_START,
     PERMISSIONS.INSPECTION_TEST,
   )
@@ -114,6 +130,7 @@ export class CameraController {
   @RequireAnyPermission(
     PERMISSIONS.CAMERA_MANAGE,
     PERMISSIONS.CAMERA_DEBUG_VIEW,
+    PERMISSIONS.ROI_EDIT,
     PERMISSIONS.INSPECTION_START,
     PERMISSIONS.INSPECTION_TEST,
   )
@@ -125,6 +142,7 @@ export class CameraController {
   @Post('connect')
   @RequireAnyPermission(
     PERMISSIONS.CAMERA_MANAGE,
+    PERMISSIONS.ROI_EDIT,
     PERMISSIONS.INSPECTION_START,
     PERMISSIONS.INSPECTION_TEST,
   )
@@ -138,6 +156,7 @@ export class CameraController {
   @RequireAnyPermission(
     PERMISSIONS.CAMERA_MANAGE,
     PERMISSIONS.CAMERA_DEBUG_VIEW,
+    PERMISSIONS.ROI_EDIT,
     PERMISSIONS.INSPECTION_START,
     PERMISSIONS.INSPECTION_TEST,
   )
@@ -149,6 +168,7 @@ export class CameraController {
   @Post('grab')
   @RequireAnyPermission(
     PERMISSIONS.CAMERA_MANAGE,
+    PERMISSIONS.ROI_EDIT,
     PERMISSIONS.INSPECTION_START,
     PERMISSIONS.INSPECTION_TEST,
   )

@@ -196,7 +196,7 @@ Current UI behavior:
 - `/dashboard` currently hosts the operator runtime foundation instead of a separate dedicated runtime module route.
 - On the operator runtime screen, `quantity` should be shown before `count` because `quantity` is the batch-progress number and `count` is only the current-scan recognized amount.
 - `roi`, `history`, and `reports` are present in menu permissions but do not have their own pages yet.
-- Camera operations now have a dedicated page at `/dashboard/camera`; the page still depends on the Device Tool running locally, usually at `http://localhost:8000`.
+- Camera operations now have a dedicated page at `/dashboard/camera`; the page still depends on the Device Tool running locally, usually at `http://localhost:8668`.
 - Product preview uses `frontend/public/preview-background.png` to simulate camera output when no live camera preview is available.
 - Product profile save must reject overlapping ROI regions.
 

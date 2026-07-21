@@ -74,6 +74,24 @@ function Protect-ProgramDataFile {
   }
 }
 
+function Remove-StalePlaintextDongleHelper {
+  $staleHelperPath = Join-Path $runtimeRoot "backend\scripts\check-dongle.py"
+  if (-not (Test-Path $staleHelperPath)) {
+    return
+  }
+
+  Remove-Item -LiteralPath $staleHelperPath -Force
+  Write-BootstrapLog "Removed stale plaintext dongle helper from previous install."
+
+  $staleScriptsDir = Split-Path -Parent $staleHelperPath
+  if (
+    (Test-Path $staleScriptsDir) -and
+    -not (Get-ChildItem -LiteralPath $staleScriptsDir -Force -ErrorAction SilentlyContinue)
+  ) {
+    Remove-Item -LiteralPath $staleScriptsDir -Force
+  }
+}
+
 function Find-CommandPath {
   param([string]$Name)
 
@@ -775,6 +793,7 @@ $psql = $null
 
 try {
   New-Item -ItemType Directory -Force -Path $programDataRoot | Out-Null
+  Remove-StalePlaintextDongleHelper
 
   $dbConfig = Get-DatabaseConfig
   Assert-PostgresIdentifier -Name $dbConfig.name -Label "Database name"
@@ -849,16 +868,17 @@ try {
 NODE_ENV=production
 BACKEND_PORT=3979
 FRONTEND_PORT=3969
-DEVICE_TOOL_PORT=8000
+DEVICE_TOOL_PORT=8668
 FRONTEND_ORIGIN=http://localhost:3969,http://127.0.0.1:3969
 NEXT_PUBLIC_API_BASE_URL=http://127.0.0.1:3979/api
 DATABASE_URL=$databaseUrl
 JWT_SECRET=$jwtSecret
-DEVICE_TOOL_BASE_URL=http://127.0.0.1:8000
+DEVICE_TOOL_BASE_URL=http://127.0.0.1:8668
 DEVICE_TOOL_API_PREFIX=/tool/v1
 DEVICE_TOOL_PYTHON=$runtimeRoot\tool\.venv\Scripts\python.exe
 DONGLE_MOCK_MODE=false
 DONGLE_DLL_PATH=$runtimeRoot\backend\native\System8.dll
+DONGLE_HELPER_PATH=$runtimeRoot\backend\native\dongle-checker.exe
 DONGLE_PYTHON_COMMAND=$runtimeRoot\tool\.venv\Scripts\python.exe
 DONGLE_RETRY_COUNT=3
 DONGLE_RETRY_INTERVAL_MS=1000

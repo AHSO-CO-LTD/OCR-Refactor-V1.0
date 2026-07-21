@@ -43,6 +43,7 @@
         "to": "installer",
         "filter": [
           "**/*.ps1",
+          "**/*.json",
           "**/*.md"
         ]
       }

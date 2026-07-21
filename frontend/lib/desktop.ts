@@ -21,6 +21,17 @@ export type DesktopTestStorageSettings = {
   testImageSaveFolderPath: string | null;
 };
 
+export type DesktopStartupHardwareStageId =
+  | "plc"
+  | "cameraPower"
+  | "cameraLight"
+  | "camera";
+
+export type DesktopStartupHardwareStage = {
+  id: DesktopStartupHardwareStageId;
+  status: "pending" | "running" | "done" | "skipped" | "failed";
+};
+
 export type DesktopBridge = {
   applyWindowSettings(
     settings: Partial<DesktopWindowSettings>,
@@ -33,6 +44,9 @@ export type DesktopBridge = {
   getWindowSettings(): Promise<DesktopWindowSettings>;
   installUpdate(): Promise<{ success: boolean }>;
   openTerminalWindow(): Promise<{ success: boolean }>;
+  prepareStartupHardware(
+    preferredProductId?: string,
+  ): Promise<{ stages: DesktopStartupHardwareStage[] }>;
   restartApp(): Promise<{ success: boolean }>;
   saveTestStorageSettings(
     settings: DesktopTestStorageSettings,
@@ -41,6 +55,9 @@ export type DesktopBridge = {
   selectModelFile(): Promise<{ canceled: boolean; filePath: string | null }>;
   onTerminalLog(callback: (message: string) => void): () => void;
   onShutdownStatus(callback: (message: string) => void): () => void;
+  onStartupHardwareStatus(
+    callback: (payload: DesktopStartupHardwareStage) => void,
+  ): () => void;
   onUpdateStatus(callback: (payload: Record<string, unknown>) => void): () => void;
   platform: string;
   versions: {

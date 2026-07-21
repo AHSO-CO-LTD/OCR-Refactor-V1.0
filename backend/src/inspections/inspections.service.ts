@@ -5,13 +5,20 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { randomUUID } from 'crypto';
-import { mkdir, writeFile } from 'fs/promises';
+import { mkdir, unlink, writeFile } from 'fs/promises';
 import { basename, dirname, extname, join, resolve } from 'path';
-import { InspectionResult, InspectionStatus, Prisma } from '@prisma/client';
+import {
+  InspectionResult,
+  InspectionStatus,
+  LineResultSavePolicy,
+  LineSessionEndReason,
+  Prisma,
+} from '@prisma/client';
 import { PrismaService } from '../database/prisma.service';
 import { DeviceToolService } from '../device-tool/device-tool.service';
 import { CameraProfileDto } from '../products/dto/product-profile.dto';
 import { CreateTestSessionReportDto } from './dto/create-test-session-report.dto';
+import { UpdateLineResultSettingsDto } from './dto/line-result-settings.dto';
 import {
   evaluateInspectionSlot,
   resolveInspectionAggregateResult,
@@ -25,6 +32,8 @@ const productInclude = {
   roiRegions: { orderBy: { index: 'asc' as const } },
 };
 
+const LINE_RESULT_SETTINGS_ID = 'default';
+
 type ProductWithProfile = Prisma.ProductGetPayload<{
   include: typeof productInclude;
 }>;
@@ -37,8 +46,23 @@ type InspectionJobWithLogs = Prisma.InspectionJobGetPayload<{
   };
 }>;
 
+type ProductFrameScan = Awaited<
+  ReturnType<DeviceToolService['inspectProductFrame']>
+>;
+
+type CompletedLineDetection = {
+  jobId: string;
+  productId: string;
+  imageBase64: string;
+  completedAt: Date;
+  product: ProductWithProfile;
+  scan: ProductFrameScan;
+};
+
 @Injectable()
 export class InspectionsService {
+  private latestCompletedLineDetection: CompletedLineDetection | null = null;
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly deviceToolService: DeviceToolService,
@@ -78,6 +102,9 @@ export class InspectionsService {
       throw new ConflictException('Another inspection job is already running');
     }
 
+    const lineResultSettings = existingRunningJob
+      ? null
+      : await this.ensureLineResultSettings();
     const job =
       existingRunningJob ??
       (await this.prisma.inspectionJob.create({
@@ -87,6 +114,8 @@ export class InspectionsService {
           status: InspectionStatus.running,
           startedAt: new Date(),
           note: dto.operatorNote || null,
+          resultSaveFolderPath: lineResultSettings?.saveFolderPath ?? null,
+          resultSavePolicy: lineResultSettings?.savePolicy ?? null,
         },
       }));
 
@@ -180,6 +209,267 @@ export class InspectionsService {
     }
 
     return { data: await this.buildInspectionState(job.id) };
+  }
+
+  async beginInspectionSession(
+    dto: StartInspectionDto,
+    user: { id: string; username: string; role: string },
+  ) {
+    const product = await this.prisma.product.findUnique({
+      where: { id: dto.productId },
+      include: productInclude,
+    });
+
+    if (!product || !product.active) {
+      throw new NotFoundException('Active product not found');
+    }
+    if (!product.modelPath) {
+      throw new BadRequestException('Product model path is required');
+    }
+    if (product.roiRegions.length === 0) {
+      throw new BadRequestException('Product ROI regions are required');
+    }
+
+    const existingRunningJob = await this.prisma.inspectionJob.findFirst({
+      where: { status: InspectionStatus.running },
+      orderBy: { createdAt: 'desc' },
+    });
+    if (
+      existingRunningJob &&
+      (existingRunningJob.productId !== product.id ||
+        existingRunningJob.operatorId !== user.id)
+    ) {
+      throw new ConflictException('Another inspection job is already running');
+    }
+
+    if (existingRunningJob) {
+      return { data: await this.buildInspectionState(existingRunningJob.id) };
+    }
+
+    const lineResultSettings = await this.ensureLineResultSettings();
+    const job = await this.prisma.inspectionJob.create({
+      data: {
+        productId: product.id,
+        operatorId: user.id,
+        status: InspectionStatus.running,
+        startedAt: new Date(),
+        note: dto.operatorNote || null,
+        resultSaveFolderPath: lineResultSettings.saveFolderPath ?? null,
+        resultSavePolicy: lineResultSettings.savePolicy ?? null,
+      },
+    });
+
+    return { data: await this.buildInspectionState(job.id) };
+  }
+
+  async refreshLatestRunningInspection(signal?: AbortSignal) {
+    const job = await this.prisma.inspectionJob.findFirst({
+      where: { status: InspectionStatus.running },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    if (!job) {
+      throw new BadRequestException(
+        'A running inspection job is required for continuous detection',
+      );
+    }
+
+    const product = await this.getActiveProductForScan(job.productId);
+    signal?.throwIfAborted();
+    await this.deviceToolService.ensureCameraReady(
+      this.toCameraProfile(product),
+      signal,
+    );
+    const frame = await this.deviceToolService.grabCameraFrame(
+      { encodeFormat: '.jpg', jpegQuality: 90 },
+      signal,
+    );
+    signal?.throwIfAborted();
+
+    if (!frame.image_base64) {
+      throw new BadRequestException(
+        'Continuous detection returned no camera frame',
+      );
+    }
+
+    const scan = await this.deviceToolService.inspectProductFrame(
+      {
+        modelPath: product.modelPath!,
+        camera: this.toCameraProfile(product),
+        roiRegions: product.roiRegions.map((region) => ({
+          index: region.index,
+          x: region.x,
+          y: region.y,
+          width: region.width,
+          height: region.height,
+          rotation: Number(region.rotation),
+        })),
+        thresholdAccept: Number(product.thresholdAccept),
+        thresholdMns: Number(product.thresholdMns),
+        rowThreshold: product.rowThreshold,
+        rotateImageClockwise: product.rotateTestImageClockwise,
+      },
+      frame.image_base64,
+      signal,
+    );
+    signal?.throwIfAborted();
+
+    const completedAt = new Date();
+    const completedDetection: CompletedLineDetection = {
+      jobId: job.id,
+      productId: product.id,
+      imageBase64: frame.image_base64,
+      completedAt,
+      product,
+      scan,
+    };
+    this.latestCompletedLineDetection = completedDetection;
+
+    return {
+      data: await this.buildLiveInspectionState(completedDetection),
+    };
+  }
+
+  async captureRunningInspectionFromPlc(signal?: AbortSignal) {
+    const completedDetection = this.latestCompletedLineDetection;
+
+    if (!completedDetection) {
+      throw new BadRequestException(
+        'No completed detection is available for PLC capture',
+      );
+    }
+
+    signal?.throwIfAborted();
+    const job = await this.prisma.inspectionJob.findFirst({
+      where: { status: InspectionStatus.running },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    if (!job || job.id !== completedDetection.jobId) {
+      throw new BadRequestException(
+        'The latest completed detection does not belong to the running job',
+      );
+    }
+
+    const capturedAt = new Date();
+    const imagePath = await this.savePlcCaptureFrame({
+      job,
+      productCode: completedDetection.product.code,
+      imageBase64: completedDetection.imageBase64,
+      capturedAt,
+    });
+
+    try {
+      signal?.throwIfAborted();
+      await this.persistPlcCaptureLogs({
+        jobId: job.id,
+        product: completedDetection.product,
+        scan: completedDetection.scan,
+        imagePath,
+        capturedAt,
+      });
+    } catch (error) {
+      if (signal?.aborted && imagePath) {
+        await unlink(imagePath).catch(() => undefined);
+      }
+      throw error;
+    }
+
+    return { data: await this.buildInspectionState(job.id) };
+  }
+
+  clearLatestRunningInspection() {
+    this.latestCompletedLineDetection = null;
+  }
+
+  async verifyRunningInspectionCameraFrame() {
+    const job = await this.prisma.inspectionJob.findFirst({
+      where: { status: InspectionStatus.running },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    if (!job) {
+      throw new BadRequestException(
+        'A running inspection job is required to restore the camera',
+      );
+    }
+
+    const product = await this.prisma.product.findUnique({
+      where: { id: job.productId },
+      include: productInclude,
+    });
+
+    if (!product || !product.active) {
+      throw new NotFoundException('Active product not found');
+    }
+
+    await this.deviceToolService.ensureCameraReady(
+      this.toCameraProfile(product),
+    );
+    const frame = await this.deviceToolService.grabCameraFrame({
+      encodeFormat: '.jpg',
+      jpegQuality: 70,
+    });
+
+    if (!frame.image_base64) {
+      throw new BadRequestException('Camera connected but returned no frame');
+    }
+
+    return { success: true, width: frame.width, height: frame.height };
+  }
+
+  async verifyStartupCameraFrame(preferredProductId?: string) {
+    const products = await this.prisma.product.findMany({
+      where: { active: true },
+      include: productInclude,
+      orderBy: { updatedAt: 'desc' },
+    });
+    const latestJob = await this.prisma.inspectionJob.findFirst({
+      orderBy: { createdAt: 'desc' },
+      select: { productId: true },
+    });
+    const isConnectable = (product: ProductWithProfile) =>
+      ['usb', 'rtsp'].includes(
+        product.cameraConfig?.sourceType.trim().toLowerCase() ?? '',
+      );
+    const product =
+      products.find(
+        (item) => item.id === preferredProductId && isConnectable(item),
+      ) ??
+      products.find(
+        (item) => item.id === latestJob?.productId && isConnectable(item),
+      ) ??
+      products.find(isConnectable) ??
+      null;
+
+    if (!product) {
+      throw new BadRequestException(
+        'No active camera product profile is available for startup',
+      );
+    }
+
+    await this.deviceToolService.ensureCameraReady(
+      this.toCameraProfile(product),
+    );
+    const frame = await this.deviceToolService.grabCameraFrame({
+      encodeFormat: '.jpg',
+      jpegQuality: 70,
+    });
+
+    if (!frame.image_base64) {
+      throw new BadRequestException(
+        'Camera connected during startup but returned no frame',
+      );
+    }
+
+    return {
+      data: {
+        productId: product.id,
+        productCode: product.code,
+        width: frame.width,
+        height: frame.height,
+      },
+    };
   }
 
   async testImage(dto: TestInspectionImageDto) {
@@ -600,7 +890,50 @@ export class InspectionsService {
     };
   }
 
-  async stopInspection(jobId: string) {
+  async getLineResultSettings() {
+    const settings = await this.ensureLineResultSettings();
+
+    return { data: this.toLineResultSettings(settings) };
+  }
+
+  async updateLineResultSettings(dto: UpdateLineResultSettingsDto) {
+    const currentSettings = await this.ensureLineResultSettings();
+    const hasSaveFolderPath = Object.prototype.hasOwnProperty.call(
+      dto,
+      'saveFolderPath',
+    );
+    const saveFolderPath = hasSaveFolderPath
+      ? dto.saveFolderPath?.trim() || null
+      : currentSettings.saveFolderPath;
+    const savePolicy = dto.savePolicy ?? currentSettings.savePolicy;
+
+    if (savePolicy !== LineResultSavePolicy.none && !saveFolderPath) {
+      throw new BadRequestException(
+        'Line result save folder is required unless saving is disabled',
+      );
+    }
+
+    const settings = await this.prisma.lineResultSettings.update({
+      where: { id: LINE_RESULT_SETTINGS_ID },
+      data: {
+        saveFolderPath,
+        savePolicy,
+        saveBySession: dto.saveBySession ?? currentSettings.saveBySession,
+        newSessionOnLineStop:
+          dto.newSessionOnLineStop ?? currentSettings.newSessionOnLineStop,
+        newSessionOnProductChange:
+          dto.newSessionOnProductChange ??
+          currentSettings.newSessionOnProductChange,
+      },
+    });
+
+    return { data: this.toLineResultSettings(settings) };
+  }
+
+  async stopInspection(
+    jobId: string,
+    endReason: LineSessionEndReason = LineSessionEndReason.line_stop,
+  ) {
     const job = await this.prisma.inspectionJob.findUnique({
       where: { id: jobId },
       select: { id: true, status: true },
@@ -620,10 +953,368 @@ export class InspectionsService {
       data: {
         status: nextStatus,
         stoppedAt: new Date(),
+        endReason,
       },
     });
 
+    await this.writeLineResultSession(jobId);
+
     return { data: await this.buildInspectionState(jobId) };
+  }
+
+  async stopCurrentInspection(endReason: LineSessionEndReason) {
+    const job = await this.prisma.inspectionJob.findFirst({
+      where: { status: InspectionStatus.running },
+      orderBy: { createdAt: 'desc' },
+      select: { id: true },
+    });
+
+    if (!job) return { data: null };
+    return this.stopInspection(job.id, endReason);
+  }
+
+  private async persistPlcCaptureLogs({
+    capturedAt,
+    imagePath,
+    jobId,
+    product,
+    scan,
+  }: {
+    capturedAt: Date;
+    imagePath: string | null;
+    jobId: string;
+    product: ProductWithProfile;
+    scan: Awaited<ReturnType<DeviceToolService['inspectProductFrame']>>;
+  }) {
+    const expectedText = product.code.trim().toUpperCase();
+    const plcCaptureId = randomUUID();
+    const logs = product.roiRegions.map((region, index) => {
+      const slotResult = scan.results[index];
+      const evaluation = evaluateInspectionSlot({
+        rawText: slotResult?.text,
+        rows: slotResult?.rows,
+        errorMessage: slotResult?.error,
+        expectedText,
+      });
+
+      return {
+        jobId,
+        plcCaptureId,
+        slotIndex: region.index,
+        slotLabel: `slot-${region.index}`,
+        expectedText,
+        result: evaluation.result,
+        text: evaluation.rawText,
+        rows: slotResult?.rows ?? [],
+        confidence: null,
+        imagePath,
+        errorMessage: evaluation.errorMessage,
+        capturedAt,
+      };
+    });
+
+    await this.prisma.inspectionLog.createMany({ data: logs });
+  }
+
+  private async savePlcCaptureFrame({
+    capturedAt,
+    imageBase64,
+    job,
+    productCode,
+  }: {
+    capturedAt: Date;
+    imageBase64: string;
+    job: {
+      id: string;
+      createdAt: Date;
+      startedAt: Date | null;
+      resultSaveFolderPath: string | null;
+      resultSavePolicy: LineResultSavePolicy | null;
+      resultSessionFolderName: string | null;
+    };
+    productCode: string;
+  }) {
+    const settings = await this.ensureLineResultSettings();
+    const savePolicy = job.resultSavePolicy ?? settings.savePolicy;
+    if (savePolicy === LineResultSavePolicy.none) return null;
+    const saveFolderPath =
+      job.resultSaveFolderPath ?? settings.saveFolderPath ?? null;
+
+    if (!saveFolderPath) return null;
+
+    const sessionFolderName =
+      job.resultSessionFolderName ??
+      this.buildSessionFolderName(
+        productCode,
+        job.startedAt ?? job.createdAt,
+        job.id,
+      );
+    const sessionRoot = this.resolveInsideDirectory(
+      saveFolderPath,
+      sessionFolderName,
+    );
+    const timestamp = capturedAt
+      .toISOString()
+      .replaceAll(':', '-')
+      .replace('T', '_')
+      .replace('Z', '');
+    const relativeImagePath = join(
+      'captures',
+      `${timestamp}-${randomUUID().slice(0, 8)}.jpg`,
+    );
+    const absoluteImagePath = this.resolveInsideDirectory(
+      sessionRoot,
+      relativeImagePath,
+    );
+
+    try {
+      await mkdir(dirname(absoluteImagePath), { recursive: true });
+      await writeFile(
+        absoluteImagePath,
+        Buffer.from(imageBase64.replace(/^data:[^;]+;base64,/i, ''), 'base64'),
+      );
+      await this.prisma.inspectionJob.update({
+        where: { id: job.id },
+        data: {
+          resultSessionFolderName: sessionFolderName,
+          resultSaveError: null,
+        },
+      });
+      return absoluteImagePath;
+    } catch (error) {
+      const message = this.getErrorMessage(error);
+      await this.prisma.inspectionJob.update({
+        where: { id: job.id },
+        data: { resultSaveError: message },
+      });
+      return null;
+    }
+  }
+
+  private async ensureLineResultSettings() {
+    return this.prisma.lineResultSettings.upsert({
+      where: { id: LINE_RESULT_SETTINGS_ID },
+      create: {
+        id: LINE_RESULT_SETTINGS_ID,
+        savePolicy: LineResultSavePolicy.all,
+        saveBySession: true,
+        newSessionOnLineStop: true,
+        newSessionOnProductChange: true,
+      },
+      update: {},
+    });
+  }
+
+  private toLineResultSettings(settings: {
+    id: string;
+    saveFolderPath: string | null;
+    savePolicy: LineResultSavePolicy;
+    saveBySession: boolean;
+    newSessionOnLineStop: boolean;
+    newSessionOnProductChange: boolean;
+    createdAt: Date;
+    updatedAt: Date;
+  }) {
+    return {
+      id: settings.id,
+      saveFolderPath: settings.saveFolderPath,
+      savePolicy: settings.savePolicy,
+      saveBySession: settings.saveBySession,
+      newSessionOnLineStop: settings.newSessionOnLineStop,
+      newSessionOnProductChange: settings.newSessionOnProductChange,
+      createdAt: settings.createdAt.toISOString(),
+      updatedAt: settings.updatedAt.toISOString(),
+    };
+  }
+
+  private async writeLineResultSession(jobId: string) {
+    const job = await this.prisma.inspectionJob.findUnique({
+      where: { id: jobId },
+      include: {
+        logs: {
+          orderBy: [{ capturedAt: 'asc' }, { slotIndex: 'asc' }],
+        },
+        operator: {
+          select: {
+            id: true,
+            username: true,
+            fullName: true,
+          },
+        },
+      },
+    });
+
+    if (!job || job.resultSavedAt) {
+      return;
+    }
+
+    const settings = await this.ensureLineResultSettings();
+    const savePolicy = job.resultSavePolicy ?? settings.savePolicy;
+    const saveFolderPath =
+      job.resultSaveFolderPath ?? settings.saveFolderPath ?? null;
+
+    if (savePolicy === LineResultSavePolicy.none) {
+      await this.prisma.inspectionJob.update({
+        where: { id: jobId },
+        data: { resultSaveError: null },
+      });
+      return;
+    }
+
+    if (!saveFolderPath) {
+      const message = 'Line result save folder is not configured';
+      await this.prisma.inspectionJob.update({
+        where: { id: jobId },
+        data: { resultSaveError: message },
+      });
+      return;
+    }
+
+    const product = await this.prisma.product.findUnique({
+      where: { id: job.productId },
+      select: {
+        id: true,
+        code: true,
+        name: true,
+        batchSize: true,
+      },
+    });
+
+    if (!product) {
+      throw new NotFoundException('Product not found for inspection job');
+    }
+
+    const createdAt = job.startedAt ?? job.createdAt;
+    const stoppedAt = job.stoppedAt ?? new Date();
+    const sessionFolderName =
+      job.resultSessionFolderName ??
+      this.buildSessionFolderName(product.code, createdAt, job.id);
+    const sessionRoot = this.resolveInsideDirectory(
+      saveFolderPath,
+      sessionFolderName,
+    );
+    const resultGroups = this.buildLineResultGroups(job.logs);
+    const savedResults = resultGroups.filter((group) =>
+      this.shouldSaveLineResultGroup(savePolicy, group.result),
+    );
+
+    try {
+      await mkdir(sessionRoot, { recursive: true });
+      await writeFile(
+        this.resolveInsideDirectory(sessionRoot, 'session-report.json'),
+        JSON.stringify(
+          {
+            jobId: job.id,
+            productId: product.id,
+            productCode: product.code,
+            productName: product.name,
+            operatorId: job.operatorId,
+            operatorUsername: job.operator.username,
+            operatorFullName: job.operator.fullName,
+            savePolicy,
+            saveBySession: settings.saveBySession,
+            endReason: job.endReason ?? null,
+            startedAt: createdAt.toISOString(),
+            stoppedAt: stoppedAt.toISOString(),
+            savedAt: new Date().toISOString(),
+            totals: this.buildLineResultTotals(resultGroups),
+            savedResultCount: savedResults.length,
+            results: savedResults,
+          },
+          null,
+          2,
+        ),
+        'utf8',
+      );
+
+      await this.prisma.inspectionJob.update({
+        where: { id: jobId },
+        data: {
+          resultSessionFolderName: sessionFolderName,
+          resultSavedAt: new Date(),
+          resultSaveError: null,
+        },
+      });
+    } catch (error) {
+      const message = this.getErrorMessage(error);
+      await this.prisma.inspectionJob.update({
+        where: { id: jobId },
+        data: { resultSaveError: message },
+      });
+    }
+  }
+
+  private buildLineResultGroups(
+    logs: Array<{
+      id: string;
+      slotIndex: number | null;
+      slotLabel: string | null;
+      expectedText: string | null;
+      result: InspectionResult;
+      text: string | null;
+      rows: Prisma.JsonValue | null;
+      imagePath: string | null;
+      errorMessage: string | null;
+      capturedAt: Date;
+    }>,
+  ) {
+    const groups = new Map<string, typeof logs>();
+
+    for (const log of logs) {
+      const capturedAt = log.capturedAt.toISOString();
+      const group = groups.get(capturedAt) ?? [];
+      group.push(log);
+      groups.set(capturedAt, group);
+    }
+
+    return Array.from(groups.entries()).map(([capturedAt, group], index) => ({
+      sequence: index + 1,
+      capturedAt,
+      result: this.resolveLatestResult(group),
+      text: group
+        .map((log) => log.text)
+        .filter(Boolean)
+        .join(' | '),
+      imagePath: group.find((log) => Boolean(log.imagePath))?.imagePath ?? null,
+      slots: group.map((log) => ({
+        slotIndex: log.slotIndex,
+        slotLabel: log.slotLabel,
+        expectedText: log.expectedText,
+        rawText: log.text,
+        rows: this.normalizeRows(log.rows),
+        imagePath: log.imagePath,
+        result: log.result,
+        errorMessage: log.errorMessage,
+      })),
+    }));
+  }
+
+  private buildLineResultTotals(groups: Array<{ result: InspectionResult }>) {
+    return {
+      total: groups.length,
+      ok: groups.filter((group) => group.result === InspectionResult.OK).length,
+      ng: groups.filter((group) => group.result === InspectionResult.NG).length,
+      unknown: groups.filter(
+        (group) => group.result === InspectionResult.UNKNOWN,
+      ).length,
+    };
+  }
+
+  private shouldSaveLineResultGroup(
+    savePolicy: LineResultSavePolicy,
+    result: InspectionResult,
+  ) {
+    switch (savePolicy) {
+      case LineResultSavePolicy.all:
+        return result === InspectionResult.OK || result === InspectionResult.NG;
+      case LineResultSavePolicy.ok:
+        return result === InspectionResult.OK;
+      case LineResultSavePolicy.ng:
+        return result === InspectionResult.NG;
+      case LineResultSavePolicy.none:
+      default:
+        return false;
+    }
   }
 
   private async getActiveProductForScan(productId: string) {
@@ -868,6 +1559,55 @@ export class InspectionsService {
     return value.replaceAll('\\', '/');
   }
 
+  private async buildLiveInspectionState(detection: CompletedLineDetection) {
+    const persistedState = await this.buildInspectionState(detection.jobId);
+    const expectedText = detection.product.code.trim().toUpperCase();
+    const slots = detection.product.roiRegions.map((region, index) => {
+      const slotResult = detection.scan.results[index];
+      const evaluation = evaluateInspectionSlot({
+        rawText: slotResult?.text,
+        rows: slotResult?.rows,
+        errorMessage: slotResult?.error,
+        expectedText,
+      });
+
+      return {
+        slotIndex: region.index,
+        slotLabel: `slot-${region.index}`,
+        expectedText,
+        rawText: evaluation.rawText,
+        rows: slotResult?.rows ?? [],
+        imagePath: null,
+        result: evaluation.result,
+        errorMessage: evaluation.errorMessage,
+      };
+    });
+    const knownSlots = slots.filter((slot) =>
+      this.isKnownInspectionResult(slot.result),
+    );
+    const result = resolveInspectionAggregateResult(
+      slots.map((slot) => slot.result),
+    );
+
+    return {
+      ...persistedState,
+      quantity: knownSlots.length,
+      latestScanAt: detection.completedAt.toISOString(),
+      lastResult: {
+        result,
+        text:
+          slots
+            .map((slot) => slot.rawText)
+            .filter(Boolean)
+            .join(' | ') || null,
+        confidence: null,
+        imagePath: null,
+        capturedAt: detection.completedAt.toISOString(),
+      },
+      slots,
+    };
+  }
+
   private async buildInspectionState(jobId: string) {
     const job = await this.prisma.inspectionJob.findUnique({
       where: { id: jobId },
@@ -939,6 +1679,12 @@ export class InspectionsService {
       operatorId: job.operatorId,
       startedAt: job.startedAt?.toISOString() ?? null,
       stoppedAt: job.stoppedAt?.toISOString() ?? null,
+      endReason: job.endReason ?? null,
+      resultSavePolicy: job.resultSavePolicy ?? null,
+      resultSaveFolderPath: job.resultSaveFolderPath ?? null,
+      resultSessionFolderName: job.resultSessionFolderName ?? null,
+      resultSavedAt: job.resultSavedAt?.toISOString() ?? null,
+      resultSaveError: job.resultSaveError ?? null,
       batchSize: product.batchSize,
       quantity: latestQuantity,
       count: currentBatchCount,
@@ -954,6 +1700,9 @@ export class InspectionsService {
               .filter(Boolean)
               .join(' | '),
             confidence: null,
+            imagePath:
+              latestLogs.find((log) => Boolean(log.imagePath))?.imagePath ??
+              null,
             capturedAt: latestCapturedAt.toISOString(),
           }
         : null,
@@ -963,6 +1712,7 @@ export class InspectionsService {
         expectedText: log.expectedText,
         rawText: log.text,
         rows: this.normalizeRows(log.rows),
+        imagePath: log.imagePath,
         result: log.result,
         errorMessage: log.errorMessage,
       })),
@@ -987,7 +1737,7 @@ export class InspectionsService {
     });
   }
 
-  private resolveLatestResult(latestLogs: InspectionJobWithLogs['logs']) {
+  private resolveLatestResult(latestLogs: Array<{ result: InspectionResult }>) {
     if (latestLogs.length === 0) {
       return InspectionResult.UNKNOWN;
     }

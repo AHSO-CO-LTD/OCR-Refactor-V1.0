@@ -1,12 +1,6 @@
 "use client";
 
-import {
-  ChangeEvent,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
+import { ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
 import {
   Camera,
   FolderOpen,
@@ -23,6 +17,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { useConnectedCameraPreview } from "@/components/camera/use-connected-camera-preview";
+import { usePlcCaptureTrigger } from "@/components/plc/use-plc-capture-trigger";
 import {
   OperatorRoiEditor,
   type OperatorRoiStatus,
@@ -53,12 +48,6 @@ import { getAccessToken } from "@/lib/session";
 
 type AnimationState = "UNKNOWN" | "CHECKING" | "WAITING_PLC" | "OK" | "NG";
 type DataSource = "api" | "sample";
-type RuntimeFrame = {
-  atMs: number;
-  regions: RoiRegion[];
-  statuses: Record<number, OperatorRoiStatus>;
-  labels?: Record<number, string>;
-};
 type AnimationBatchReportRow = {
   fileName: string;
   relativePath: string;
@@ -96,11 +85,27 @@ type RoiCropImage = {
   slotIndex: number;
   imageBase64: string;
 };
+type PendingTestDetection = {
+  id: number;
+  details: LatestTestResultDetails;
+  inspection: TestInspectionImageResult | null;
+  regions: RoiRegion[];
+};
 type LineAnimationTestPanelProps = {
   layout?: "animation" | "operator-test";
 };
 
-const detectDelayMs = 300;
+function getInspectionSlotFingerprint(slot: InspectionSlotState | undefined) {
+  if (!slot) return "missing";
+
+  return [
+    slot.result,
+    slot.rawText ?? "",
+    (slot.rows ?? []).join("\u001f"),
+    slot.errorMessage ?? "",
+  ].join("\u001e");
+}
+
 const plcDoneHoldMs = 750;
 const resultHoldMs = 1200;
 const runtimeFrameIntervalMs = 2800;
@@ -201,7 +206,10 @@ function countStatuses(statuses: Record<number, OperatorRoiStatus>) {
 }
 
 function isImageFile(file: File) {
-  return file.type.startsWith("image/") || /\.(bmp|gif|jpe?g|png|tif?f|webp)$/i.test(file.name);
+  return (
+    file.type.startsWith("image/") ||
+    /\.(bmp|gif|jpe?g|png|tif?f|webp)$/i.test(file.name)
+  );
 }
 
 export function LineAnimationTestPanel({
@@ -213,15 +221,28 @@ export function LineAnimationTestPanel({
   const cancelBatchTestRef = useRef(false);
   const timersRef = useRef<number[]>([]);
   const lineIntervalRef = useRef<number | null>(null);
-  const lineVisibleIndexesRef = useRef<Set<number>>(new Set());
-  const lineStatusesRef = useRef<Record<number, OperatorRoiStatus>>({});
-  const lineLabelsRef = useRef<Record<number, string>>({});
   const lineTickBusyRef = useRef(false);
+  const plcTriggerBusyRef = useRef(false);
+  const pendingDetectionRef = useRef<PendingTestDetection | null>(null);
+  const pendingDetectionSequenceRef = useRef(0);
+  const animatedRoiFingerprintsRef = useRef<Record<number, string>>({});
+  const animatedErrorFingerprintRef = useRef<string | null>(null);
+  const testRoiStatusesRef = useRef<Record<number, OperatorRoiStatus>>({});
+  const testRoiLabelsRef = useRef<Record<number, string>>({});
+  const testSessionGenerationRef = useRef(0);
+  const lineRunningRef = useRef(false);
+  const batchTestingRef = useRef(false);
+  const batchPausedRef = useRef(false);
+  const batchLatchResolverRef = useRef<
+    ((latched: boolean) => void) | null
+  >(null);
   const totalCountRef = useRef(0);
   const batchCountRef = useRef(0);
   const batchQuantityRef = useRef(0);
   const [products, setProducts] = useState<ProductProfile[]>(sampleProducts);
-  const [selectedProductId, setSelectedProductId] = useState(sampleProducts[0].id);
+  const [selectedProductId, setSelectedProductId] = useState(
+    sampleProducts[0].id,
+  );
   const [dataSource, setDataSource] = useState<DataSource>("sample");
   const [loadingProducts, setLoadingProducts] = useState(true);
   const [animationState, setAnimationState] =
@@ -241,15 +262,15 @@ export function LineAnimationTestPanel({
   const [lineRunning, setLineRunning] = useState(false);
   const [testingRealImage, setTestingRealImage] = useState(false);
   const [batchTesting, setBatchTesting] = useState(false);
+  const [batchPaused, setBatchPaused] = useState(false);
   const [savingBatchReport, setSavingBatchReport] = useState(false);
   const [selectedImageUrl, setSelectedImageUrl] = useState("");
   const [selectedImageBase64, setSelectedImageBase64] = useState("");
   const [selectedImageName, setSelectedImageName] = useState("");
   const [batchFiles, setBatchFiles] = useState<File[]>([]);
   const [batchFolderName, setBatchFolderName] = useState("");
-  const [batchSummary, setBatchSummary] = useState<AnimationBatchSummary | null>(
-    null,
-  );
+  const [batchSummary, setBatchSummary] =
+    useState<AnimationBatchSummary | null>(null);
   const [latestTestResult, setLatestTestResult] =
     useState<LatestTestResultDetails | null>(null);
   const [batchProgress, setBatchProgress] = useState<{
@@ -275,7 +296,9 @@ export function LineAnimationTestPanel({
 
       try {
         const response = await listProductProfiles(accessToken);
-        const activeProducts = response.data.filter((product) => product.active);
+        const activeProducts = response.data.filter(
+          (product) => product.active,
+        );
 
         if (!cancelled && activeProducts.length > 0) {
           setProducts(activeProducts);
@@ -309,6 +332,10 @@ export function LineAnimationTestPanel({
     });
 
     return () => {
+      testSessionGenerationRef.current += 1;
+      cancelBatchTestRef.current = true;
+      batchLatchResolverRef.current?.(false);
+      batchLatchResolverRef.current = null;
       timersRef.current.forEach((timerId) => window.clearTimeout(timerId));
       stopLineInterval();
       unsubscribe();
@@ -382,6 +409,11 @@ export function LineAnimationTestPanel({
   const isBusy = testingRealImage || batchTesting || lineRunning;
   const inspectionResultDelayMs = runtimeSettings.inspectionResultDelayMs;
 
+  usePlcCaptureTrigger({
+    enabled: layout === "operator-test" && dataSource === "api",
+    onTrigger: handlePlcCaptureTrigger,
+  });
+
   function clearTimers() {
     timersRef.current.forEach((timerId) => window.clearTimeout(timerId));
     timersRef.current = [];
@@ -393,12 +425,6 @@ export function LineAnimationTestPanel({
       lineIntervalRef.current = null;
     }
     lineTickBusyRef.current = false;
-  }
-
-  function clearLineSessionRefs() {
-    lineVisibleIndexesRef.current = new Set();
-    lineStatusesRef.current = {};
-    lineLabelsRef.current = {};
   }
 
   function resetProductionCounters() {
@@ -431,9 +457,21 @@ export function LineAnimationTestPanel({
   }
 
   function resetScenario(showToast = true) {
+    testSessionGenerationRef.current += 1;
+    cancelBatchTestRef.current = true;
+    batchPausedRef.current = false;
+    setBatchPaused(false);
+    batchLatchResolverRef.current?.(false);
+    batchLatchResolverRef.current = null;
+    pendingDetectionRef.current = null;
+    animatedRoiFingerprintsRef.current = {};
+    animatedErrorFingerprintRef.current = null;
+    testRoiStatusesRef.current = {};
+    testRoiLabelsRef.current = {};
+    lineRunningRef.current = false;
+    batchTestingRef.current = false;
     stopLineInterval();
     clearTimers();
-    clearLineSessionRefs();
     setLineRunning(false);
     setAnimationState("UNKNOWN");
     setRoiStatuses({});
@@ -473,12 +511,20 @@ export function LineAnimationTestPanel({
       URL.revokeObjectURL(selectedImageUrl);
     }
 
-    setSelectedImageUrl(URL.createObjectURL(file));
-    setSelectedImageBase64(await readFileAsDataUrl(file));
-    setSelectedImageName(file.name);
+    const imageBase64 = await readFileAsDataUrl(file);
     resetScenario(false);
+    setSelectedImageUrl(URL.createObjectURL(file));
+    setSelectedImageBase64(imageBase64);
+    setSelectedImageName(file.name);
     event.target.value = "";
     toast.success(t("lineTest.imageReady"));
+    void prepareTestDetection({
+      imageBase64,
+      fileName: file.name,
+      relativePath: file.name,
+      source: "image",
+      showLoadingToast: true,
+    });
   }
 
   function handleFolderChange(event: ChangeEvent<HTMLInputElement>) {
@@ -495,7 +541,8 @@ export function LineAnimationTestPanel({
     }
 
     const firstPath = nextFiles[0]?.webkitRelativePath ?? "";
-    const folderName = firstPath.split("/")[0] || t("lineTest.batchFolderUnknown");
+    const folderName =
+      firstPath.split("/")[0] || t("lineTest.batchFolderUnknown");
 
     setBatchFiles(nextFiles);
     setBatchFolderName(folderName);
@@ -519,6 +566,11 @@ export function LineAnimationTestPanel({
     setSelectedImageUrl("");
     setSelectedImageBase64("");
     setSelectedImageName("");
+    pendingDetectionRef.current = null;
+    animatedRoiFingerprintsRef.current = {};
+    animatedErrorFingerprintRef.current = null;
+    testRoiStatusesRef.current = {};
+    testRoiLabelsRef.current = {};
     setLatestTestResult(null);
     setActiveRoiIndexes([]);
     setRoiStatuses({});
@@ -528,6 +580,16 @@ export function LineAnimationTestPanel({
   }
 
   function clearSelectedFolder() {
+    cancelBatchTestRef.current = true;
+    batchPausedRef.current = false;
+    setBatchPaused(false);
+    batchLatchResolverRef.current?.(false);
+    batchLatchResolverRef.current = null;
+    pendingDetectionRef.current = null;
+    animatedRoiFingerprintsRef.current = {};
+    animatedErrorFingerprintRef.current = null;
+    testRoiStatusesRef.current = {};
+    testRoiLabelsRef.current = {};
     setBatchFiles([]);
     setBatchFolderName("");
     setBatchSummary(null);
@@ -564,151 +626,13 @@ export function LineAnimationTestPanel({
     };
   }
 
-  function scheduleRuntimeFrames(frames: RuntimeFrame[]) {
-    clearTimers();
-
-    if (frames.length === 0) {
-      toast.warning(t("lineAnimationTest.noRoi"));
-      return false;
-    }
-
-    const visibleIndexes = new Set<number>();
-    const sessionStatuses: Record<number, OperatorRoiStatus> = {};
-    const sessionLabels: Record<number, string> = Object.fromEntries(
-      frames.flatMap((frame) =>
-        frame.regions.map((region) => [
-          region.index,
-          frame.labels?.[region.index] ?? product.code,
-        ]),
-      ),
-    );
-
-    setAnimationState("UNKNOWN");
-    setRoiStatuses({});
-    setRoiDetectedTextLabels(sessionLabels);
-    setActiveRoiIndexes([]);
-    setOkCount(0);
-    setNgCount(0);
-
-    frames.forEach((frame) => {
-      const frameIndexes = new Set(frame.regions.map((region) => region.index));
-      const frameTimer = window.setTimeout(() => {
-        Array.from(visibleIndexes).forEach((index) => {
-          if (!frameIndexes.has(index)) {
-            visibleIndexes.delete(index);
-            delete sessionStatuses[index];
-            delete sessionLabels[index];
-          }
-        });
-
-        let startedChecking = false;
-
-        frame.regions.forEach((region) => {
-          const detectAt = frame.atMs;
-          const resultAt = detectAt + inspectionResultDelayMs;
-          const finalStatus = frame.statuses[region.index] ?? "NG";
-          const finalLabel = frame.labels?.[region.index];
-          const currentStatus = sessionStatuses[region.index];
-
-          visibleIndexes.add(region.index);
-
-          if (!currentStatus || currentStatus === "CHECKING") {
-            startedChecking = true;
-            sessionStatuses[region.index] = "CHECKING";
-            sessionLabels[region.index] =
-              finalLabel ?? sessionLabels[region.index] ?? product.code;
-
-            const resultTimer = window.setTimeout(() => {
-              sessionStatuses[region.index] = finalStatus;
-
-              if (finalLabel) {
-                sessionLabels[region.index] = finalLabel;
-              }
-
-              setRoiStatuses({ ...sessionStatuses });
-              setRoiDetectedTextLabels({ ...sessionLabels });
-            }, resultAt - frame.atMs);
-
-            timersRef.current.push(resultTimer);
-            return;
-          }
-
-          if (currentStatus === "NG" && finalStatus === "OK") {
-            const resultTimer = window.setTimeout(() => {
-              sessionStatuses[region.index] = "OK";
-
-              if (finalLabel) {
-                sessionLabels[region.index] = finalLabel;
-              }
-
-              setRoiStatuses({ ...sessionStatuses });
-              setRoiDetectedTextLabels({ ...sessionLabels });
-            }, resultAt - frame.atMs);
-
-            timersRef.current.push(resultTimer);
-            return;
-          }
-
-          if (currentStatus === "NG" && finalStatus === "NG" && finalLabel) {
-            sessionLabels[region.index] = finalLabel;
-          }
-        });
-
-        setAnimationState(startedChecking ? "CHECKING" : "WAITING_PLC");
-        setActiveRoiIndexes(Array.from(visibleIndexes));
-        setRoiStatuses({ ...sessionStatuses });
-        setRoiDetectedTextLabels({ ...sessionLabels });
-      }, frame.atMs);
-
-      timersRef.current.push(frameTimer);
-    });
-
-    const lastFrameEndAt =
-      Math.max(
-        ...frames.map(
-          (frame) =>
-            frame.atMs,
-        ),
-      ) + inspectionResultDelayMs;
-    const plcDoneAt = lastFrameEndAt + plcDoneHoldMs;
-
-    const waitPlcTimer = window.setTimeout(() => {
-      setAnimationState("WAITING_PLC");
-    }, lastFrameEndAt);
-
-    const plcDoneTimer = window.setTimeout(() => {
-      const finalCounts = countStatuses(sessionStatuses);
-      const finalState = finalCounts.ng > 0 ? "NG" : "OK";
-
-      setAnimationState(finalState);
-      setOkCount(finalCounts.ok);
-      setNgCount(finalCounts.ng);
-      addProductionCount(Object.keys(sessionStatuses).length);
-    }, plcDoneAt);
-
-    timersRef.current.push(waitPlcTimer, plcDoneTimer);
-    return true;
-  }
-
-  async function playRuntimeFrames(frames: RuntimeFrame[]) {
-    const scheduled = scheduleRuntimeFrames(frames);
-
-    if (!scheduled) {
-      return false;
-    }
-
-    const lastFrameAt = Math.max(...frames.map((frame) => frame.atMs));
-    await wait(
-      lastFrameAt + inspectionResultDelayMs + plcDoneHoldMs + resultHoldMs,
-    );
-    return true;
-  }
-
   function buildAnimationResult(
     inspection: TestInspectionImageResult,
     regions: RoiRegion[],
   ) {
-    const regionByIndex = new Map(regions.map((region) => [region.index, region]));
+    const regionByIndex = new Map(
+      regions.map((region) => [region.index, region]),
+    );
     const animationSlots = inspection.slots.filter(
       (slot) => slot.result === "OK" || slot.result === "NG",
     );
@@ -721,17 +645,19 @@ export function LineAnimationTestPanel({
       .filter((region): region is RoiRegion => Boolean(region));
     const finalStatuses = Object.fromEntries(
       animationRegions.map((region) => {
-        const slot = animationSlots.find((item) => item.slotIndex === region.index);
+        const slot = animationSlots.find(
+          (item) => item.slotIndex === region.index,
+        );
         return [region.index, slot?.result === "OK" ? "OK" : "NG"];
       }),
     ) as Record<number, OperatorRoiStatus>;
     const finalLabels = Object.fromEntries(
       animationRegions.map((region) => {
-        const slot = animationSlots.find((item) => item.slotIndex === region.index);
+        const slot = animationSlots.find(
+          (item) => item.slotIndex === region.index,
+        );
         const detectedText =
-          slot?.rawText?.trim() ||
-          slot?.expectedText?.trim() ||
-          slot?.result;
+          slot?.rawText?.trim() || slot?.expectedText?.trim() || slot?.result;
         return [region.index, detectedText || finalStatuses[region.index]];
       }),
     ) as Record<number, string>;
@@ -765,106 +691,277 @@ export function LineAnimationTestPanel({
     };
   }
 
-  async function playInspectionResult(
-    inspection: TestInspectionImageResult,
-    regions: RoiRegion[],
+  function showDetectionWaitingForLatch(
+    pending: PendingTestDetection,
+    forceAnimation = true,
   ) {
-    const animation = buildAnimationResult(inspection, regions);
+    if (!pending.inspection) {
+      const errorFingerprint = `ERROR:${pending.details.errorMessage ?? ""}`;
+      if (
+        !forceAnimation &&
+        errorFingerprint === animatedErrorFingerprintRef.current
+      ) {
+        return false;
+      }
 
-    if (animation.regions.length === 0) {
-      return playRejectedInspectionResult("UNKNOWN");
+      animatedErrorFingerprintRef.current = errorFingerprint;
+      animatedRoiFingerprintsRef.current = {};
+      clearTimers();
+      testRoiStatusesRef.current = {};
+      testRoiLabelsRef.current = {};
+      setAnimationState("CHECKING");
+      setActiveRoiIndexes([]);
+      setRoiStatuses({});
+      setRoiDetectedTextLabels({});
+      const errorTimer = window.setTimeout(() => {
+        setAnimationState("WAITING_PLC");
+      }, inspectionResultDelayMs);
+      timersRef.current.push(errorTimer);
+      return true;
     }
 
-    return playRuntimeFrames([
-      {
-        atMs: detectDelayMs,
-        regions: animation.regions,
-        statuses: animation.finalStatuses,
-        labels: animation.finalLabels,
-      },
-    ]);
-  }
+    animatedErrorFingerprintRef.current = null;
+    const slotByIndex = new Map(
+      pending.inspection.slots
+        .filter((slot) => typeof slot.slotIndex === "number")
+        .map((slot) => [slot.slotIndex as number, slot]),
+    );
+    const nextFingerprints: Record<number, string> = {};
+    const nextStatuses = forceAnimation
+      ? {}
+      : { ...testRoiStatusesRef.current };
+    const nextLabels = forceAnimation ? {} : { ...testRoiLabelsRef.current };
+    const changedRegions = pending.regions.filter((region) => {
+      const slot = slotByIndex.get(region.index);
+      const fingerprint = getInspectionSlotFingerprint(slot);
+      nextFingerprints[region.index] = fingerprint;
+      nextLabels[region.index] =
+        slot?.rawText?.trim() ||
+        slot?.expectedText?.trim() ||
+        slot?.result ||
+        "UNKNOWN";
+      return (
+        forceAnimation ||
+        animatedRoiFingerprintsRef.current[region.index] !== fingerprint
+      );
+    });
 
-  async function playRejectedInspectionResult(
-    result: TestInspectionImageResult["result"] | "ERROR",
-  ) {
-    clearTimers();
+    animatedRoiFingerprintsRef.current = nextFingerprints;
+    if (changedRegions.length === 0) return false;
+    if (forceAnimation) clearTimers();
+
+    changedRegions.forEach((region) => {
+      nextStatuses[region.index] = "CHECKING";
+    });
+    testRoiStatusesRef.current = nextStatuses;
+    testRoiLabelsRef.current = nextLabels;
+
     setAnimationState("CHECKING");
-    setActiveRoiIndexes([]);
-    setRoiStatuses({});
-    setRoiDetectedTextLabels({});
-    setOkCount(0);
-    setNgCount(result === "NG" || result === "ERROR" ? 1 : 0);
+    setActiveRoiIndexes(pending.regions.map((region) => region.index));
+    setRoiStatuses({ ...nextStatuses });
+    setRoiDetectedTextLabels({ ...nextLabels });
+    const expectedFingerprints = { ...nextFingerprints };
+    const resultTimer = window.setTimeout(() => {
+      const finalStatuses = { ...testRoiStatusesRef.current };
+      const finalLabels = { ...testRoiLabelsRef.current };
 
-    await wait(inspectionResultDelayMs);
-    setAnimationState(result === "UNKNOWN" ? "UNKNOWN" : "NG");
-    setActiveRoiIndexes([]);
-    setRoiStatuses({});
-    setRoiDetectedTextLabels({});
+      changedRegions.forEach((region) => {
+        if (
+          animatedRoiFingerprintsRef.current[region.index] !==
+          expectedFingerprints[region.index]
+        ) {
+          return;
+        }
 
-    await wait(resultHoldMs);
+        const slot = slotByIndex.get(region.index);
+        if (slot?.result === "OK" || slot?.result === "NG") {
+          finalStatuses[region.index] = slot.result;
+        } else {
+          delete finalStatuses[region.index];
+        }
+        finalLabels[region.index] =
+          slot?.rawText?.trim() ||
+          slot?.expectedText?.trim() ||
+          slot?.result ||
+          "UNKNOWN";
+      });
+
+      testRoiStatusesRef.current = finalStatuses;
+      testRoiLabelsRef.current = finalLabels;
+      setActiveRoiIndexes(
+        Object.entries(finalStatuses)
+          .filter(([, value]) =>
+            value === "OK" || value === "NG" || value === "CHECKING",
+          )
+          .map(([index]) => Number(index)),
+      );
+      setRoiStatuses({ ...finalStatuses });
+      setRoiDetectedTextLabels({ ...finalLabels });
+      setAnimationState(
+        Object.values(finalStatuses).some((value) => value === "CHECKING")
+          ? "CHECKING"
+          : "WAITING_PLC",
+      );
+    }, inspectionResultDelayMs);
+    timersRef.current.push(resultTimer);
     return true;
   }
 
-  function applyContinuousLineFrame(
-    regions: RoiRegion[],
-    frameStatuses: Record<number, OperatorRoiStatus>,
-    frameLabels: Record<number, string>,
-  ) {
+  async function commitPendingDetection(pending: PendingTestDetection) {
+    clearTimers();
+    setAnimationState("WAITING_PLC");
+    await wait(plcDoneHoldMs);
 
-    const nextFrameIndexes = new Set(regions.map((region) => region.index));
-    const visibleIndexes = lineVisibleIndexesRef.current;
-    const statuses = lineStatusesRef.current;
-    const labels = lineLabelsRef.current;
-    let startedChecking = false;
+    if (!pending.inspection) {
+      setAnimationState("NG");
+      setOkCount(0);
+      setNgCount(1);
+      setLatestTestResult(pending.details);
+      await wait(resultHoldMs);
+      return;
+    }
 
-    Array.from(visibleIndexes).forEach((index) => {
-      if (!nextFrameIndexes.has(index)) {
-        visibleIndexes.delete(index);
-        delete statuses[index];
-        delete labels[index];
-      }
+    const animation = buildAnimationResult(
+      pending.inspection,
+      pending.regions,
+    );
+    const finalCounts = countStatuses(animation.finalStatuses);
+    const finalState =
+      pending.inspection.result === "OK"
+        ? "OK"
+        : pending.inspection.result === "UNKNOWN"
+          ? "UNKNOWN"
+          : "NG";
+
+    setActiveRoiIndexes(animation.regions.map((region) => region.index));
+    testRoiStatusesRef.current = { ...animation.finalStatuses };
+    testRoiLabelsRef.current = { ...animation.finalLabels };
+    setRoiStatuses(animation.finalStatuses);
+    setRoiDetectedTextLabels(animation.finalLabels);
+    setAnimationState(finalState);
+    setOkCount(finalCounts.ok);
+    setNgCount(finalCounts.ng);
+    addProductionCount(Object.keys(animation.finalStatuses).length);
+    setLatestTestResult(pending.details);
+    await wait(resultHoldMs);
+  }
+
+  async function detectTestImage({
+    accessToken,
+    fileName,
+    imageBase64,
+    relativePath,
+    source,
+    testProduct,
+  }: {
+    accessToken: string;
+    fileName: string;
+    imageBase64: string;
+    relativePath: string;
+    source: LatestTestResultDetails["source"];
+    testProduct: ProductProfile;
+  }): Promise<PendingTestDetection> {
+    const id = ++pendingDetectionSequenceRef.current;
+
+    try {
+      const { crops, inspection } = await runInspectionForImage(
+        accessToken,
+        imageBase64,
+        testProduct,
+      );
+      return {
+        id,
+        inspection,
+        regions: testProduct.roiRegions,
+        details: buildLatestTestResult({
+          inspection,
+          roiImages: crops,
+          source,
+          fileName,
+          relativePath,
+        }),
+      };
+    } catch (cause) {
+      const message =
+        cause instanceof ApiError
+          ? apiError(cause.message, "lineAnimationTest.realTestFailed")
+          : t("lineAnimationTest.realTestFailed");
+      return {
+        id,
+        inspection: null,
+        regions: testProduct.roiRegions,
+        details: buildLatestErrorResult({
+          source,
+          fileName,
+          relativePath,
+          message,
+          productCode: testProduct.code,
+        }),
+      };
+    }
+  }
+
+  async function prepareTestDetection({
+    fileName,
+    imageBase64,
+    relativePath,
+    showLoadingToast = false,
+    source,
+  }: {
+    fileName: string;
+    imageBase64: string;
+    relativePath: string;
+    showLoadingToast?: boolean;
+    source: LatestTestResultDetails["source"];
+  }) {
+    const validated = validateRealTestInputs();
+    if (!validated || testingRealImage) return null;
+    const generation = testSessionGenerationRef.current;
+
+    setTestingRealImage(true);
+    const toastId = showLoadingToast
+      ? toast.loading(t("lineAnimationTest.realTesting"))
+      : undefined;
+    const pending = await detectTestImage({
+      accessToken: validated.accessToken,
+      fileName,
+      imageBase64,
+      relativePath,
+      source,
+      testProduct: validated.product,
     });
+    if (generation !== testSessionGenerationRef.current) {
+      setTestingRealImage(false);
+      if (toastId !== undefined) toast.dismiss(toastId);
+      return null;
+    }
+    pendingDetectionRef.current = pending;
+    showDetectionWaitingForLatch(pending);
+    setTestingRealImage(false);
 
-    regions.forEach((region) => {
-      const nextStatus = frameStatuses[region.index] ?? "NG";
-      const nextLabel = frameLabels[region.index] ?? product.code;
-      const currentStatus = statuses[region.index];
-
-      visibleIndexes.add(region.index);
-      labels[region.index] = labels[region.index] ?? nextLabel;
-
-      if (!currentStatus || currentStatus === "CHECKING") {
-        startedChecking = true;
-        statuses[region.index] = "CHECKING";
-
-        const resultTimer = window.setTimeout(() => {
-          statuses[region.index] = nextStatus;
-          labels[region.index] = nextLabel;
-          setRoiStatuses({ ...statuses });
-          setRoiDetectedTextLabels({ ...labels });
-        }, inspectionResultDelayMs);
-
-        timersRef.current.push(resultTimer);
-        return;
+    if (pending.inspection) {
+      if (toastId !== undefined) {
+        toast.success(t("lineTest.plcTriggerListening"), { id: toastId });
       }
+    } else {
+      toast.error(
+        pending.details.errorMessage ?? t("lineAnimationTest.realTestFailed"),
+        { id: toastId },
+      );
+    }
+    return pending;
+  }
 
-      if (currentStatus === "NG" && nextStatus === "OK") {
-        const resultTimer = window.setTimeout(() => {
-          statuses[region.index] = "OK";
-          labels[region.index] = nextLabel;
-          setRoiStatuses({ ...statuses });
-          setRoiDetectedTextLabels({ ...labels });
-        }, inspectionResultDelayMs);
-
-        timersRef.current.push(resultTimer);
-      }
+  function waitForBatchLatch() {
+    return new Promise<boolean>((resolve) => {
+      batchLatchResolverRef.current = resolve;
     });
+  }
 
-    setAnimationState(startedChecking ? "CHECKING" : "WAITING_PLC");
-    setActiveRoiIndexes(Array.from(visibleIndexes));
-    setRoiStatuses({ ...statuses });
-    setRoiDetectedTextLabels({ ...labels });
+  async function waitUntilBatchResumed() {
+    while (batchPausedRef.current && !cancelBatchTestRef.current) {
+      await wait(50);
+    }
   }
 
   function runLineContinuously() {
@@ -876,8 +973,15 @@ export function LineAnimationTestPanel({
 
     stopLineInterval();
     clearTimers();
-    clearLineSessionRefs();
+    const generation = ++testSessionGenerationRef.current;
+    lineRunningRef.current = true;
+    pendingDetectionRef.current = null;
+    animatedRoiFingerprintsRef.current = {};
+    animatedErrorFingerprintRef.current = null;
+    testRoiStatusesRef.current = {};
+    testRoiLabelsRef.current = {};
     setLineRunning(true);
+    setLatestTestResult(null);
     setOkCount(0);
     setNgCount(0);
     resetProductionCounters();
@@ -897,6 +1001,7 @@ export function LineAnimationTestPanel({
         const frameBase64 = selectedImageBase64
           ? selectedImageBase64
           : await grabLineFrameBase64(validated.accessToken);
+        if (generation !== testSessionGenerationRef.current) return;
         const testProduct = {
           ...product,
           roiRegions: product.roiRegions,
@@ -911,52 +1016,46 @@ export function LineAnimationTestPanel({
           })),
           product.roiRegions,
         );
-        setLatestTestResult(
-          buildLatestTestResult({
+        if (generation !== testSessionGenerationRef.current) return;
+        const pending: PendingTestDetection = {
+          id: ++pendingDetectionSequenceRef.current,
+          inspection: response.data,
+          regions: product.roiRegions,
+          details: buildLatestTestResult({
             inspection: response.data,
             roiImages: crops,
             source: selectedImageBase64 ? "image" : "camera",
             fileName: selectedImageName || t("operator.liveCamera"),
             relativePath: selectedImageName || t("operator.liveCamera"),
           }),
-        );
-
-        const animation = buildAnimationResult(response.data, product.roiRegions);
-
-        if (animation.regions.length === 0) {
-          clearLineSessionRefs();
-          setActiveRoiIndexes([]);
-          setRoiStatuses({});
-          setRoiDetectedTextLabels({});
-          setOkCount(0);
-          setNgCount(0);
-          setAnimationState("UNKNOWN");
-          return;
+        };
+        pendingDetectionRef.current = pending;
+        if (!plcTriggerBusyRef.current) {
+          showDetectionWaitingForLatch(pending, false);
         }
-
-        applyContinuousLineFrame(
-          animation.regions,
-          animation.finalStatuses,
-          animation.finalLabels,
-        );
-        addProductionCount(animation.regions.length);
       } catch (cause) {
+        if (generation !== testSessionGenerationRef.current) return;
         const message =
           cause instanceof ApiError
             ? apiError(cause.message, "lineAnimationTest.realTestFailed")
             : t("lineAnimationTest.realTestFailed");
-        setLatestTestResult(
-          buildLatestErrorResult({
+        const pending: PendingTestDetection = {
+          id: ++pendingDetectionSequenceRef.current,
+          inspection: null,
+          regions: product.roiRegions,
+          details: buildLatestErrorResult({
             source: selectedImageBase64 ? "image" : "camera",
             fileName: selectedImageName || t("operator.liveCamera"),
             relativePath: selectedImageName || t("operator.liveCamera"),
             message,
             productCode: product.code,
           }),
-        );
+        };
+        pendingDetectionRef.current = pending;
+        if (!plcTriggerBusyRef.current) {
+          showDetectionWaitingForLatch(pending, false);
+        }
         toast.error(message);
-        stopLineInterval();
-        setLineRunning(false);
       } finally {
         lineTickBusyRef.current = false;
       }
@@ -971,28 +1070,62 @@ export function LineAnimationTestPanel({
   }
 
   function finishLineSession() {
+    testSessionGenerationRef.current += 1;
+    lineRunningRef.current = false;
     stopLineInterval();
     clearTimers();
     setLineRunning(false);
-
-    const finalStatuses = Object.fromEntries(
-      Object.entries(lineStatusesRef.current).filter(
-        ([, status]) => status === "OK" || status === "NG",
-      ),
-    ) as Record<number, OperatorRoiStatus>;
-    const finalCounts = countStatuses(finalStatuses);
-    const finalState = finalCounts.ng > 0 ? "NG" : "OK";
-    const finalIndexes = Object.keys(finalStatuses).map(Number);
-
-    lineStatusesRef.current = finalStatuses;
-    lineVisibleIndexesRef.current = new Set(finalIndexes);
-    setActiveRoiIndexes(finalIndexes);
-    setRoiStatuses({ ...finalStatuses });
-    setRoiDetectedTextLabels({ ...lineLabelsRef.current });
-    setOkCount(finalCounts.ok);
-    setNgCount(finalCounts.ng);
-    setAnimationState(finalIndexes.length > 0 ? finalState : "UNKNOWN");
     toast.success(t("lineAnimationTest.lineFinished"));
+  }
+
+  async function handlePlcCaptureTrigger() {
+    if (plcTriggerBusyRef.current) {
+      toast.warning(t("lineTest.plcTriggerBusy"));
+      return;
+    }
+
+    if (batchTestingRef.current) {
+      if (
+        batchPausedRef.current ||
+        !pendingDetectionRef.current ||
+        !batchLatchResolverRef.current
+      ) {
+        toast.warning(t("lineTest.plcTriggerBusy"));
+        return;
+      }
+      const resolveLatch = batchLatchResolverRef.current;
+      batchLatchResolverRef.current = null;
+      resolveLatch(true);
+      return;
+    }
+
+    const pending = pendingDetectionRef.current;
+    if (!pending) {
+      toast.warning(t("lineTest.noPendingDetection"));
+      return;
+    }
+
+    plcTriggerBusyRef.current = true;
+    try {
+      await commitPendingDetection(pending);
+      if (!lineRunningRef.current && pendingDetectionRef.current?.id === pending.id) {
+        pendingDetectionRef.current = null;
+      }
+      toast.success(t("lineTest.plcLatchCommitted"));
+    } finally {
+      plcTriggerBusyRef.current = false;
+      const latestPending = pendingDetectionRef.current;
+      if (
+        lineRunningRef.current &&
+        latestPending &&
+        latestPending.id !== pending.id
+      ) {
+        const animated = showDetectionWaitingForLatch(latestPending, false);
+        if (!animated) setAnimationState("WAITING_PLC");
+      } else if (lineRunningRef.current) {
+        setAnimationState("WAITING_PLC");
+      }
+    }
   }
 
   async function runRealImageTest() {
@@ -1002,14 +1135,8 @@ export function LineAnimationTestPanel({
       return;
     }
 
-    const detectedRegions = product.roiRegions;
-
-    if (detectedRegions.length === 0) {
-      toast.warning(t("lineAnimationTest.noRoi"));
-      return;
-    }
-
     setTestingRealImage(true);
+    const generation = testSessionGenerationRef.current;
     const toastId = toast.loading(t("lineAnimationTest.realTesting"));
 
     try {
@@ -1017,49 +1144,52 @@ export function LineAnimationTestPanel({
         ? selectedImageBase64
         : await grabLineFrameBase64(validated.accessToken);
       const testFileName = selectedImageName || t("operator.liveCamera");
-      const testProduct = {
-        ...product,
-        roiRegions: detectedRegions,
-      };
-      const crops = await cropProductRois(imageToTestBase64, testProduct);
-      const response = await testInspectionImage(
-        validated.accessToken,
-        product.id,
-        crops.map((crop) => ({
-          slotIndex: crop.slotIndex,
-          imageBase64: crop.imageBase64,
-        })),
-        detectedRegions,
-      );
-      await playInspectionResult(response.data, detectedRegions);
-      setLatestTestResult(
-        buildLatestTestResult({
-          inspection: response.data,
-          roiImages: crops,
-          source: selectedImageBase64 ? "image" : "camera",
-          fileName: testFileName,
-          relativePath: testFileName,
-        }),
-      );
-      toast.success(t("lineAnimationTest.realScenarioStarted"), { id: toastId });
-    } catch (cause) {
-      const message =
-        cause instanceof ApiError
-          ? apiError(cause.message, "lineAnimationTest.realTestFailed")
-          : t("lineAnimationTest.realTestFailed");
-      setLatestTestResult(
-        buildLatestErrorResult({
-          source: selectedImageBase64 ? "image" : "camera",
-          fileName: selectedImageName || t("operator.liveCamera"),
-          relativePath: selectedImageName || t("operator.liveCamera"),
-          message,
-          productCode: product.code,
-        }),
-      );
-      toast.error(message, { id: toastId });
+      const pending = await detectTestImage({
+        accessToken: validated.accessToken,
+        fileName: testFileName,
+        imageBase64: imageToTestBase64,
+        relativePath: testFileName,
+        source: selectedImageBase64 ? "image" : "camera",
+        testProduct: validated.product,
+      });
+      if (generation !== testSessionGenerationRef.current) {
+        toast.dismiss(toastId);
+        return;
+      }
+      pendingDetectionRef.current = pending;
+      showDetectionWaitingForLatch(pending);
+      if (pending.inspection) {
+        toast.success(t("lineTest.plcTriggerListening"), { id: toastId });
+      } else {
+        toast.error(
+          pending.details.errorMessage ?? t("lineAnimationTest.realTestFailed"),
+          { id: toastId },
+        );
+      }
     } finally {
       setTestingRealImage(false);
     }
+  }
+
+  function toggleBatchPause() {
+    const paused = !batchPausedRef.current;
+    batchPausedRef.current = paused;
+    setBatchPaused(paused);
+    toast.info(
+      paused
+        ? t("lineTest.batchPaused")
+        : t("lineTest.batchResumed"),
+    );
+  }
+
+  function stopBatchTest() {
+    testSessionGenerationRef.current += 1;
+    cancelBatchTestRef.current = true;
+    batchPausedRef.current = false;
+    setBatchPaused(false);
+    batchLatchResolverRef.current?.(false);
+    batchLatchResolverRef.current = null;
+    toast.info(t("lineAnimationTest.batchCancelled"));
   }
 
   async function runBatchFolderTest() {
@@ -1076,9 +1206,14 @@ export function LineAnimationTestPanel({
 
     stopLineInterval();
     clearTimers();
-    clearLineSessionRefs();
+    const generation = ++testSessionGenerationRef.current;
+    lineRunningRef.current = false;
+    batchTestingRef.current = true;
+    pendingDetectionRef.current = null;
     setLineRunning(false);
     setBatchTesting(true);
+    batchPausedRef.current = false;
+    setBatchPaused(false);
     setBatchSummary(null);
     setLatestTestResult(null);
     setBatchProgress(null);
@@ -1090,6 +1225,7 @@ export function LineAnimationTestPanel({
       const rows: AnimationBatchReportRow[] = [];
 
       for (const [index, file] of batchFiles.entries()) {
+        await waitUntilBatchResumed();
         if (cancelBatchTestRef.current) {
           break;
         }
@@ -1101,72 +1237,61 @@ export function LineAnimationTestPanel({
         });
 
         const imageUrl = URL.createObjectURL(file);
-        let currentImageBase64 = "";
-
         setSelectedImageUrl(imageUrl);
         setSelectedImageName(file.name);
+        const currentImageBase64 = await readFileAsDataUrl(file);
+        setSelectedImageBase64(currentImageBase64);
+        const relativePath = file.webkitRelativePath || file.name;
+        const pending = await detectTestImage({
+          accessToken: validated.accessToken,
+          fileName: file.name,
+          imageBase64: currentImageBase64,
+          relativePath,
+          source: "folder",
+          testProduct: validated.product,
+        });
+        if (generation !== testSessionGenerationRef.current) {
+          break;
+        }
+        const reportImageBase64 = await compressImageForReport(
+          currentImageBase64,
+        ).catch(() => "");
+        pendingDetectionRef.current = pending;
+        showDetectionWaitingForLatch(pending);
 
-        try {
-          currentImageBase64 = await readFileAsDataUrl(file);
-          setSelectedImageBase64(currentImageBase64);
-          const { crops, inspection } = await runInspectionForImage(
-            validated.accessToken,
-            currentImageBase64,
-            validated.product,
-          );
-          const reportImageBase64 = await compressImageForReport(
-            currentImageBase64,
-          );
+        if (cancelBatchTestRef.current) {
+          break;
+        }
 
-          await playInspectionResult(inspection, validated.product.roiRegions);
-          setLatestTestResult(
-            buildLatestTestResult({
-              inspection,
-              roiImages: crops,
-              source: "folder",
-              fileName: file.name,
-              relativePath: file.webkitRelativePath || file.name,
-            }),
-          );
+        const latched = await waitForBatchLatch();
+        if (!latched || cancelBatchTestRef.current) {
+          break;
+        }
 
+        await commitPendingDetection(pending);
+        if (pending.inspection) {
           rows.push({
             fileName: file.name,
-            relativePath: file.webkitRelativePath || file.name,
-            result: inspection.result,
-            cycleTimeMs: inspection.cycleTimeMs,
-            errorMessage: inspection.error,
+            relativePath,
+            result: pending.inspection.result,
+            cycleTimeMs: pending.inspection.cycleTimeMs,
+            errorMessage: pending.inspection.error,
             originalImageBase64: reportImageBase64,
-            slots: inspection.slots,
+            slots: pending.inspection.slots,
           });
-        } catch (cause) {
-          const message =
-            cause instanceof ApiError
-              ? apiError(cause.message, "lineAnimationTest.realTestFailed")
-              : t("lineAnimationTest.realTestFailed");
-          const reportImageBase64 = currentImageBase64
-            ? await compressImageForReport(currentImageBase64).catch(() => "")
-            : "";
-
-          await playRejectedInspectionResult("ERROR");
-          setLatestTestResult(
-            buildLatestErrorResult({
-              source: "folder",
-              fileName: file.name,
-              relativePath: file.webkitRelativePath || file.name,
-              message,
-              productCode: validated.product.code,
-            }),
-          );
-
+        } else {
           rows.push({
             fileName: file.name,
-            relativePath: file.webkitRelativePath || file.name,
+            relativePath,
             result: "ERROR",
             cycleTimeMs: null,
-            errorMessage: message,
+            errorMessage: pending.details.errorMessage,
             originalImageBase64: reportImageBase64,
             slots: [],
           });
+        }
+        if (pendingDetectionRef.current?.id === pending.id) {
+          pendingDetectionRef.current = null;
         }
       }
 
@@ -1193,7 +1318,12 @@ export function LineAnimationTestPanel({
           : t("lineTest.batchTestFailed");
       toast.error(message, { id: toastId });
     } finally {
+      batchLatchResolverRef.current = null;
+      pendingDetectionRef.current = null;
+      batchPausedRef.current = false;
+      batchTestingRef.current = false;
       setBatchTesting(false);
+      setBatchPaused(false);
       setSavingBatchReport(false);
       setBatchProgress(null);
     }
@@ -1239,7 +1369,10 @@ export function LineAnimationTestPanel({
     });
   }
 
-  function buildBatchSummary(rows: AnimationBatchReportRow[], reportId: string) {
+  function buildBatchSummary(
+    rows: AnimationBatchReportRow[],
+    reportId: string,
+  ) {
     return {
       reportId,
       folderName: batchFolderName || t("lineTest.batchFolderUnknown"),
@@ -1350,17 +1483,32 @@ export function LineAnimationTestPanel({
           </Button>
         )}
         {batchTesting ? (
-          <Button
-            type="button"
-            variant="outline"
-            className="operator-line-action-button h-14 border-[#1e293b] bg-[#9fc3eb] text-base font-semibold text-slate-950 opacity-100 hover:bg-[#8fb8e6]"
-            onClick={() => {
-              cancelBatchTestRef.current = true;
-            }}
-          >
-            <Pause className="h-5 w-5" />
-            {t("lineTest.stopBatchTest")}
-          </Button>
+          <>
+            <Button
+              type="button"
+              variant="outline"
+              className="operator-line-action-button h-14 border-[#1e293b] bg-[#9fc3eb] text-base font-semibold text-slate-950 opacity-100 hover:bg-[#8fb8e6]"
+              onClick={toggleBatchPause}
+            >
+              {batchPaused ? (
+                <Play className="h-5 w-5" />
+              ) : (
+                <Pause className="h-5 w-5" />
+              )}
+              {batchPaused
+                ? t("lineTest.resumeBatchTest")
+                : t("lineTest.pauseBatchTest")}
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              className="operator-line-action-button h-14 border-red-700 bg-red-700 text-base font-semibold text-white hover:bg-red-800"
+              onClick={stopBatchTest}
+            >
+              <Square className="h-5 w-5" />
+              {t("lineTest.stopBatchTest")}
+            </Button>
+          </>
         ) : (
           <Button
             type="button"
@@ -1409,211 +1557,217 @@ export function LineAnimationTestPanel({
       <div className="grid min-w-0 gap-4 pb-4">
         <div className="grid min-h-[calc(100dvh-170px)] min-w-0 grid-rows-[auto_minmax(0,1fr)_auto] gap-3">
           <Card className="operator-line-top-card border-[#86a8cf] bg-[#cfdff2] shadow-none">
-          <CardContent className="operator-line-top-content grid gap-4 p-4 min-[980px]:grid-cols-[340px_minmax(0,1fr)]">
-            <div className="operator-line-product-box rounded-sm border border-[#9db7d8] bg-[#d9e6f5] p-4">
-              <div className="mb-3 flex items-center justify-between gap-3">
-                <CardTitle className="flex items-center gap-2 text-xl font-bold text-slate-950">
-                  <Package className="h-5 w-5 text-[#274d7d]" />
-                  {t("operator.productToday")}
-                </CardTitle>
-                <Badge
-                  className={
-                    dataSource === "api"
-                      ? "border-[#8bb96d] bg-[#eef8e2] text-[#355f13]"
-                      : "border-[#d9a04f] bg-[#fff1d8] text-[#8a4b00]"
-                  }
-                >
-                  {dataSource === "api"
-                    ? t("operator.sourceApi")
-                    : t("operator.sourceDemo")}
-                </Badge>
-              </div>
-
-              <div className="grid gap-3">
-                <div className="grid gap-2">
-                  <label className="text-sm font-semibold text-[#274d7d]">
-                    {t("products.code")}
-                  </label>
-                  <Select
-                    aria-label={t("products.code")}
-                    value={selectedProductId}
-                    disabled={loadingProducts || isBusy}
-                    className="h-11 border-[#9db7d8] bg-white text-base"
-                    onChange={(event) => handleProductChange(event.target.value)}
-                    >
-                    {products.map((item) => (
-                      <option key={item.id} value={item.id}>
-                        {item.code} - {item.name}
-                      </option>
-                    ))}
-                  </Select>
-                </div>
-
-                <div className="grid gap-2">
-                  <label className="text-sm font-semibold text-[#274d7d]">
-                    {t("lineAnimationTest.testImage")}
-                  </label>
-                  <input
-                    ref={fileInputRef}
-                    type="file"
-                    accept="image/*"
-                    className="hidden"
-                    onChange={handleImageChange}
-                  />
-                  <div className="grid grid-cols-[minmax(0,1fr)_44px] gap-2">
-                    <Button
-                      type="button"
-                      variant="outline"
-                      className="h-11 justify-start border-[#9db7d8] bg-white text-slate-700 hover:bg-slate-50"
-                      disabled={batchTesting}
-                      onClick={() => fileInputRef.current?.click()}
-                    >
-                      <FileImage className="h-4 w-4" />
-                      <span className="truncate">
-                        {selectedImageName || t("lineAnimationTest.chooseImage")}
-                      </span>
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      aria-label={t("lineTest.clearImage")}
-                      className="h-11 border-[#9db7d8] bg-white px-0 text-slate-700 hover:bg-slate-50"
-                      disabled={isBusy || !selectedImageBase64}
-                      onClick={clearSelectedImage}
-                    >
-                      <X className="h-4 w-4" />
-                    </Button>
-                  </div>
-                </div>
-
-                <div className="grid gap-2">
-                  <label className="text-sm font-semibold text-[#274d7d]">
-                    {t("lineTest.selectFolder")}
-                  </label>
-                  <input
-                    ref={folderInputRef}
-                    type="file"
-                    accept="image/*"
-                    multiple
-                    className="hidden"
-                    onChange={handleFolderChange}
-                  />
-                  <div className="grid grid-cols-[minmax(0,1fr)_44px] gap-2">
-                    <Button
-                      type="button"
-                      variant="outline"
-                      className="h-11 justify-start border-[#9db7d8] bg-white text-slate-700 hover:bg-slate-50"
-                      disabled={batchTesting}
-                      onClick={() => folderInputRef.current?.click()}
-                    >
-                      <FolderOpen className="h-4 w-4" />
-                      <span className="truncate">
-                        {batchFolderName
-                          ? formatMessage(t("lineTest.folderSelected"), {
-                              folder: batchFolderName,
-                              count: batchFiles.length,
-                            })
-                          : t("lineTest.selectFolder")}
-                      </span>
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      aria-label={t("lineTest.clearFolder")}
-                      className="h-11 border-[#9db7d8] bg-white px-0 text-slate-700 hover:bg-slate-50"
-                      disabled={batchTesting || batchFiles.length === 0}
-                      onClick={clearSelectedFolder}
-                    >
-                      <X className="h-4 w-4" />
-                    </Button>
-                  </div>
-                </div>
-
-                {batchSummary ? (
-                  <div className="flex flex-wrap gap-2">
-                    <Badge className="border-[#9db7d8] bg-[#edf5ff] text-[#274d7d]">
-                      {formatMessage(t("lineTest.batchReportId"), {
-                        reportId: batchSummary.reportId,
-                      })}
+            <CardContent className="operator-line-top-content grid gap-4 p-4 min-[980px]:grid-cols-[340px_minmax(0,1fr)]">
+              <div className="operator-line-product-box rounded-sm border border-[#9db7d8] bg-[#d9e6f5] p-4">
+                <div className="mb-3 flex items-center justify-between gap-3">
+                  <CardTitle className="flex items-center gap-2 text-xl font-bold text-slate-950">
+                    <Package className="h-5 w-5 text-[#274d7d]" />
+                    {t("operator.productToday")}
+                  </CardTitle>
+                  <Badge
+                    className={
+                      dataSource === "api"
+                        ? "border-[#8bb96d] bg-[#eef8e2] text-[#355f13]"
+                        : "border-[#d9a04f] bg-[#fff1d8] text-[#8a4b00]"
+                    }
+                  >
+                    {dataSource === "api"
+                      ? t("operator.sourceApi")
+                      : t("operator.sourceDemo")}
+                  </Badge>
+                  {dataSource === "api" ? (
+                    <Badge className="border-emerald-200 bg-emerald-50 text-emerald-700">
+                      {t("lineTest.plcTriggerListening")}
                     </Badge>
-                    <Badge className="border-slate-200 bg-white text-slate-700">
-                      {batchSummary.folderName}
-                    </Badge>
+                  ) : null}
+                </div>
+
+                <div className="grid gap-3">
+                  <div className="grid gap-2">
+                    <label className="text-sm font-semibold text-[#274d7d]">
+                      {t("products.code")}
+                    </label>
+                    <Select
+                      aria-label={t("products.code")}
+                      value={selectedProductId}
+                      disabled={loadingProducts || isBusy}
+                      className="h-11 border-[#9db7d8] bg-white text-base"
+                      onChange={(event) =>
+                        handleProductChange(event.target.value)
+                      }
+                    >
+                      {products.map((item) => (
+                        <option key={item.id} value={item.id}>
+                          {item.code} - {item.name}
+                        </option>
+                      ))}
+                    </Select>
                   </div>
-                ) : null}
-              </div>
-            </div>
 
-            <div className="operator-line-stats-shell grid gap-3 min-[860px]:grid-cols-[minmax(0,1fr)_280px]">
-              <div className="operator-line-stats-grid grid gap-3 min-[760px]:grid-cols-2">
-                <OperatorMetricTile
-                  label={t("operator.currentProduct")}
-                  value={product.code}
-                  className="operator-line-info-tile border-[#f0a53b] bg-white text-slate-950"
-                />
-                <OperatorMetricTile
-                  label={t("operator.quantity")}
-                  value={quantity}
-                  className="operator-line-info-tile border-[#f0a53b] bg-white text-slate-950"
-                />
-                <OperatorMetricTile
-                  label={t("operator.count")}
-                  value={count}
-                  className="operator-line-info-tile border-[#f0a53b] bg-white text-slate-950"
-                />
-                <OperatorMetricTile
-                  label={t("operator.batch")}
-                  value={batch}
-                  className="operator-line-info-tile border-[#f0a53b] bg-white text-slate-950"
-                />
+                  <div className="grid gap-2">
+                    <label className="text-sm font-semibold text-[#274d7d]">
+                      {t("lineAnimationTest.testImage")}
+                    </label>
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      accept="image/*"
+                      className="hidden"
+                      onChange={handleImageChange}
+                    />
+                    <div className="grid grid-cols-[minmax(0,1fr)_44px] gap-2">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        className="h-11 justify-start border-[#9db7d8] bg-white text-slate-700 hover:bg-slate-50"
+                        disabled={isBusy}
+                        onClick={() => fileInputRef.current?.click()}
+                      >
+                        <FileImage className="h-4 w-4" />
+                        <span className="truncate">
+                          {selectedImageName ||
+                            t("lineAnimationTest.chooseImage")}
+                        </span>
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        aria-label={t("lineTest.clearImage")}
+                        className="h-11 border-[#9db7d8] bg-white px-0 text-slate-700 hover:bg-slate-50"
+                        disabled={isBusy || !selectedImageBase64}
+                        onClick={clearSelectedImage}
+                      >
+                        <X className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  </div>
+
+                  <div className="grid gap-2">
+                    <label className="text-sm font-semibold text-[#274d7d]">
+                      {t("lineTest.selectFolder")}
+                    </label>
+                    <input
+                      ref={folderInputRef}
+                      type="file"
+                      accept="image/*"
+                      multiple
+                      className="hidden"
+                      onChange={handleFolderChange}
+                    />
+                    <div className="grid grid-cols-[minmax(0,1fr)_44px] gap-2">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        className="h-11 justify-start border-[#9db7d8] bg-white text-slate-700 hover:bg-slate-50"
+                        disabled={batchTesting}
+                        onClick={() => folderInputRef.current?.click()}
+                      >
+                        <FolderOpen className="h-4 w-4" />
+                        <span className="truncate">
+                          {batchFolderName
+                            ? formatMessage(t("lineTest.folderSelected"), {
+                                folder: batchFolderName,
+                                count: batchFiles.length,
+                              })
+                            : t("lineTest.selectFolder")}
+                        </span>
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        aria-label={t("lineTest.clearFolder")}
+                        className="h-11 border-[#9db7d8] bg-white px-0 text-slate-700 hover:bg-slate-50"
+                        disabled={batchTesting || batchFiles.length === 0}
+                        onClick={clearSelectedFolder}
+                      >
+                        <X className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  </div>
+
+                  {batchSummary ? (
+                    <div className="flex flex-wrap gap-2">
+                      <Badge className="border-[#9db7d8] bg-[#edf5ff] text-[#274d7d]">
+                        {formatMessage(t("lineTest.batchReportId"), {
+                          reportId: batchSummary.reportId,
+                        })}
+                      </Badge>
+                      <Badge className="border-slate-200 bg-white text-slate-700">
+                        {batchSummary.folderName}
+                      </Badge>
+                    </div>
+                  ) : null}
+                </div>
               </div>
 
-              <div className="operator-line-status-grid grid gap-3 min-[520px]:grid-cols-2 min-[860px]:grid-cols-1">
-                <OperatorMetricTile
-                  label={t("operator.ok")}
-                  value={okCount}
-                  className="operator-line-info-tile border-[#0f9f47] bg-[#15b455] text-white"
-                  valueClassName="operator-line-okng-value text-6xl min-[860px]:text-7xl"
-                />
-                <OperatorMetricTile
-                  label={t("operator.ng")}
-                  value={ngCount}
-                  className="operator-line-info-tile border-[#d92d20] bg-[#ef3e36] text-white"
-                  valueClassName="operator-line-okng-value text-6xl min-[860px]:text-7xl"
-                />
-              </div>
-            </div>
+              <div className="operator-line-stats-shell grid gap-3 min-[860px]:grid-cols-[minmax(0,1fr)_280px]">
+                <div className="operator-line-stats-grid grid gap-3 min-[760px]:grid-cols-2">
+                  <OperatorMetricTile
+                    label={t("operator.currentProduct")}
+                    value={product.code}
+                    className="operator-line-info-tile border-[#f0a53b] bg-white text-slate-950"
+                  />
+                  <OperatorMetricTile
+                    label={t("operator.quantity")}
+                    value={quantity}
+                    className="operator-line-info-tile border-[#f0a53b] bg-white text-slate-950"
+                  />
+                  <OperatorMetricTile
+                    label={t("operator.count")}
+                    value={count}
+                    className="operator-line-info-tile border-[#f0a53b] bg-white text-slate-950"
+                  />
+                  <OperatorMetricTile
+                    label={t("operator.batch")}
+                    value={batch}
+                    className="operator-line-info-tile border-[#f0a53b] bg-white text-slate-950"
+                  />
+                </div>
 
-            <div className="operator-line-top-actions rounded-sm border border-[#9db7d8] bg-[#d9e6f5] p-4">
-              <div className="grid gap-2">
-                {operatorTestActionButtons}
+                <div className="operator-line-status-grid grid gap-3 min-[520px]:grid-cols-2 min-[860px]:grid-cols-1">
+                  <OperatorMetricTile
+                    label={t("operator.ok")}
+                    value={okCount}
+                    className="operator-line-info-tile border-[#0f9f47] bg-[#15b455] text-white"
+                    valueClassName="operator-line-okng-value text-6xl min-[860px]:text-7xl"
+                  />
+                  <OperatorMetricTile
+                    label={t("operator.ng")}
+                    value={ngCount}
+                    className="operator-line-info-tile border-[#d92d20] bg-[#ef3e36] text-white"
+                    valueClassName="operator-line-okng-value text-6xl min-[860px]:text-7xl"
+                  />
+                </div>
               </div>
-            </div>
-          </CardContent>
+
+              <div className="operator-line-top-actions rounded-sm border border-[#9db7d8] bg-[#d9e6f5] p-4">
+                <div className="grid gap-2">{operatorTestActionButtons}</div>
+              </div>
+            </CardContent>
           </Card>
 
           <Card className="operator-line-preview-card flex min-h-0 overflow-hidden border-[#86a8cf] bg-[#9fc3eb] shadow-none">
-          <div className="flex min-h-0 flex-1 flex-col">
-            <div className="operator-line-preview-heading shrink-0 border-b border-[#86a8cf] px-4 py-3 text-center text-3xl font-bold text-[#2270c6]">
-              {t("operator.referenceImage")}
+            <div className="flex min-h-0 flex-1 flex-col">
+              <div className="operator-line-preview-heading shrink-0 border-b border-[#86a8cf] px-4 py-3 text-center text-3xl font-bold text-[#2270c6]">
+                {t("operator.referenceImage")}
+              </div>
+              <div className="operator-line-preview-body min-h-0 flex-1 p-4">
+                <OperatorRoiEditor
+                  product={displayProduct}
+                  onChange={() => undefined}
+                  overlayResult={overlayResult}
+                  okCount={okCount}
+                  ngCount={ngCount}
+                  roiStatuses={roiStatuses}
+                  roiDetectedTextLabels={roiDetectedTextLabels}
+                  roiCheckingLabel={t("lineAnimationTest.checkingBand")}
+                  roiTextAnimationMs={inspectionResultDelayMs}
+                  interactive={false}
+                  previewImageSrc={operatorPreviewImageSrc}
+                  showClock
+                />
+              </div>
             </div>
-            <div className="operator-line-preview-body min-h-0 flex-1 p-4">
-              <OperatorRoiEditor
-                product={displayProduct}
-                onChange={() => undefined}
-                overlayResult={overlayResult}
-                okCount={okCount}
-                ngCount={ngCount}
-                roiStatuses={roiStatuses}
-                roiDetectedTextLabels={roiDetectedTextLabels}
-                roiCheckingLabel={t("lineAnimationTest.checkingBand")}
-                roiTextAnimationMs={inspectionResultDelayMs}
-                interactive={false}
-                previewImageSrc={operatorPreviewImageSrc}
-                showClock
-              />
-            </div>
-          </div>
           </Card>
 
           <div className="operator-line-footer-actions grid shrink-0 gap-2 min-[980px]:grid-cols-5">
@@ -1621,10 +1775,7 @@ export function LineAnimationTestPanel({
           </div>
         </div>
 
-        <LatestTestResultCard
-          result={latestTestResult}
-          t={t}
-        />
+        <LatestTestResultCard result={latestTestResult} t={t} />
       </div>
     );
   }
@@ -1682,7 +1833,7 @@ export function LineAnimationTestPanel({
                   type="button"
                   variant="outline"
                   className="h-11 justify-start border-slate-300 bg-white text-slate-700 hover:bg-slate-50"
-                  disabled={batchTesting}
+                  disabled={isBusy}
                   onClick={() => fileInputRef.current?.click()}
                 >
                   <FileImage className="h-4 w-4" />
@@ -1712,7 +1863,7 @@ export function LineAnimationTestPanel({
               </Badge>
               <Badge className="border-cyan-200 bg-cyan-50 text-cyan-700">
                 {runtimeSettings.ignorePlcInDev
-                  ? t("lineAnimationTest.plcIgnored")
+                  ? t("lineAnimationTest.plcOptional")
                   : t("lineAnimationTest.plcRequired")}
               </Badge>
               {animationState === "CHECKING" ? (
@@ -1768,7 +1919,9 @@ export function LineAnimationTestPanel({
             <Button
               type="button"
               variant="outline"
-              disabled={batchTesting || (!lineRunning && activeRoiIndexes.length === 0)}
+              disabled={
+                batchTesting || (!lineRunning && activeRoiIndexes.length === 0)
+              }
               className="border-slate-300 text-slate-800 hover:bg-slate-50"
               onClick={finishLineSession}
             >
@@ -1804,16 +1957,30 @@ export function LineAnimationTestPanel({
               </span>
             </Button>
             {batchTesting ? (
-              <Button
-                type="button"
-                className="border-red-700 bg-red-700 text-white hover:bg-red-800"
-                onClick={() => {
-                  cancelBatchTestRef.current = true;
-                }}
-              >
-                <Pause className="h-4 w-4" />
-                {t("lineTest.stopBatchTest")}
-              </Button>
+              <>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={toggleBatchPause}
+                >
+                  {batchPaused ? (
+                    <Play className="h-4 w-4" />
+                  ) : (
+                    <Pause className="h-4 w-4" />
+                  )}
+                  {batchPaused
+                    ? t("lineTest.resumeBatchTest")
+                    : t("lineTest.pauseBatchTest")}
+                </Button>
+                <Button
+                  type="button"
+                  className="border-red-700 bg-red-700 text-white hover:bg-red-800"
+                  onClick={stopBatchTest}
+                >
+                  <Square className="h-4 w-4" />
+                  {t("lineTest.stopBatchTest")}
+                </Button>
+              </>
             ) : (
               <Button
                 type="button"
@@ -1891,8 +2058,14 @@ export function LineAnimationTestPanel({
                 label={t("lineTest.batchTotal")}
                 value={batchSummary.totalImages}
               />
-              <MetricTile label={t("operator.ok")} value={batchSummary.okImages} />
-              <MetricTile label={t("operator.ng")} value={batchSummary.ngImages} />
+              <MetricTile
+                label={t("operator.ok")}
+                value={batchSummary.okImages}
+              />
+              <MetricTile
+                label={t("operator.ng")}
+                value={batchSummary.ngImages}
+              />
               <MetricTile
                 label={t("lineAnimationTest.unknown")}
                 value={batchSummary.unknownImages}
@@ -1910,10 +2083,7 @@ export function LineAnimationTestPanel({
         </CardContent>
       </Card>
 
-      <LatestTestResultCard
-        result={latestTestResult}
-        t={t}
-      />
+      <LatestTestResultCard result={latestTestResult} t={t} />
     </div>
   );
 }
@@ -1921,7 +2091,9 @@ export function LineAnimationTestPanel({
 function MetricTile({ label, value }: { label: string; value: number }) {
   return (
     <div className="border border-slate-200 bg-slate-50 p-4">
-      <div className="text-sm font-semibold uppercase text-slate-500">{label}</div>
+      <div className="text-sm font-semibold uppercase text-slate-500">
+        {label}
+      </div>
       <div className="mt-2 text-3xl font-bold text-slate-950">{value}</div>
     </div>
   );
@@ -1935,7 +2107,13 @@ function LatestTestResultCard({
   t: (key: string) => string;
 }) {
   const roiImageBySlot = new Map(
-    (result?.roiImages ?? []).map((image) => [image.slotIndex, image.imageBase64]),
+    (result?.roiImages ?? []).map((image) => [
+      image.slotIndex,
+      image.imageBase64,
+    ]),
+  );
+  const visibleSlots = (result?.slots ?? []).filter(
+    (slot) => slot.result === "OK" || slot.result === "NG",
   );
 
   return (
@@ -1965,8 +2143,14 @@ function LatestTestResultCard({
         {result ? (
           <>
             <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-              <DetailTile label={t("lineTest.batchImage")} value={result.fileName} />
-              <DetailTile label={t("operator.currentProduct")} value={result.productCode} />
+              <DetailTile
+                label={t("lineTest.batchImage")}
+                value={result.fileName}
+              />
+              <DetailTile
+                label={t("operator.currentProduct")}
+                value={result.productCode}
+              />
               <DetailTile
                 label={t("lineTest.cycleTime")}
                 value={
@@ -2013,12 +2197,14 @@ function LatestTestResultCard({
             </div>
 
             <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
-              {result.slots.length > 0 ? (
-                result.slots.map((slot, index) => {
+              {visibleSlots.length > 0 ? (
+                visibleSlots.map((slot, index) => {
                   const slotIndex =
                     typeof slot.slotIndex === "number" ? slot.slotIndex : null;
                   const roiImage =
-                    slotIndex == null ? "" : roiImageBySlot.get(slotIndex) ?? "";
+                    slotIndex == null
+                      ? ""
+                      : (roiImageBySlot.get(slotIndex) ?? "");
 
                   return (
                     <div
@@ -2102,8 +2288,8 @@ function LatestTestResultCard({
                   </tr>
                 </thead>
                 <tbody>
-                  {result.slots.length > 0 ? (
-                    result.slots.map((slot, index) => (
+                  {visibleSlots.length > 0 ? (
+                    visibleSlots.map((slot, index) => (
                       <tr
                         key={`${slot.slotIndex ?? "unknown"}-${index}`}
                         className="odd:bg-white even:bg-slate-50"
@@ -2155,7 +2341,9 @@ function LatestTestResultCard({
 function DetailTile({ label, value }: { label: string; value: string }) {
   return (
     <div className="border border-slate-200 bg-slate-50 p-4">
-      <div className="text-xs font-semibold uppercase text-slate-500">{label}</div>
+      <div className="text-xs font-semibold uppercase text-slate-500">
+        {label}
+      </div>
       <div className="mt-2 truncate text-lg font-bold text-slate-950">
         {value || "-"}
       </div>
@@ -2188,7 +2376,9 @@ function OperatorMetricTile({
 }) {
   return (
     <div className={["rounded-sm border-2 p-5", className].join(" ")}>
-      <div className="text-sm font-semibold uppercase tracking-normal">{label}</div>
+      <div className="text-sm font-semibold uppercase tracking-normal">
+        {label}
+      </div>
       <div
         className={[
           "mt-3 truncate text-4xl font-bold leading-none",
@@ -2305,8 +2495,10 @@ async function cropProductRois(imageBase64: string, product: ProductProfile) {
   });
 
   return product.roiRegions.map((region) => {
-    const sourceCenterX = (region.x - imageMapping.offsetX) * imageMapping.scaleX;
-    const sourceCenterY = (region.y - imageMapping.offsetY) * imageMapping.scaleY;
+    const sourceCenterX =
+      (region.x - imageMapping.offsetX) * imageMapping.scaleX;
+    const sourceCenterY =
+      (region.y - imageMapping.offsetY) * imageMapping.scaleY;
     const sourceWidth = Math.max(
       1,
       Math.round(region.width * imageMapping.scaleX),
@@ -2381,7 +2573,10 @@ function getContainedImageMapping({
   imageHeight: number;
   imageWidth: number;
 }) {
-  const containScale = Math.min(frameWidth / imageWidth, frameHeight / imageHeight);
+  const containScale = Math.min(
+    frameWidth / imageWidth,
+    frameHeight / imageHeight,
+  );
   const displayedWidth = imageWidth * containScale;
   const displayedHeight = imageHeight * containScale;
   const offsetX = (frameWidth - displayedWidth) / 2;

@@ -31,6 +31,12 @@ contextBridge.exposeInMainWorld("ocrDesktop", {
   openTerminalWindow() {
     return ipcRenderer.invoke("desktop:open-terminal-window");
   },
+  prepareStartupHardware(preferredProductId?: string) {
+    return ipcRenderer.invoke(
+      "desktop:prepare-startup-hardware",
+      preferredProductId,
+    );
+  },
   saveTestStorageSettings(settings: Record<string, unknown>) {
     return ipcRenderer.invoke("desktop:save-test-storage-settings", settings);
   },
@@ -54,6 +60,15 @@ contextBridge.exposeInMainWorld("ocrDesktop", {
 
     return () => {
       ipcRenderer.removeListener("desktop-shutdown-status", listener);
+    };
+  },
+  onStartupHardwareStatus(callback: (payload: Record<string, unknown>) => void) {
+    const listener = (_event: unknown, payload: Record<string, unknown>) =>
+      callback(payload);
+    ipcRenderer.on("desktop-startup-hardware-status", listener);
+
+    return () => {
+      ipcRenderer.removeListener("desktop-startup-hardware-status", listener);
     };
   },
   onUpdateStatus(callback: (payload: Record<string, unknown>) => void) {

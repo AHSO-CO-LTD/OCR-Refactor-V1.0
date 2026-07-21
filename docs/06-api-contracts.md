@@ -27,7 +27,7 @@ Recommended local defaults:
 ```text
 Frontend: http://localhost:3969
 Backend:  http://localhost:3979/api
-Tool:     http://localhost:8000/tool/v1
+Tool:     http://localhost:8668/tool/v1
 ```
 
 These ports can change later, but the responsibility split should stay the same.
@@ -153,6 +153,14 @@ Response:
   }
 }
 ```
+
+### Restore Remembered Session
+
+```http
+GET /auth/restore
+```
+
+Uses the same bearer token response shape as `GET /auth/me`, but is reserved for startup auto-login. It rejects dongle mock mode and succeeds only after a real physical dongle check returns `DONGLE_OK`. PLC and camera state are not part of this authentication decision.
 
 ### Logout
 
@@ -701,6 +709,30 @@ POST /system/shutdown
 ```
 
 This endpoint must require a high-level permission such as `system.shutdown`.
+
+## Product XLSX Import
+
+```http
+GET /products/import/template?language=vi
+POST /products/import
+```
+
+- Template là XLSX chỉ có hai cột `Mã sản phẩm` và `Link model`.
+- Upload dùng `multipart/form-data`, field `file`, tối đa 5 MB và chỉ nhận `.xlsx`.
+- Mã mới tạo sản phẩm với tên bằng mã và các thông số mặc định; mã đã tồn tại cập nhật link model.
+- Yêu cầu quyền `product.manage`.
+
+## Line Operation Reports
+
+```http
+GET /inspections/line-reports/summary?from=<ISO>&to=<ISO>&groupBy=day|month|year
+GET /inspections/line-reports/export?from=<ISO>&to=<ISO>&groupBy=day|month|year
+```
+
+- Dữ liệu lấy từ các snapshot được PLC chốt trong session Line thực tế.
+- Endpoint `summary` trả tổng session, kết quả OK/NG/UNKNOWN, ROI và thống kê theo kỳ.
+- Endpoint `export` tải file XLSX gồm Summary, Statistics, Results và ROI details.
+- Yêu cầu quyền `report.view`.
 
 ## Backend To Device/OCR Tool Contract
 

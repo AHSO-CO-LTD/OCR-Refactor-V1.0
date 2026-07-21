@@ -5,6 +5,7 @@ import { Plus } from "lucide-react";
 import { toast } from "sonner";
 import { ApplyProductProfilePanel } from "@/components/products/apply-product-profile-panel";
 import { ProductProfileForm } from "@/components/products/product-profile-form";
+import { ProductBulkImportPanel } from "@/components/products/product-bulk-import-panel";
 import { ProductProfilesTable } from "@/components/products/product-profiles-table";
 import { Button } from "@/components/ui/button";
 import { ConfirmModal } from "@/components/ui/confirm-modal";
@@ -21,7 +22,15 @@ import {
 import { useI18n } from "@/lib/i18n";
 import { getAccessToken } from "@/lib/session";
 
-export function ProductProfilesPanel() {
+type ProductProfilesPanelProps = {
+  unifiedConfiguration?: boolean;
+  onProductsChanged?: (products: ProductProfile[]) => void;
+};
+
+export function ProductProfilesPanel({
+  onProductsChanged,
+  unifiedConfiguration = false,
+}: ProductProfilesPanelProps = {}) {
   const { apiError, t } = useI18n();
   const [products, setProducts] = useState<ProductProfile[]>([]);
   const [selectedTargetIds, setSelectedTargetIds] = useState<string[]>([]);
@@ -53,6 +62,7 @@ export function ProductProfilesPanel() {
     try {
       const response = await listProductProfiles(token);
       setProducts(response.data);
+      onProductsChanged?.(response.data);
       setError("");
     } catch (cause) {
       const message =
@@ -62,7 +72,7 @@ export function ProductProfilesPanel() {
       setError(message);
       toast.error(message);
     }
-  }, [apiError, t]);
+  }, [apiError, onProductsChanged, t]);
 
   useEffect(() => {
     const token = getAccessToken();
@@ -74,6 +84,7 @@ export function ProductProfilesPanel() {
     listProductProfiles(token)
       .then((response) => {
         setProducts(response.data);
+        onProductsChanged?.(response.data);
         setError("");
       })
       .catch((cause) => {
@@ -85,7 +96,7 @@ export function ProductProfilesPanel() {
         toast.error(message);
       })
       .finally(() => setLoading(false));
-  }, [apiError, t]);
+  }, [apiError, onProductsChanged, t]);
 
   async function handleSubmit(payload: ProductProfilePayload) {
     const token = getAccessToken();
@@ -264,12 +275,15 @@ export function ProductProfilesPanel() {
 
   return (
     <div className="min-w-0 space-y-4">
+      <ProductBulkImportPanel onImported={loadProducts} />
+
       {createOpen || editingProduct ? (
         <ProductProfileForm
           key={editingProduct?.id ?? "create"}
           product={editingProduct}
           products={products}
           saving={saving}
+          hideCameraAndRoi={unifiedConfiguration}
           onCancel={() => {
             setCreateOpen(false);
             setEditingProduct(null);

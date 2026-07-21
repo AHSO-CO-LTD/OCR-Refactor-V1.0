@@ -1,15 +1,5 @@
-"use client";
-
-import { AppShell } from "@/components/app-shell";
-import { CameraDebugPanel } from "@/components/camera/camera-debug-panel";
+import { redirect } from "next/navigation";
 
 export default function CameraDebugPage() {
-  return (
-    <AppShell
-      titleKey="cameraDebug.title"
-      descriptionKey="cameraDebug.description"
-    >
-      <CameraDebugPanel />
-    </AppShell>
-  );
+  redirect("/dashboard/configuration?tab=debug");
 }

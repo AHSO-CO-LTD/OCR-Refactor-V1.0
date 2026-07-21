@@ -160,6 +160,42 @@ export class ProductsService {
     return { data: { success: true } };
   }
 
+  async updateProductRoiRegions(id: string, roiRegions: RoiRegionDto[]) {
+    const existingProduct = await this.prisma.product.findUnique({
+      where: { id },
+      select: { id: true },
+    });
+
+    if (!existingProduct) {
+      throw new NotFoundException('Product not found');
+    }
+
+    this.ensureValidRoiRegions(roiRegions);
+
+    if (
+      roiRegions.some((region) => region.width !== 300 || region.height !== 440)
+    ) {
+      throw new BadRequestException('ROI size must be exactly 300 x 440');
+    }
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.roiRegion.deleteMany({ where: { productId: id } });
+      await tx.roiRegion.createMany({
+        data: roiRegions.map((region) => ({
+          productId: id,
+          ...this.toRoiData(region),
+        })),
+      });
+    });
+
+    const product = await this.prisma.product.findUniqueOrThrow({
+      where: { id },
+      include: productInclude,
+    });
+
+    return { data: this.toProductProfile(product) };
+  }
+
   async updateProductBatchSize(id: string, dto: UpdateProductBatchSizeDto) {
     const existingProduct = await this.prisma.product.findUnique({
       where: { id },

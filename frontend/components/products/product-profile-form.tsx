@@ -48,6 +48,7 @@ import { useI18n } from "@/lib/i18n";
 import { getAccessToken } from "@/lib/session";
 
 type ProductProfileFormProps = {
+  hideCameraAndRoi?: boolean;
   product?: ProductProfile | null;
   products: ProductProfile[];
   saving: boolean;
@@ -492,6 +493,7 @@ function safeSetPointerCapture(element: Element, pointerId: number) {
 }
 
 export function ProductProfileForm({
+  hideCameraAndRoi = false,
   product,
   products,
   saving,
@@ -1828,6 +1830,8 @@ export function ProductProfileForm({
               </div>
             </section>
 
+            {!hideCameraAndRoi ? (
+            <>
             <section className="border border-slate-200 p-4">
               <div className="mb-3 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                 <div>
@@ -2381,7 +2385,10 @@ export function ProductProfileForm({
               </div>
             </section>
 
-          </div>
+            </>
+            ) : null}
+
+            </div>
         ) : null}
       </form>
     </Card>
