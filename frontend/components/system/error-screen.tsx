@@ -5,6 +5,7 @@ import { AlertTriangle, Home, RefreshCw, Send } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { useI18n } from "@/lib/i18n";
+import { OPERATOR_STARTUP_ROUTE } from "@/lib/operator-startup-preferences";
 
 type ErrorScreenProps = {
   code: string;
@@ -70,7 +71,7 @@ export function ErrorScreen({
                 </Button>
               ) : null}
               <Button asChild variant={reset ? "outline" : "default"}>
-                <Link href="/dashboard">
+                <Link href={OPERATOR_STARTUP_ROUTE}>
                   <Home className="h-4 w-4" aria-hidden="true" />
                   {t("error.backHome")}
                 </Link>

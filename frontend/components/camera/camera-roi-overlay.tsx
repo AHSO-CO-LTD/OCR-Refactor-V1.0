@@ -12,8 +12,9 @@ import {
   snapRoiRotation,
   type RoiAssist,
 } from "@/components/camera/roi-editor-geometry";
-import type { RoiRegion } from "@/lib/api";
+import type { RoiRegion, TestInspectionImageResult } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
+import { getInspectionSlotDisplayText } from "@/lib/inspection-slot-display";
 
 type CameraRoiOverlayProps = {
   assist: RoiAssist | null;
@@ -30,6 +31,8 @@ type CameraRoiOverlayProps = {
   previewRotation?: number;
   regions: RoiRegion[];
   selectedIndexes: number[];
+  testResult?: TestInspectionImageResult | null;
+  testRunning?: boolean;
   zoomFactor?: number;
 };
 
@@ -66,6 +69,8 @@ export function CameraRoiOverlay({
   previewRotation = 0,
   regions,
   selectedIndexes,
+  testResult = null,
+  testRunning = false,
   zoomFactor = 1,
 }: CameraRoiOverlayProps) {
   const { t } = useI18n();
@@ -290,6 +295,17 @@ export function CameraRoiOverlay({
       {regions.map((region) => {
         const selected = selectedIndexes.includes(region.index);
         const overlapping = overlappingIndexes.has(region.index);
+        const testSlot = testResult?.slots.find(
+          (slot) => slot.slotIndex === region.index,
+        );
+        const testState = testRunning ? "CHECKING" : testSlot?.result;
+        const testTone = cameraRoiTestTone(testState);
+        const testLabel = testRunning
+          ? t("configuration.test.runningShort")
+          : getInspectionSlotDisplayText(
+              testSlot,
+              testResult?.productCode ?? "",
+            );
         return (
           <div
             key={region.index}
@@ -299,7 +315,8 @@ export function CameraRoiOverlay({
                 ? "border-red-400 bg-red-500/15 shadow-[0_0_0_3px_rgba(248,113,113,0.25)]"
                 : selected
                   ? "border-amber-300 bg-amber-300/15 shadow-[0_0_0_3px_rgba(252,211,77,0.22)]"
-                  : "border-cyan-400 bg-cyan-400/10 shadow-[0_0_0_1px_rgba(8,145,178,0.35)]",
+                  : testTone?.region ??
+                    "border-cyan-400 bg-cyan-400/10 shadow-[0_0_0_1px_rgba(8,145,178,0.35)]",
             ].join(" ")}
             onPointerDown={(event) => handleRegionPointerDown(event, region)}
             onPointerMove={handlePointerMove}
@@ -314,9 +331,15 @@ export function CameraRoiOverlay({
             }}
           >
             <span className={[
-              "pointer-events-none absolute -top-6 left-0 px-1.5 py-0.5 font-mono text-[11px] font-semibold text-slate-950",
-              overlapping ? "bg-red-400" : selected ? "bg-amber-300" : "bg-cyan-400",
-            ].join(" ")}>ROI {region.index}</span>
+              "pointer-events-none absolute -top-6 left-0 max-w-52 truncate px-1.5 py-0.5 font-mono text-[11px] font-semibold",
+              overlapping
+                ? "bg-red-400 text-slate-950"
+                : selected
+                  ? "bg-amber-300 text-slate-950"
+                  : testTone?.label ?? "bg-cyan-400 text-slate-950",
+            ].join(" ")}>
+              ROI {region.index}{testLabel ? ` · ${testLabel}` : ""}
+            </span>
             {interactive && selected ? (
               <button
                 type="button"
@@ -360,6 +383,40 @@ export function CameraRoiOverlay({
       ) : null}
     </div>
   );
+}
+
+function cameraRoiTestTone(
+  state: "CHECKING" | "OK" | "NG" | "UNKNOWN" | undefined,
+) {
+  if (state === "CHECKING") {
+    return {
+      label: "bg-amber-300 text-amber-950",
+      region:
+        "border-amber-300 bg-amber-300/15 shadow-[0_0_0_3px_rgba(252,211,77,0.22)]",
+    };
+  }
+  if (state === "OK") {
+    return {
+      label: "bg-emerald-500 text-white",
+      region:
+        "border-emerald-400 bg-emerald-400/15 shadow-[0_0_0_3px_rgba(52,211,153,0.22)]",
+    };
+  }
+  if (state === "NG") {
+    return {
+      label: "bg-red-500 text-white",
+      region:
+        "border-red-400 bg-red-500/15 shadow-[0_0_0_3px_rgba(248,113,113,0.25)]",
+    };
+  }
+  if (state === "UNKNOWN") {
+    return {
+      label: "bg-slate-600 text-white",
+      region:
+        "border-slate-400 bg-slate-400/10 shadow-[0_0_0_2px_rgba(148,163,184,0.2)]",
+    };
+  }
+  return null;
 }
 
 function selectionBox(start: { x: number; y: number }, current: { x: number; y: number }) {

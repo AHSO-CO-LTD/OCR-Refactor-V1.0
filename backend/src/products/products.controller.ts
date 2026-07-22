@@ -30,6 +30,7 @@ import { BulkUpdateProductAiSettingsDto } from './dto/bulk-update-product-ai-set
 import { BulkUpdateProductOcrTestSettingsDto } from './dto/bulk-update-product-ocr-test-settings.dto';
 import { CreateProductProfileDto } from './dto/product-profile.dto';
 import { UpdateProductBatchSizeDto } from './dto/update-product-batch-size.dto';
+import { UpdateProductAiSettingsDto } from './dto/update-product-ai-settings.dto';
 import { UpdateProductOcrTestSettingsDto } from './dto/update-product-ocr-test-settings.dto';
 import { UpdateProductProfileDto } from './dto/update-product-profile.dto';
 import { UpdateProductRoiRegionsDto } from './dto/update-product-roi-regions.dto';
@@ -147,8 +148,30 @@ export class ProductsController {
   })
   @Patch('ai-settings/apply')
   @RequirePermissions(PERMISSIONS.PRODUCT_MANAGE)
-  bulkUpdateProductAiSettings(@Body() dto: BulkUpdateProductAiSettingsDto) {
+  bulkUpdateProductAiSettings(
+    @Body() dto: BulkUpdateProductAiSettingsDto,
+    @CurrentUser() user: AuthenticatedRequest['user'],
+  ) {
+    if (user.role !== 'dev' && dto.rowThreshold !== undefined) {
+      throw new ForbiddenException('Only dev can update row threshold');
+    }
+
     return this.productsService.bulkUpdateProductAiSettings(dto);
+  }
+
+  @ApiOperation({ summary: 'Update AI settings for one product profile' })
+  @Patch(':id/ai-settings')
+  @RequirePermissions(PERMISSIONS.PRODUCT_MANAGE)
+  updateProductAiSettings(
+    @Param('id') id: string,
+    @Body() dto: UpdateProductAiSettingsDto,
+    @CurrentUser() user: AuthenticatedRequest['user'],
+  ) {
+    if (user.role !== 'dev' && dto.rowThreshold !== undefined) {
+      throw new ForbiddenException('Only dev can update row threshold');
+    }
+
+    return this.productsService.updateProductAiSettings(id, dto);
   }
 
   @ApiOperation({

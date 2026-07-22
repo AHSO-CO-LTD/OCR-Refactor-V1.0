@@ -79,22 +79,68 @@ export type DesktopStartupLogContext = {
   }>;
 };
 
+export type DesktopUpdateStatus =
+  | "available"
+  | "checking"
+  | "downloaded"
+  | "downloading"
+  | "error"
+  | "idle"
+  | "installing"
+  | "not-available"
+  | "preparing";
+
+export type DesktopUpdateState = {
+  currentVersion: string;
+  details: {
+    bytesPerSecond?: number;
+    percent?: number;
+    releaseDate?: string;
+    releaseName?: string;
+    releaseNotes?: string;
+    total?: number;
+    transferred?: number;
+    version?: string;
+  };
+  message: string;
+  status: DesktopUpdateStatus;
+  timestamp: string;
+};
+
+export type DesktopUpdateRecoveryNotice = {
+  failure?: string;
+  fromVersion: string;
+  status: "completed" | "rolled-back";
+  targetVersion: string;
+};
+
+export type DesktopUpdateActionResult = {
+  error?: string;
+  skipped?: boolean;
+  state?: DesktopUpdateState;
+  success: boolean;
+};
+
 export type DesktopBridge = {
   applyWindowSettings(
     settings: Partial<DesktopWindowSettings>,
   ): Promise<DesktopWindowSettings>;
-  checkForUpdates(): Promise<{ success: boolean; skipped?: boolean }>;
-  downloadUpdate(): Promise<{ success: boolean; skipped?: boolean }>;
+  acknowledgeUpdateRecovery(): Promise<{ success: boolean }>;
+  checkForUpdates(accessToken: string): Promise<DesktopUpdateActionResult>;
+  downloadUpdate(accessToken: string): Promise<DesktopUpdateActionResult>;
   exitApp(): Promise<{ success: boolean }>;
   getTestStorageSettings(): Promise<DesktopTestStorageSettings>;
   getTerminalLogs(): Promise<string[]>;
   getStartupSnapshot(): Promise<DesktopStartupSnapshot>;
+  getUpdateRecovery(): Promise<DesktopUpdateRecoveryNotice | null>;
+  getUpdateStatus(): Promise<DesktopUpdateState>;
   exportStartupLog(
     context?: DesktopStartupLogContext,
   ): Promise<{ canceled: boolean; filePath: string | null }>;
+  exportUpdateLog(): Promise<{ canceled: boolean; filePath: string | null }>;
   getLanguagePreference(): Promise<"en" | "vi">;
   getWindowSettings(): Promise<DesktopWindowSettings>;
-  installUpdate(): Promise<{ success: boolean }>;
+  installUpdate(accessToken: string): Promise<DesktopUpdateActionResult>;
   openTerminalWindow(): Promise<{ success: boolean }>;
   restartApp(): Promise<{ success: boolean }>;
   setCloseConfirmationReady(ready: boolean): Promise<{ success: boolean }>;
@@ -108,7 +154,7 @@ export type DesktopBridge = {
   onCloseRequested(callback: () => void): () => void;
   onShutdownStatus(callback: (message: string) => void): () => void;
   onStartupSnapshot(callback: (payload: DesktopStartupSnapshot) => void): () => void;
-  onUpdateStatus(callback: (payload: Record<string, unknown>) => void): () => void;
+  onUpdateStatus(callback: (payload: DesktopUpdateState) => void): () => void;
   platform: string;
   versions: {
     chrome: string;

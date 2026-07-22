@@ -1,7 +1,10 @@
 import { ModuleRef } from '@nestjs/core';
 import { LineSessionEndReason } from '@prisma/client';
 import { DeviceToolService } from '../device-tool/device-tool.service';
-import { MachineOperationModeDto } from './dto/machine-runtime.dto';
+import {
+  MachineOperationModeDto,
+  MachineTestResultDto,
+} from './dto/machine-runtime.dto';
 import { MachineRuntimeService } from './machine-runtime.service';
 import { PlcRuntimeEvent, PlcRuntimeService } from './plc-runtime.service';
 
@@ -26,11 +29,12 @@ describe('MachineRuntimeService', () => {
   let plcRuntime: {
     subscribe: jest.Mock;
     ensureConnected: jest.Mock;
+    getMachineInactivitySettings: jest.Mock;
     getRuntimeStatus: jest.Mock;
-    getSleepTimeMilliseconds: jest.Mock;
     pulseError: jest.Mock;
     pulseOkResult: jest.Mock;
     setFixedOutput: jest.Mock;
+    updateMachineInactivitySettings: jest.Mock;
   };
 
   beforeEach(() => {
@@ -74,10 +78,15 @@ describe('MachineRuntimeService', () => {
       getRuntimeStatus: jest.fn().mockResolvedValue({
         data: { connected: true, lastError: null },
       }),
-      getSleepTimeMilliseconds: jest.fn().mockResolvedValue(300_000),
+      getMachineInactivitySettings: jest.fn().mockResolvedValue({
+        data: { enabled: true, timeoutSeconds: 300, configured: true },
+      }),
       pulseError: jest.fn().mockResolvedValue({ data: {} }),
       pulseOkResult: jest.fn().mockResolvedValue({ data: {} }),
       setFixedOutput: jest.fn().mockResolvedValue({ data: {} }),
+      updateMachineInactivitySettings: jest.fn().mockResolvedValue({
+        data: { enabled: true, timeoutSeconds: 300, configured: true },
+      }),
     };
     const moduleRef = {
       get: jest.fn().mockReturnValue(inspections),
@@ -99,7 +108,62 @@ describe('MachineRuntimeService', () => {
       operationMode: MachineOperationModeDto.auto,
       liveCameraEnabled: true,
       realtimeAiEnabled: true,
+      inactivityTimeoutEnabled: true,
+      sleepTimeSeconds: 300,
     });
+  });
+
+  it('records a PLC latch as activity even when inspection is disabled', async () => {
+    await service.startOperation();
+    plcRuntime.getMachineInactivitySettings.mockClear();
+    service.updateControls({
+      mode: MachineOperationModeDto.auto,
+      liveCameraEnabled: true,
+      realtimeAiEnabled: false,
+    });
+
+    emitPlcEvent(signal('captureTrigger'));
+    await settleAsyncWork();
+
+    expect(plcRuntime.getMachineInactivitySettings).toHaveBeenCalledTimes(1);
+    expect(inspections.latchLatestRunningInspection).not.toHaveBeenCalled();
+    expect(service.getStatus().data.lastCaptureTriggerAt).not.toBeNull();
+  });
+
+  it('records authenticated app interaction as machine activity', async () => {
+    await service.startOperation();
+    plcRuntime.getMachineInactivitySettings.mockClear();
+
+    await service.notifyUserActivity();
+
+    expect(plcRuntime.getMachineInactivitySettings).toHaveBeenCalledTimes(1);
+    expect(service.getStatus().data.lastActivityAt).not.toBeNull();
+  });
+
+  it('records a manual Grab attempt even when no inspection runs', async () => {
+    await service.startOperation();
+    plcRuntime.getMachineInactivitySettings.mockClear();
+    service.updateControls({
+      mode: MachineOperationModeDto.manual,
+      liveCameraEnabled: true,
+      realtimeAiEnabled: false,
+    });
+
+    const response = await service.grabManually();
+
+    expect(response.data.action).toBe('ignored');
+    expect(plcRuntime.getMachineInactivitySettings).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not schedule automatic pause when inactivity timeout is disabled', async () => {
+    plcRuntime.getMachineInactivitySettings.mockResolvedValue({
+      data: { enabled: false, timeoutSeconds: 300, configured: true },
+    });
+
+    await service.startOperation();
+
+    expect(service.getStatus().data.inactivityTimeoutEnabled).toBe(false);
+    expect(service['inactivityTimer']).toBeNull();
   });
 
   it('pulses the PLC only when a PLC-triggered inspection is NG', async () => {
@@ -132,6 +196,173 @@ describe('MachineRuntimeService', () => {
 
     expect(plcRuntime.pulseOkResult).toHaveBeenCalledTimes(1);
     expect(plcRuntime.pulseError).not.toHaveBeenCalled();
+  });
+
+  it('resynchronizes the waiting indicator when operation is already running', async () => {
+    await service.startOperation();
+    plcRuntime.setFixedOutput.mockClear();
+
+    await service.startOperation();
+
+    expect(plcRuntime.setFixedOutput).toHaveBeenCalledWith(
+      'waitingChecking',
+      true,
+    );
+  });
+
+  it('isolates PLC capture triggers and emits only the requested test pulse', async () => {
+    enableAutoAi(service);
+    await service.startOperation();
+    plcRuntime.setFixedOutput.mockClear();
+    await service.updateTestMode({ clientId: 'line-test', active: true });
+
+    expect(service.getStatus().data).toMatchObject({
+      testModeActive: true,
+      testOutputEnabled: false,
+    });
+    expect(plcRuntime.setFixedOutput).toHaveBeenLastCalledWith(
+      'waitingChecking',
+      true,
+    );
+
+    const indicatorCallsBeforeEnabling =
+      plcRuntime.setFixedOutput.mock.calls.length;
+    service.updateTestOutput({
+      clientId: 'line-test',
+      enabled: true,
+    });
+    expect(service.getStatus().data.testOutputEnabled).toBe(true);
+    expect(plcRuntime.setFixedOutput).toHaveBeenCalledTimes(
+      indicatorCallsBeforeEnabling,
+    );
+
+    emitPlcEvent(signal('captureTrigger'));
+    await settleAsyncWork();
+
+    expect(service.getStatus().data.captureTriggerSequence).toBe(1);
+    expect(inspections.latchLatestRunningInspection).not.toHaveBeenCalled();
+    expect(plcRuntime.pulseOkResult).not.toHaveBeenCalled();
+    expect(plcRuntime.pulseError).not.toHaveBeenCalled();
+
+    await service.pulseTestResult({
+      clientId: 'line-test',
+      result: MachineTestResultDto.OK,
+    });
+    await service.pulseTestResult({
+      clientId: 'line-test',
+      result: MachineTestResultDto.NG,
+    });
+
+    expect(plcRuntime.pulseOkResult).toHaveBeenCalledTimes(1);
+    expect(plcRuntime.pulseError).toHaveBeenCalledTimes(1);
+    expect(plcRuntime.setFixedOutput).toHaveBeenLastCalledWith(
+      'waitingChecking',
+      true,
+    );
+
+    await service.updateTestMode({ clientId: 'line-test', active: false });
+    expect(service.getStatus().data).toMatchObject({
+      testModeActive: false,
+      testOutputEnabled: false,
+    });
+    expect(plcRuntime.setFixedOutput).toHaveBeenLastCalledWith(
+      'waitingChecking',
+      true,
+    );
+  });
+
+  it('rejects a test result pulse without an active test session', async () => {
+    await expect(
+      service.pulseTestResult({
+        clientId: 'inactive-test',
+        result: MachineTestResultDto.NG,
+      }),
+    ).rejects.toThrow('PLC test session is not active');
+
+    expect(plcRuntime.pulseOkResult).not.toHaveBeenCalled();
+    expect(plcRuntime.pulseError).not.toHaveBeenCalled();
+  });
+
+  it('rejects a test result pulse while test output is disabled', async () => {
+    await service.updateTestMode({ clientId: 'disabled-test', active: true });
+
+    await expect(
+      service.pulseTestResult({
+        clientId: 'disabled-test',
+        result: MachineTestResultDto.OK,
+      }),
+    ).rejects.toThrow('PLC test output is not enabled');
+
+    expect(plcRuntime.pulseOkResult).not.toHaveBeenCalled();
+    expect(plcRuntime.pulseError).not.toHaveBeenCalled();
+  });
+
+  it('keeps image tests available while the PLC indicator is unavailable', async () => {
+    plcRuntime.setFixedOutput.mockRejectedValueOnce(
+      new Error('PLC is not connected'),
+    );
+
+    await expect(
+      service.updateTestMode({ clientId: 'offline-test', active: true }),
+    ).resolves.toMatchObject({
+      data: { testModeActive: true, testOutputEnabled: false },
+    });
+
+    emitPlcEvent({
+      type: 'status',
+      at: new Date().toISOString(),
+      state: 'connected',
+    });
+    await settleAsyncWork();
+    expect(plcRuntime.setFixedOutput).toHaveBeenLastCalledWith(
+      'waitingChecking',
+      true,
+    );
+
+    expect(
+      service.updateTestOutput({
+        clientId: 'offline-test',
+        enabled: true,
+      }),
+    ).toMatchObject({
+      data: { testModeActive: true, testOutputEnabled: true },
+    });
+  });
+
+  it('restores the test waiting indicator when the configured pulse completes', async () => {
+    let completePulse!: () => void;
+    plcRuntime.pulseOkResult.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          completePulse = resolve;
+        }),
+    );
+    await service.updateTestMode({ clientId: 'timed-test', active: true });
+    service.updateTestOutput({
+      clientId: 'timed-test',
+      enabled: true,
+    });
+    plcRuntime.setFixedOutput.mockClear();
+
+    const pulseRequest = service.pulseTestResult({
+      clientId: 'timed-test',
+      result: MachineTestResultDto.OK,
+    });
+    await Promise.resolve();
+
+    expect(plcRuntime.setFixedOutput).toHaveBeenCalledTimes(1);
+    expect(plcRuntime.setFixedOutput).toHaveBeenLastCalledWith(
+      'waitingChecking',
+      false,
+    );
+
+    completePulse();
+    await pulseRequest;
+
+    expect(plcRuntime.setFixedOutput).toHaveBeenLastCalledWith(
+      'waitingChecking',
+      true,
+    );
   });
 
   it('never pulses PLC outputs for a manual Grab latch', async () => {
@@ -220,6 +451,7 @@ describe('MachineRuntimeService', () => {
     });
     enableAutoAi(service);
     await service.startOperation();
+    plcRuntime.setFixedOutput.mockClear();
 
     emitPlcEvent(signal('captureTrigger'));
     await settleAsyncWork();
@@ -227,6 +459,7 @@ describe('MachineRuntimeService', () => {
     expect(service.getStatus().data.lastPlcInspectionSequence).toBe(0);
     expect(plcRuntime.pulseOkResult).not.toHaveBeenCalled();
     expect(plcRuntime.pulseError).not.toHaveBeenCalled();
+    expect(plcRuntime.setFixedOutput).not.toHaveBeenCalled();
   });
 
   it('keeps camera operation available when PLC is not configured', async () => {

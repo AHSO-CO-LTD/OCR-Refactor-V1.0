@@ -3,10 +3,11 @@
 import { ArrowLeft } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
-import { AiSettingsPanel } from "@/components/settings/ai-settings-panel";
+import { AppUpdatePanel } from "@/components/settings/app-update-panel";
 import { DesktopSettingsPanel } from "@/components/settings/desktop-settings-panel";
 import { LanguageSettingsPanel } from "@/components/settings/language-settings-panel";
 import { LineResultSettingsPanel } from "@/components/settings/line-result-settings-panel";
+import { MachineInactivitySettingsPanel } from "@/components/settings/machine-inactivity-settings-panel";
 import { OcrTestSettingsPanel } from "@/components/settings/ocr-test-settings-panel";
 import { RuntimeTestSettingsPanel } from "@/components/settings/runtime-test-settings-panel";
 import { TerminalSettingsPanel } from "@/components/settings/terminal-settings-panel";
@@ -17,24 +18,27 @@ import { getStoredUser } from "@/lib/session";
 type SettingsTab =
   | "desktop"
   | "language"
-  | "ai"
+  | "inactivity"
   | "line-result"
   | "ocr-test"
   | "runtime-test"
-  | "terminal";
+  | "terminal"
+  | "update";
 
 export function SettingsTabsPanel() {
   const { t } = useI18n();
   const currentRole =
     typeof window === "undefined" ? null : getStoredUser()?.role ?? null;
-  const canManageAiSettings =
+  const canManageProductSettings =
     currentRole === "dev" ||
     currentRole === "admin" ||
     currentRole === "engineer";
-  const canManageLineResultSettings = canManageAiSettings;
+  const canManageLineResultSettings = canManageProductSettings;
   const canManageOcrTestSettings = currentRole === "dev";
   const canManageRuntimeTestSettings = currentRole === "dev";
   const canManageTerminalSettings = currentRole === "dev";
+  const canManageUpdates = currentRole === "dev" || currentRole === "admin";
+  const canManageInactivity = currentRole === "dev" || currentRole === "admin";
   const [activeTab, setActiveTab] = useState<SettingsTab>("desktop");
 
   return (
@@ -52,18 +56,18 @@ export function SettingsTabsPanel() {
           label={t("settings.tabDesktop")}
           onClick={() => setActiveTab("desktop")}
         />
+        {canManageInactivity ? (
+          <TabButton
+            active={activeTab === "inactivity"}
+            label={t("settings.tabInactivity")}
+            onClick={() => setActiveTab("inactivity")}
+          />
+        ) : null}
         <TabButton
           active={activeTab === "language"}
           label={t("settings.tabLanguage")}
           onClick={() => setActiveTab("language")}
         />
-        {canManageAiSettings ? (
-          <TabButton
-            active={activeTab === "ai"}
-            label={t("settings.tabAi")}
-            onClick={() => setActiveTab("ai")}
-          />
-        ) : null}
         {canManageLineResultSettings ? (
           <TabButton
             active={activeTab === "line-result"}
@@ -92,11 +96,20 @@ export function SettingsTabsPanel() {
             onClick={() => setActiveTab("terminal")}
           />
         ) : null}
+        {canManageUpdates ? (
+          <TabButton
+            active={activeTab === "update"}
+            label={t("settings.tabUpdate")}
+            onClick={() => setActiveTab("update")}
+          />
+        ) : null}
       </div>
 
       {activeTab === "desktop" ? <DesktopSettingsPanel /> : null}
       {activeTab === "language" ? <LanguageSettingsPanel /> : null}
-      {canManageAiSettings && activeTab === "ai" ? <AiSettingsPanel /> : null}
+      {canManageInactivity && activeTab === "inactivity" ? (
+        <MachineInactivitySettingsPanel />
+      ) : null}
       {canManageLineResultSettings && activeTab === "line-result" ? (
         <LineResultSettingsPanel />
       ) : null}
@@ -109,6 +122,7 @@ export function SettingsTabsPanel() {
       {canManageTerminalSettings && activeTab === "terminal" ? (
         <TerminalSettingsPanel />
       ) : null}
+      {canManageUpdates && activeTab === "update" ? <AppUpdatePanel /> : null}
     </div>
   );
 }

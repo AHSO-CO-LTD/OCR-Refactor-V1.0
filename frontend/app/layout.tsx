@@ -3,6 +3,7 @@ import { Geist, Geist_Mono } from "next/font/google";
 import { Toaster } from "@/components/ui/sonner";
 import { VirtualKeyboardProvider } from "@/components/ui/virtual-keyboard";
 import { DesktopLifecycleProvider } from "@/components/system/desktop-lifecycle-provider";
+import { AppUpdateProvider } from "@/components/update/app-update-provider";
 import { I18nProvider } from "@/lib/i18n";
 import "./globals.css";
 
@@ -34,10 +35,12 @@ export default function RootLayout({
       <body className="min-h-full flex flex-col">
         <I18nProvider>
           <VirtualKeyboardProvider>
-            <DesktopLifecycleProvider>
-              {children}
-              <Toaster />
-            </DesktopLifecycleProvider>
+            <AppUpdateProvider>
+              <DesktopLifecycleProvider>
+                {children}
+                <Toaster />
+              </DesktopLifecycleProvider>
+            </AppUpdateProvider>
           </VirtualKeyboardProvider>
         </I18nProvider>
       </body>

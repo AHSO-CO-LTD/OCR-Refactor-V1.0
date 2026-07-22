@@ -103,7 +103,7 @@ export default function LoginPage() {
           const response = await getCurrentSessionWithTimeout(rememberedToken);
           if (cancelled) return;
           saveSession(rememberedToken, response.data.user, { remember: true });
-          router.replace(getPostLoginRoute(response.data.user));
+          router.replace(getPostLoginRoute());
           return;
         } catch {
           if (cancelled) return;
@@ -147,7 +147,7 @@ export default function LoginPage() {
         remember: rememberLogin,
       });
       toast.success(t("auth.loginSuccess"));
-      router.replace(getPostLoginRoute(response.data.user));
+      router.replace(getPostLoginRoute());
     } catch (cause) {
       const message =
         cause instanceof ApiError

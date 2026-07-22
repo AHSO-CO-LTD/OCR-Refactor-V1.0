@@ -51,7 +51,6 @@ type PlcFormState = {
   waitingCheckingAddress: string;
   errorPulseDurationMs: string;
   okPulseDurationMs: string;
-  sleepTimeSeconds: string;
   customKeys: CustomKeyDraft[];
 };
 
@@ -204,7 +203,7 @@ export function PlcConfigForm({ config, loading, onSave }: PlcConfigFormProps) {
             </table>
           </div>
 
-          <div className="mt-4 grid gap-4 md:grid-cols-3">
+          <div className="mt-4 grid gap-4 md:grid-cols-2">
             <label className="grid gap-2 text-sm font-medium text-slate-700">
               <span>{t("plc.ngPulseDuration")}</span>
               <Input
@@ -234,24 +233,6 @@ export function PlcConfigForm({ config, loading, onSave }: PlcConfigFormProps) {
                 disabled={loading}
                 className="h-11"
               />
-            </label>
-            <label className="grid gap-2 text-sm font-medium text-slate-700">
-              <span>{t("plc.sleepTime")}</span>
-              <Input
-                value={form.sleepTimeSeconds}
-                onChange={(event) =>
-                  setForm((current) => ({
-                    ...current,
-                    sleepTimeSeconds: numericText(event.target.value),
-                  }))
-                }
-                inputMode="numeric"
-                disabled={loading}
-                className="h-11"
-              />
-              <span className="text-xs font-normal text-slate-500">
-                {t("plc.sleepTimeHint")}
-              </span>
             </label>
           </div>
         </CardContent>
@@ -483,7 +464,6 @@ function toFormState(config: PlcConfiguration | null): PlcFormState {
     waitingCheckingAddress: valueText(config?.waitingCheckingAddress),
     errorPulseDurationMs: valueText(config?.errorPulseDurationMs ?? 500),
     okPulseDurationMs: valueText(config?.okPulseDurationMs ?? 500),
-    sleepTimeSeconds: valueText(config?.sleepTimeSeconds ?? 300),
     customKeys: (config?.customKeys ?? []).map((key) => ({
       clientId: key.id ?? createClientId(),
       name: key.name,
@@ -582,15 +562,6 @@ function validateForm(
     return t("plc.validationPulseDuration");
   }
 
-  const sleepTimeSeconds = Number(form.sleepTimeSeconds);
-  if (
-    !Number.isSafeInteger(sleepTimeSeconds) ||
-    sleepTimeSeconds < 1 ||
-    sleepTimeSeconds > 86400
-  ) {
-    return t("plc.validationSleepTime");
-  }
-
   return {
     ipAddress: form.ipAddress,
     protocol: form.protocol,
@@ -605,7 +576,6 @@ function validateForm(
     waitingCheckingAddress: addresses[7],
     errorPulseDurationMs,
     okPulseDurationMs,
-    sleepTimeSeconds,
     customKeys: form.customKeys.map(
       ({ name, address, operation, enabled }) => ({
         name: name.trim(),

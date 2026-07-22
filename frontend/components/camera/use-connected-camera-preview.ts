@@ -46,6 +46,8 @@ export function useConnectedCameraPreview(
   });
   const socketRef = useRef<WebSocket | null>(null);
   const imageUrlRef = useRef("");
+  const frameTimesRef = useRef<number[]>([]);
+  const [fps, setFps] = useState(0);
   const accessTokenRef = useRef("");
   const ensuredProfileKeyRef = useRef("");
   const [reconnectAttempt, setReconnectAttempt] = useState(0);
@@ -93,6 +95,9 @@ export function useConnectedCameraPreview(
       imageUrlRef.current = "";
     }
 
+    frameTimesRef.current = [];
+    setFps(0);
+
     setState({
       connected: false,
       connectionStatus: "connecting",
@@ -131,6 +136,9 @@ export function useConnectedCameraPreview(
       if (clearImage) {
         replaceImage("");
       }
+
+      frameTimesRef.current = [];
+      setFps(0);
     }
 
     if (!enabled) {
@@ -191,6 +199,12 @@ export function useConnectedCameraPreview(
           return;
         }
 
+        const now = performance.now();
+        const frameTimes = frameTimesRef.current
+          .filter((timestamp) => now - timestamp <= 1000)
+          .concat(now);
+        frameTimesRef.current = frameTimes;
+        setFps(frameTimes.length);
         replaceImage(URL.createObjectURL(event.data as Blob));
         setState((current) => ({
           ...current,
@@ -356,6 +370,14 @@ export function useConnectedCameraPreview(
     const intervalId = window.setInterval(() => {
       void syncStatus();
     }, STATUS_POLL_MS);
+    const fpsIntervalId = window.setInterval(() => {
+      const now = performance.now();
+      const frameTimes = frameTimesRef.current.filter(
+        (timestamp) => now - timestamp <= 1000,
+      );
+      frameTimesRef.current = frameTimes;
+      setFps(frameTimes.length);
+    }, 500);
 
     return () => {
       active = false;
@@ -363,6 +385,7 @@ export function useConnectedCameraPreview(
       syncStatusRef.current = async () => undefined;
       window.clearTimeout(connectingTimer);
       window.clearInterval(intervalId);
+      window.clearInterval(fpsIntervalId);
       closeSocket();
       if (imageUrlRef.current) {
         URL.revokeObjectURL(imageUrlRef.current);
@@ -435,7 +458,7 @@ export function useConnectedCameraPreview(
     };
   }, [enabled, hardwareProfileKey, state.connectionStatus]);
 
-  return { ...state, reconnect };
+  return { ...state, fps, reconnect };
 }
 
 function buildCameraIdentityKey(

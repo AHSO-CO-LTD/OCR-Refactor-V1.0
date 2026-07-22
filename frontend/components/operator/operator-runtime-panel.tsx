@@ -48,6 +48,7 @@ import {
   updateMachineRuntimeControls,
 } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
+import { getInspectionSlotDisplayText } from "@/lib/inspection-slot-display";
 import {
   saveOperatorStartupPreferences,
   selectOperatorStartupProduct,
@@ -113,10 +114,6 @@ function toCameraImageSource(imageBase64: string) {
     : `data:image/jpeg;base64,${imageBase64}`;
 }
 
-function getSlotLabel(slot: InspectionSlotState, fallback: string) {
-  return slot.rawText?.trim() || slot.expectedText?.trim() || fallback;
-}
-
 function getSlotFingerprint(slot: InspectionSlotState | undefined) {
   if (!slot) return "missing";
   return [
@@ -125,6 +122,29 @@ function getSlotFingerprint(slot: InspectionSlotState | undefined) {
     (slot.rows ?? []).join("\u001f"),
     slot.errorMessage ?? "",
   ].join("\u001e");
+}
+
+function isKnownInspectionSlot(
+  slot: InspectionSlotState | undefined,
+): slot is InspectionSlotState & { result: "OK" | "NG" } {
+  return slot?.result === "OK" || slot?.result === "NG";
+}
+
+function getVisibleRoiIndexes(statuses: Record<number, OperatorRoiStatus>) {
+  return Object.entries(statuses)
+    .filter(([, value]) =>
+      value === "OK" || value === "NG" || value === "CHECKING",
+    )
+    .map(([index]) => Number(index));
+}
+
+function resolveLiveRoiAnimationState(
+  statuses: Record<number, OperatorRoiStatus>,
+): AnimationState {
+  const values = Object.values(statuses);
+
+  if (values.some((value) => value === "CHECKING")) return "CHECKING";
+  return values.length > 0 ? "WAITING_PLC" : "UNKNOWN";
 }
 
 export function OperatorRuntimePanel() {
@@ -139,6 +159,7 @@ export function OperatorRuntimePanel() {
   const lastLiveInspectionSequenceRef = useRef(0);
   const lastCameraFrameSequenceRef = useRef(0);
   const runtimeDefaultsAppliedRef = useRef(false);
+  const operationStartupProductRef = useRef("");
   const liveRoiFingerprintsRef = useRef<Record<number, string>>({});
   const liveRoiStatusesRef = useRef<Record<number, OperatorRoiStatus>>({});
   const liveRoiLabelsRef = useRef<Record<number, string>>({});
@@ -334,6 +355,57 @@ export function OperatorRuntimePanel() {
       demoProducts[0],
     [products, selectedProductId],
   );
+
+  useEffect(() => {
+    if (
+      dataSource !== "api" ||
+      loadingProducts ||
+      !selectedProductId ||
+      operationStartupProductRef.current === selectedProductId
+    ) {
+      return;
+    }
+
+    operationStartupProductRef.current = selectedProductId;
+
+    async function startOperationOnEntry() {
+      const accessToken = getAccessToken();
+      if (!accessToken) {
+        toast.error(t("users.missingSession"));
+        return;
+      }
+
+      try {
+        const inspection = await beginInspectionSession(
+          accessToken,
+          selectedProductId,
+        );
+        const runtime = await startMachineOperation(accessToken);
+        const machineIsRunning = runtime.data.state === "running";
+
+        currentJobIdRef.current = inspection.data.jobId;
+        setBatchSize(inspection.data.batchSize || 1);
+        setBatchDraft(String(inspection.data.batchSize || 1));
+        setBatchQuantity(inspection.data.quantity);
+        setScanCount(inspection.data.count);
+        setBatchCount(inspection.data.batch);
+        setOkCount(inspection.data.okCount);
+        setNgCount(inspection.data.ngCount);
+        autoRunRef.current = machineIsRunning;
+        setAutoRunning(machineIsRunning);
+        setMachineRuntimeState(runtime.data.state);
+        applyRuntimeControls(runtime.data);
+      } catch (cause) {
+        toast.error(
+          cause instanceof ApiError
+            ? cause.message
+            : t("lineAnimationTest.realTestFailed"),
+        );
+      }
+    }
+
+    void startOperationOnEntry();
+  }, [dataSource, loadingProducts, selectedProductId, t]);
   const activeRegions = useMemo(
     () =>
       selectedProduct.roiRegions.filter((region) =>
@@ -474,6 +546,9 @@ export function OperatorRuntimePanel() {
         await stopCurrentInspection(false, "product_change");
       }
 
+      if (wasAutoRunning) {
+        operationStartupProductRef.current = nextProductId;
+      }
       setSelectedProductId(nextProductId);
       const nextProduct =
         products.find((product) => product.id === nextProductId) ??
@@ -634,7 +709,11 @@ export function OperatorRuntimePanel() {
         return [
           region.index,
           slot
-            ? getSlotLabel(slot, finalStatuses[region.index])
+            ? getInspectionSlotDisplayText(
+                slot,
+                selectedProduct.code,
+                finalStatuses[region.index],
+              )
             : selectedProduct.code,
         ];
       }),
@@ -666,21 +745,13 @@ export function OperatorRuntimePanel() {
   ) {
     clearTimers();
     const animation = buildAnimationResult(inspection);
-    const labels = Object.fromEntries(
-      inspection.slots
-        .filter((slot) => typeof slot.slotIndex === "number")
-        .map((slot) => [
-          slot.slotIndex as number,
-          slot.rawText?.trim() || slot.result,
-        ]),
-    ) as Record<number, string>;
     const finalResult = resolveVisibleInspectionResult(inspection);
 
     liveRoiStatusesRef.current = { ...animation.finalStatuses };
-    liveRoiLabelsRef.current = labels;
+    liveRoiLabelsRef.current = { ...animation.finalLabels };
     setActiveRoiIndexes(animation.regions.map((region) => region.index));
     setRoiStatuses({ ...animation.finalStatuses });
-    setRoiDetectedTextLabels(labels);
+    setRoiDetectedTextLabels({ ...animation.finalLabels });
     setAnimationState("WAITING_PLC");
     await wait(plcDoneHoldMs);
     setAnimationState(finalResult);
@@ -766,7 +837,6 @@ export function OperatorRuntimePanel() {
         toast.success(t("operator.frameCaptured"));
       } else if (response.data.action === "unknown") {
         setAnimationState("UNKNOWN");
-        toast.warning(t("operator.unknownIgnored"));
       }
     } catch (cause) {
       const message =
@@ -979,29 +1049,44 @@ export function OperatorRuntimePanel() {
       const slot = slotByIndex.get(region.index);
       const fingerprint = getSlotFingerprint(slot);
       nextFingerprints[region.index] = fingerprint;
-      nextLabels[region.index] = slot?.rawText?.trim() || slot?.result || "UNKNOWN";
       return liveRoiFingerprintsRef.current[region.index] !== fingerprint;
     });
 
     liveRoiFingerprintsRef.current = nextFingerprints;
     if (changedRegions.length === 0) return;
 
-    changedRegions.forEach((region) => {
+    const knownChangedRegions = changedRegions.filter((region) => {
+      const slot = slotByIndex.get(region.index);
+
+      if (!isKnownInspectionSlot(slot)) {
+        delete nextStatuses[region.index];
+        delete nextLabels[region.index];
+        return false;
+      }
+
       nextStatuses[region.index] = "CHECKING";
+      nextLabels[region.index] = getInspectionSlotDisplayText(
+        slot,
+        selectedProduct.code,
+        slot.result,
+      );
+      return true;
     });
     liveRoiStatusesRef.current = nextStatuses;
     liveRoiLabelsRef.current = nextLabels;
-    setAnimationState("CHECKING");
-    setActiveRoiIndexes(selectedProduct.roiRegions.map((region) => region.index));
+    setAnimationState(resolveLiveRoiAnimationState(nextStatuses));
+    setActiveRoiIndexes(getVisibleRoiIndexes(nextStatuses));
     setRoiStatuses({ ...nextStatuses });
     setRoiDetectedTextLabels({ ...nextLabels });
+
+    if (knownChangedRegions.length === 0) return;
 
     const expectedFingerprints = { ...nextFingerprints };
     const resultTimer = window.setTimeout(() => {
       const finalStatuses = { ...liveRoiStatusesRef.current };
       const finalLabels = { ...liveRoiLabelsRef.current };
 
-      changedRegions.forEach((region) => {
+      knownChangedRegions.forEach((region) => {
         if (
           liveRoiFingerprintsRef.current[region.index] !==
           expectedFingerprints[region.index]
@@ -1011,29 +1096,23 @@ export function OperatorRuntimePanel() {
         const slot = slotByIndex.get(region.index);
         if (slot?.result === "OK" || slot?.result === "NG") {
           finalStatuses[region.index] = slot.result;
+          finalLabels[region.index] = getInspectionSlotDisplayText(
+            slot,
+            selectedProduct.code,
+            slot.result,
+          );
         } else {
           delete finalStatuses[region.index];
+          delete finalLabels[region.index];
         }
-        finalLabels[region.index] =
-          slot?.rawText?.trim() || slot?.result || "UNKNOWN";
       });
 
       liveRoiStatusesRef.current = finalStatuses;
       liveRoiLabelsRef.current = finalLabels;
-      setActiveRoiIndexes(
-        Object.entries(finalStatuses)
-          .filter(([, value]) =>
-            value === "OK" || value === "NG" || value === "CHECKING",
-          )
-          .map(([index]) => Number(index)),
-      );
+      setActiveRoiIndexes(getVisibleRoiIndexes(finalStatuses));
       setRoiStatuses({ ...finalStatuses });
       setRoiDetectedTextLabels({ ...finalLabels });
-      setAnimationState(
-        Object.values(finalStatuses).some((value) => value === "CHECKING")
-          ? "CHECKING"
-          : "WAITING_PLC",
-      );
+      setAnimationState(resolveLiveRoiAnimationState(finalStatuses));
     }, inspectionResultDelayMs);
     timersRef.current.push(resultTimer);
   };
@@ -1114,7 +1193,7 @@ export function OperatorRuntimePanel() {
   );
 
   return (
-    <div className="operator-line-runtime grid h-full min-w-0 min-h-0 grid-rows-[auto_minmax(0,1fr)_auto] gap-3">
+    <div className="operator-line-runtime grid min-h-full min-w-0 grid-rows-[auto_auto_auto] gap-3">
       <Card className="operator-line-top-card border-[#86a8cf] bg-[#cfdff2] shadow-none">
         <CardContent className="operator-line-top-content grid gap-4 p-4 min-[980px]:grid-cols-[340px_minmax(0,1fr)]">
           <div className="operator-line-product-box rounded-sm border border-[#9db7d8] bg-[#d9e6f5] p-4">
@@ -1151,7 +1230,10 @@ export function OperatorRuntimePanel() {
                 <label className="text-sm font-semibold text-[#274d7d]">
                   {t("operator.packSize")}
                 </label>
-                <div ref={batchEditorRef} className="relative grid gap-2">
+                <div
+                  ref={batchEditorRef}
+                  className="operator-line-pack-editor relative grid gap-2"
+                >
                   <div className="operator-line-pack-row grid grid-cols-[56px_minmax(0,1fr)_56px] gap-2">
                     <Button
                       type="button"
@@ -1249,7 +1331,9 @@ export function OperatorRuntimePanel() {
           </div>
 
           <div className="operator-line-top-actions rounded-sm border border-[#9db7d8] bg-[#d9e6f5] p-4">
-            <div className="grid gap-2">{actionButtons}</div>
+            <div className="operator-line-top-action-grid grid gap-2">
+              {actionButtons}
+            </div>
           </div>
         </CardContent>
       </Card>
@@ -1272,6 +1356,9 @@ export function OperatorRuntimePanel() {
               roiTextAnimationMs={inspectionResultDelayMs}
               interactive={false}
               previewImageSrc={previewImageSrc}
+              cameraDisplayName={
+                livePreviewRuntimeDeviceName || selectedProduct.camera.deviceName
+              }
               showClock
               clockLeadingContent={
                 <OperatorModeStatus

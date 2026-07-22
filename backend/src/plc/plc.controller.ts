@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  ForbiddenException,
   Get,
   Param,
   Patch,
@@ -10,18 +11,26 @@ import {
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { CurrentUser } from '../auth/current-user.decorator';
 import {
   RequireAnyPermission,
   RequirePermissions,
 } from '../auth/permissions.decorator';
 import { PermissionsGuard } from '../auth/permissions.guard';
 import { PERMISSIONS } from '../common/constants/permissions';
+import type { AuthenticatedRequest } from '../common/types/authenticated-request';
 import {
   ExecuteCustomPlcKeyDto,
   SetPlcBooleanDto,
   UpdatePlcConfigDto,
 } from './dto/plc-config.dto';
-import { UpdateMachineRuntimeControlsDto } from './dto/machine-runtime.dto';
+import {
+  PulseMachineTestResultDto,
+  UpdateMachineInactivitySettingsDto,
+  UpdateMachineRuntimeControlsDto,
+  UpdateMachineTestModeDto,
+  UpdateMachineTestOutputDto,
+} from './dto/machine-runtime.dto';
 import { PlcRuntimeService } from './plc-runtime.service';
 import { MachineRuntimeService } from './machine-runtime.service';
 
@@ -111,10 +120,37 @@ export class PlcController {
     PERMISSIONS.PLC_MANAGE,
     PERMISSIONS.PLC_OPERATE,
     PERMISSIONS.INSPECTION_TEST,
+    PERMISSIONS.INSPECTION_START,
+    PERMISSIONS.CAMERA_MANAGE,
   )
   @ApiOperation({ summary: 'Get PLC-driven machine runtime state' })
   getMachineStatus() {
     return this.machineRuntime.getStatus();
+  }
+
+  @Get('machine/inactivity-settings')
+  @ApiOperation({ summary: 'Get automatic machine inactivity settings' })
+  getMachineInactivitySettings(
+    @CurrentUser() user: AuthenticatedRequest['user'],
+  ) {
+    this.assertCanManageInactivitySettings(user);
+    return this.machineRuntime.getInactivitySettings();
+  }
+
+  @Put('machine/inactivity-settings')
+  @ApiOperation({ summary: 'Update automatic machine inactivity settings' })
+  updateMachineInactivitySettings(
+    @Body() dto: UpdateMachineInactivitySettingsDto,
+    @CurrentUser() user: AuthenticatedRequest['user'],
+  ) {
+    this.assertCanManageInactivitySettings(user);
+    return this.machineRuntime.updateInactivitySettings(dto);
+  }
+
+  @Post('machine/activity')
+  @ApiOperation({ summary: 'Record authenticated user activity in the app' })
+  notifyMachineUserActivity() {
+    return this.machineRuntime.notifyUserActivity();
   }
 
   @Get('machine/frame')
@@ -131,6 +167,44 @@ export class PlcController {
   })
   updateMachineControls(@Body() dto: UpdateMachineRuntimeControlsDto) {
     return this.machineRuntime.updateControls(dto);
+  }
+
+  @Patch('machine/test-mode')
+  @RequireAnyPermission(
+    PERMISSIONS.PLC_MANAGE,
+    PERMISSIONS.PLC_OPERATE,
+    PERMISSIONS.INSPECTION_TEST,
+    PERMISSIONS.CAMERA_MANAGE,
+  )
+  @ApiOperation({ summary: 'Acquire or release an isolated PLC test session' })
+  updateMachineTestMode(@Body() dto: UpdateMachineTestModeDto) {
+    return this.machineRuntime.updateTestMode(dto);
+  }
+
+  @Patch('machine/test-output')
+  @RequireAnyPermission(
+    PERMISSIONS.PLC_MANAGE,
+    PERMISSIONS.PLC_OPERATE,
+    PERMISSIONS.INSPECTION_TEST,
+    PERMISSIONS.CAMERA_MANAGE,
+  )
+  @ApiOperation({ summary: 'Enable or disable PLC outputs for a test session' })
+  updateMachineTestOutput(@Body() dto: UpdateMachineTestOutputDto) {
+    return this.machineRuntime.updateTestOutput(dto);
+  }
+
+  @Post('machine/test-result-pulse')
+  @RequireAnyPermission(
+    PERMISSIONS.PLC_MANAGE,
+    PERMISSIONS.PLC_OPERATE,
+    PERMISSIONS.INSPECTION_TEST,
+    PERMISSIONS.CAMERA_MANAGE,
+  )
+  @ApiOperation({
+    summary: 'Pulse an OK or NG result from an active test session',
+  })
+  pulseMachineTestResult(@Body() dto: PulseMachineTestResultDto) {
+    return this.machineRuntime.pulseTestResult(dto);
   }
 
   @Post('machine/start')
@@ -185,5 +259,15 @@ export class PlcController {
   })
   reconnectMachinePlc() {
     return this.machineRuntime.reconnectPlc();
+  }
+
+  private assertCanManageInactivitySettings(
+    user: AuthenticatedRequest['user'],
+  ) {
+    if (user.role !== 'admin' && user.role !== 'dev') {
+      throw new ForbiddenException(
+        'Only admin or dev can manage machine inactivity settings',
+      );
+    }
   }
 }

@@ -20,6 +20,7 @@ describe('PlcRuntimeService', () => {
     waitingCheckingAddress: 103,
     errorPulseDurationMs: 500,
     okPulseDurationMs: 750,
+    inactivityTimeoutEnabled: true,
     sleepTimeSeconds: 300,
     createdAt: new Date(),
     updatedAt: new Date(),
@@ -274,6 +275,56 @@ describe('PlcRuntimeService', () => {
     }
   });
 
+  it('does not let the startup signal test clear a newer waiting command', async () => {
+    jest.useFakeTimers();
+    const prisma = {
+      plcConfig: { findUnique: jest.fn().mockResolvedValue(config) },
+    } as unknown as PrismaService;
+    const writeBoolean = jest.fn().mockResolvedValue({});
+    const toolClient = {
+      connect: jest.fn().mockResolvedValue({
+        driver: 'modbus_tcp',
+        state: 'connected',
+      }),
+      status: jest.fn().mockResolvedValue({ state: 'connected' }),
+      readBoolean: jest
+        .fn()
+        .mockImplementation((_host: string, address: number) =>
+          Promise.resolve({ address, values: [false] }),
+        ),
+      watchBoolean: jest.fn().mockImplementation(() => new Promise(() => {})),
+      writeBoolean,
+      pulse: jest.fn().mockResolvedValue({}),
+    } as unknown as PlcToolClient;
+    const service = new PlcRuntimeService(prisma, toolClient);
+
+    try {
+      await service.connect();
+      const startupSignals = service.testStartupSignals();
+      await jest.advanceTimersByTimeAsync(1);
+
+      expect(writeBoolean).toHaveBeenLastCalledWith(
+        config.ipAddress,
+        8295,
+        true,
+      );
+
+      await service.setFixedOutput('waitingChecking', true);
+      await jest.advanceTimersByTimeAsync(400);
+      await startupSignals;
+
+      expect(writeBoolean).toHaveBeenCalledTimes(2);
+      expect(writeBoolean).toHaveBeenNthCalledWith(
+        2,
+        config.ipAddress,
+        8295,
+        true,
+      );
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
   it('automatically reconnects after saving PLC configuration', async () => {
     const transactionClient = {
       plcConfig: { upsert: jest.fn().mockResolvedValue(config) },
@@ -320,7 +371,6 @@ describe('PlcRuntimeService', () => {
       waitingCheckingAddress: config.waitingCheckingAddress,
       errorPulseDurationMs: config.errorPulseDurationMs,
       okPulseDurationMs: config.okPulseDurationMs,
-      sleepTimeSeconds: config.sleepTimeSeconds,
       customKeys: config.customKeys.map((key) => ({
         name: key.name,
         address: key.address,

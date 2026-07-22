@@ -100,11 +100,6 @@ export class UpdatePlcConfigDto {
   @Max(10000)
   okPulseDurationMs!: number;
 
-  @IsInt()
-  @Min(1)
-  @Max(86400)
-  sleepTimeSeconds!: number;
-
   @ValidateNested({ each: true })
   @Type(() => PlcCustomKeyDto)
   @ArrayMaxSize(64)

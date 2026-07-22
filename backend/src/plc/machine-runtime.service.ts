@@ -11,14 +11,19 @@ import { DeviceToolService } from '../device-tool/device-tool.service';
 import { InspectionsService } from '../inspections/inspections.service';
 import {
   MachineOperationModeDto,
+  MachineTestResultDto,
+  PulseMachineTestResultDto,
+  UpdateMachineInactivitySettingsDto,
   UpdateMachineRuntimeControlsDto,
+  UpdateMachineTestModeDto,
+  UpdateMachineTestOutputDto,
 } from './dto/machine-runtime.dto';
 import { PlcRuntimeEvent, PlcRuntimeService } from './plc-runtime.service';
 
 const DEFAULT_CAMERA_RESTORE_TIMEOUT_MS = 60 * 1000;
 const CAMERA_RETRY_INTERVAL_MS = 2000;
 const CONTINUOUS_DETECTION_DELAY_MS = 25;
-const PLC_RESULT_HOLD_MS = 2000;
+const TEST_MODE_LEASE_TTL_MS = 15_000;
 
 export type MachineRuntimeState =
   | 'inactive'
@@ -48,6 +53,10 @@ type ResumeSessionContext = {
 type MachineOperationMode = 'manual' | 'auto';
 type MachineTriggerSource = 'manual' | 'plc';
 type MachineTriggerAction = 'ignored' | 'captured' | 'latched' | 'unknown';
+type MachineTestModeLease = {
+  expiresAt: number;
+  outputEnabled: boolean;
+};
 type MachineRuntimeFrame = {
   jobId: string;
   productId: string;
@@ -72,7 +81,9 @@ export class MachineRuntimeService
   private message: string | null = null;
   private countdownSeconds: number | null = null;
   private lastActivityAt: string | null = null;
+  private inactivityTimeoutEnabled = true;
   private sleepTimeSeconds = 300;
+  private inactivityRevision = 0;
   private plcOffline = false;
   private plcErrorMessage: string | null = null;
   private stepsBeforePlcOffline: MachineRuntimeStep[] | null = null;
@@ -86,7 +97,6 @@ export class MachineRuntimeService
   private detectionAbortController: AbortController | null = null;
   private detectionTimer: NodeJS.Timeout | null = null;
   private detectionLoopActive = false;
-  private resultIndicatorTimer: NodeJS.Timeout | null = null;
   private latestLiveInspection: unknown = null;
   private liveInspectionSequence = 0;
   private liveInspectionError: string | null = null;
@@ -101,6 +111,7 @@ export class MachineRuntimeService
   private realtimeAiEnabled = true;
   private latestFrame: MachineRuntimeFrame | null = null;
   private cameraFrameSequence = 0;
+  private readonly testModeLeases = new Map<string, MachineTestModeLease>();
 
   constructor(
     private readonly moduleRef: ModuleRef,
@@ -113,6 +124,14 @@ export class MachineRuntimeService
       strict: false,
     });
     this.unsubscribePlc = this.plcRuntime.subscribe((event) => {
+      if (
+        event.type === 'signal' &&
+        event.value === true &&
+        event.key === 'captureTrigger' &&
+        this.state === 'running'
+      ) {
+        void this.recordActivity();
+      }
       if (
         event.type === 'signal' &&
         event.value === true &&
@@ -142,10 +161,10 @@ export class MachineRuntimeService
     this.unsubscribePlc = null;
     this.clearInactivityTimer();
     this.clearCountdownTimer();
-    this.clearResultIndicatorTimer();
     this.captureAbortController?.abort();
     this.captureAbortController = null;
     this.stopContinuousDetection();
+    this.testModeLeases.clear();
     this.destroyed = true;
     this.transitionSequence += 1;
     await this.inspectionsService
@@ -166,6 +185,7 @@ export class MachineRuntimeService
         message: this.message,
         countdownSeconds: this.countdownSeconds,
         lastActivityAt: this.lastActivityAt,
+        inactivityTimeoutEnabled: this.inactivityTimeoutEnabled,
         sleepTimeSeconds: this.sleepTimeSeconds,
         plcOffline: this.plcOffline,
         plcErrorMessage: this.plcErrorMessage,
@@ -183,6 +203,8 @@ export class MachineRuntimeService
         liveCameraEnabled: this.liveCameraEnabled,
         realtimeAiEnabled: this.realtimeAiEnabled,
         cameraFrameSequence: this.cameraFrameSequence,
+        testModeActive: this.hasActiveTestModeLease(),
+        testOutputEnabled: this.hasEnabledTestOutput(),
       },
     };
   }
@@ -212,6 +234,91 @@ export class MachineRuntimeService
     return this.getStatus();
   }
 
+  async getInactivitySettings() {
+    const response = await this.plcRuntime.getMachineInactivitySettings();
+    this.inactivityTimeoutEnabled = response.data.enabled;
+    this.sleepTimeSeconds = response.data.timeoutSeconds;
+    return response;
+  }
+
+  async updateInactivitySettings(dto: UpdateMachineInactivitySettingsDto) {
+    const response = await this.plcRuntime.updateMachineInactivitySettings(dto);
+    this.inactivityTimeoutEnabled = response.data.enabled;
+    this.sleepTimeSeconds = response.data.timeoutSeconds;
+    if (this.state === 'running') {
+      await this.recordActivity();
+    }
+    return response;
+  }
+
+  async notifyUserActivity() {
+    if (this.state === 'running') {
+      await this.recordActivity();
+    }
+    return this.getStatus();
+  }
+
+  async updateTestMode(dto: UpdateMachineTestModeDto) {
+    this.pruneExpiredTestModeLeases(false);
+    const existingLease = this.testModeLeases.get(dto.clientId);
+    let leaseMembershipChanged = false;
+    if (dto.active) {
+      this.testModeLeases.set(dto.clientId, {
+        expiresAt: Date.now() + TEST_MODE_LEASE_TTL_MS,
+        outputEnabled: existingLease?.outputEnabled ?? false,
+      });
+      leaseMembershipChanged = !existingLease;
+    } else if (existingLease) {
+      this.testModeLeases.delete(dto.clientId);
+      leaseMembershipChanged = true;
+    }
+    if (leaseMembershipChanged) {
+      await this.setWaitingCheckingIndicator(
+        this.desiredWaitingCheckingState(),
+      ).catch((error) => {
+        this.logger.warn(
+          `PLC test waiting indicator synchronization failed: ${this.errorMessage(error)}`,
+        );
+      });
+    }
+    this.touch();
+    return this.getStatus();
+  }
+
+  updateTestOutput(dto: UpdateMachineTestOutputDto) {
+    const lease = this.getActiveTestModeLease(dto.clientId);
+    if (!lease) {
+      throw new BadRequestException('PLC test session is not active');
+    }
+
+    if (lease.outputEnabled !== dto.enabled) {
+      lease.outputEnabled = dto.enabled;
+      lease.expiresAt = Date.now() + TEST_MODE_LEASE_TTL_MS;
+    }
+    this.touch();
+    return this.getStatus();
+  }
+
+  async pulseTestResult(dto: PulseMachineTestResultDto) {
+    const lease = this.getActiveTestModeLease(dto.clientId);
+    if (!lease) {
+      throw new BadRequestException('PLC test session is not active');
+    }
+    if (!lease.outputEnabled) {
+      throw new BadRequestException('PLC test output is not enabled');
+    }
+
+    lease.expiresAt = Date.now() + TEST_MODE_LEASE_TTL_MS;
+    await this.showPulsedTestResultIndicator(dto.result);
+
+    return {
+      data: {
+        pulsed: true,
+        result: dto.result,
+      },
+    };
+  }
+
   async startOperation() {
     if (
       this.state === 'stopping' ||
@@ -236,6 +343,13 @@ export class MachineRuntimeService
 
     if (this.state === 'running') {
       this.reconcileContinuousDetection();
+      if (!this.plcOffline) {
+        await this.syncWaitingCheckingIndicator().catch((error) => {
+          this.logger.error(
+            `PLC waiting indicator resynchronization failed: ${this.errorMessage(error)}`,
+          );
+        });
+      }
       await this.recordActivity();
       return this.getStatus();
     }
@@ -250,6 +364,9 @@ export class MachineRuntimeService
   }
 
   async grabManually() {
+    if (this.state === 'running') {
+      await this.recordActivity();
+    }
     const result = await this.executeTrigger('manual');
     return {
       data: {
@@ -328,7 +445,7 @@ export class MachineRuntimeService
 
       if (previousState === 'running') {
         this.setState('running');
-        await this.showWaitingCheckingIndicator();
+        await this.syncWaitingCheckingIndicator();
         await this.recordActivity();
         return this.getStatus();
       }
@@ -398,6 +515,13 @@ export class MachineRuntimeService
         }
         this.stepsBeforePlcOffline = null;
       }
+      if (this.hasActiveTestModeLease()) {
+        await this.syncWaitingCheckingIndicator().catch((error) => {
+          this.logger.error(
+            `PLC test waiting indicator reconnect synchronization failed: ${this.errorMessage(error)}`,
+          );
+        });
+      }
       this.touch();
       return;
     }
@@ -426,6 +550,7 @@ export class MachineRuntimeService
       this.captureTriggerSequence += 1;
       this.lastCaptureTriggerAt = event.at;
       this.touch();
+      if (this.hasActiveTestModeLease()) return;
     }
 
     if (event.key === 'stopTrigger') {
@@ -833,7 +958,7 @@ export class MachineRuntimeService
     this.setState('running');
     this.reconcileContinuousDetection();
     if (plcReady) {
-      await this.showWaitingCheckingIndicator().catch((error) => {
+      await this.syncWaitingCheckingIndicator().catch((error) => {
         this.logger.error(
           `PLC waiting indicator update failed: ${this.errorMessage(error)}`,
         );
@@ -894,15 +1019,35 @@ export class MachineRuntimeService
   }
 
   private async recordActivity() {
+    const activityRevision = ++this.inactivityRevision;
     this.lastActivityAt = new Date().toISOString();
     this.touch();
-    this.clearInactivityTimer();
+    this.clearInactivityTimer(false);
     if (this.state !== 'running') return;
-    const timeoutMs = await this.plcRuntime
-      .getSleepTimeMilliseconds()
-      .catch(() => this.sleepTimeSeconds * 1000);
-    this.sleepTimeSeconds = Math.max(1, Math.round(timeoutMs / 1000));
+    const settings = await this.plcRuntime
+      .getMachineInactivitySettings()
+      .then((response) => response.data)
+      .catch(() => ({
+        enabled: this.inactivityTimeoutEnabled,
+        timeoutSeconds: this.sleepTimeSeconds,
+      }));
+    if (
+      activityRevision !== this.inactivityRevision ||
+      this.state !== 'running'
+    ) {
+      return;
+    }
+    this.inactivityTimeoutEnabled = settings.enabled;
+    this.sleepTimeSeconds = Math.max(1, settings.timeoutSeconds);
+    if (!this.inactivityTimeoutEnabled) return;
+    const timeoutMs = this.sleepTimeSeconds * 1000;
     this.inactivityTimer = setTimeout(() => {
+      if (
+        activityRevision !== this.inactivityRevision ||
+        !this.inactivityTimeoutEnabled
+      ) {
+        return;
+      }
       void this.stopForCaptureTimeout();
     }, timeoutMs);
   }
@@ -957,7 +1102,8 @@ export class MachineRuntimeService
     this.updatedAt = new Date().toISOString();
   }
 
-  private clearInactivityTimer() {
+  private clearInactivityTimer(invalidatePendingActivity = true) {
+    if (invalidatePendingActivity) this.inactivityRevision += 1;
     if (this.inactivityTimer) clearTimeout(this.inactivityTimer);
     this.inactivityTimer = null;
   }
@@ -967,41 +1113,105 @@ export class MachineRuntimeService
     this.countdownTimer = null;
   }
 
-  private clearResultIndicatorTimer() {
-    if (this.resultIndicatorTimer) clearTimeout(this.resultIndicatorTimer);
-    this.resultIndicatorTimer = null;
+  private hasActiveTestModeLease(clientId?: string) {
+    this.pruneExpiredTestModeLeases();
+    if (clientId) return this.testModeLeases.has(clientId);
+    return this.testModeLeases.size > 0;
+  }
+
+  private getActiveTestModeLease(clientId: string) {
+    this.pruneExpiredTestModeLeases();
+    return this.testModeLeases.get(clientId) ?? null;
+  }
+
+  private hasEnabledTestOutput() {
+    this.pruneExpiredTestModeLeases();
+    return [...this.testModeLeases.values()].some(
+      (lease) => lease.outputEnabled,
+    );
+  }
+
+  private desiredWaitingCheckingState() {
+    if (this.testModeLeases.size > 0) {
+      return true;
+    }
+    return this.state === 'running';
+  }
+
+  private pruneExpiredTestModeLeases(syncIndicator = true) {
+    const now = Date.now();
+    let changed = false;
+    for (const [clientId, lease] of this.testModeLeases) {
+      if (lease.expiresAt <= now) {
+        this.testModeLeases.delete(clientId);
+        changed = true;
+      }
+    }
+    if (changed && syncIndicator) {
+      void this.syncWaitingCheckingIndicator(false).catch((error) => {
+        this.logger.error(
+          `PLC waiting indicator recovery failed: ${this.errorMessage(error)}`,
+        );
+      });
+    }
   }
 
   private async clearResultIndicators() {
-    this.clearResultIndicatorTimer();
     await this.plcRuntime.setFixedOutput('waitingChecking', false);
   }
 
-  private async showWaitingCheckingIndicator() {
-    this.clearResultIndicatorTimer();
-    await this.plcRuntime.setFixedOutput('waitingChecking', true);
+  private async setWaitingCheckingIndicator(enabled: boolean) {
+    await this.plcRuntime.setFixedOutput('waitingChecking', enabled);
+  }
+
+  private async syncWaitingCheckingIndicator(pruneExpired = true) {
+    if (pruneExpired) this.pruneExpiredTestModeLeases(false);
+    await this.setWaitingCheckingIndicator(this.desiredWaitingCheckingState());
   }
 
   private async showPulsedResultIndicator(
     result: string | undefined,
     recognizedQuantity: number,
   ) {
-    this.clearResultIndicatorTimer();
-    await this.plcRuntime.setFixedOutput('waitingChecking', false);
-    if (result === 'OK') {
-      await this.plcRuntime.pulseOkResult();
-    } else if (result === 'NG' && recognizedQuantity > 0) {
-      await this.plcRuntime.pulseError();
+    if (result !== 'OK' && !(result === 'NG' && recognizedQuantity > 0)) {
+      return;
     }
-    this.resultIndicatorTimer = setTimeout(() => {
-      this.resultIndicatorTimer = null;
-      if (this.state !== 'running' || this.destroyed) return;
-      void this.showWaitingCheckingIndicator().catch((error) => {
-        this.logger.error(
-          `PLC waiting indicator restore failed: ${this.errorMessage(error)}`,
-        );
-      });
-    }, PLC_RESULT_HOLD_MS);
+
+    await this.plcRuntime.setFixedOutput('waitingChecking', false);
+    try {
+      if (result === 'OK') {
+        await this.plcRuntime.pulseOkResult();
+      } else {
+        await this.plcRuntime.pulseError();
+      }
+    } finally {
+      if (!this.destroyed) {
+        await this.syncWaitingCheckingIndicator().catch((error) => {
+          this.logger.error(
+            `PLC waiting indicator restore failed: ${this.errorMessage(error)}`,
+          );
+        });
+      }
+    }
+  }
+
+  private async showPulsedTestResultIndicator(result: MachineTestResultDto) {
+    await this.plcRuntime.setFixedOutput('waitingChecking', false);
+    try {
+      if (result === MachineTestResultDto.OK) {
+        await this.plcRuntime.pulseOkResult();
+      } else {
+        await this.plcRuntime.pulseError();
+      }
+    } finally {
+      if (!this.destroyed) {
+        await this.syncWaitingCheckingIndicator().catch((error) => {
+          this.logger.error(
+            `PLC test waiting indicator restore failed: ${this.errorMessage(error)}`,
+          );
+        });
+      }
+    }
   }
 
   private delay(ms: number) {

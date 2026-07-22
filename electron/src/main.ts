@@ -12,6 +12,7 @@ import { join, resolve } from "node:path";
 import { registerAutoUpdater } from "./auto-updater";
 import { ServiceManager } from "./service-manager";
 import { createStartupDocument } from "./startup-page";
+import { UpdateRecoveryManager } from "./update-recovery";
 import {
   createPendingStartupStages,
   type StartupHardwareStageUpdate,
@@ -70,6 +71,7 @@ let rendererUrl =
 let mainWindow: BrowserWindow | null = null;
 let terminalWindow: BrowserWindow | null = null;
 let serviceManager: ServiceManager | null = null;
+let updateRecoveryManager: UpdateRecoveryManager | null = null;
 let isQuitting = false;
 let closeConfirmationReady = false;
 let shutdownPromise: Promise<{ success: boolean }> | null = null;
@@ -114,14 +116,21 @@ async function startDesktopApp() {
   const runtimeRoot = getRuntimeRoot();
   loadRuntimeEnv(runtimeRoot);
   serviceManager = new ServiceManager(runtimeRoot);
+  updateRecoveryManager = new UpdateRecoveryManager({
+    onLog: showTerminalLog,
+    programDataRoot: getProgramDataRoot(),
+    userDataRoot: app.getPath("userData"),
+  });
   windowSettings = loadWindowSettings();
   testStorageSettings = loadTestStorageSettings();
   desktopLanguage = loadDesktopLanguage();
   resetStartupState();
   registerDesktopIpc();
   registerAutoUpdater({
+    authorize: authorizeUpdateAccess,
     getWindow: () => mainWindow,
     onLog: showTerminalLog,
+    prepareInstall: prepareUpdateInstall,
   });
 
   createMainWindow();
@@ -140,17 +149,33 @@ async function startDesktopApp() {
   const frontendUrl = process.env.ELECTRON_RENDERER_URL ?? serviceManager.getFrontendUrl();
 
   if (!startupResult) {
+    await updateRecoveryManager.markStartupHealthy();
     return;
   }
 
   startupPhase = startupResult.hardwareWarning ? "warning" : "finished";
   broadcastStartupSnapshot();
+  await updateRecoveryManager.markStartupHealthy();
   rendererUrl = new URL(
     startupResult.requiresAdminSetup ? "setup" : "login",
     frontendUrl,
   ).toString();
 
   await loadRendererUrl();
+}
+
+async function authorizeUpdateAccess(accessToken: string) {
+  if (!accessToken || !serviceManager) throw new Error("Update authorization is required.");
+  const response = await fetch(new URL("auth/me", serviceManager.getBackendUrl()), {
+    headers: { authorization: `Bearer ${accessToken}` },
+    signal: AbortSignal.timeout(10_000),
+  });
+  if (!response.ok) throw new Error("Update authorization failed.");
+  const payload = (await response.json()) as { data?: { user?: { role?: string } } };
+  const role = payload.data?.user?.role;
+  if (role !== "admin" && role !== "dev") {
+    throw new Error("Only administrator and developer roles can manage updates.");
+  }
 }
 
 function createMainWindow() {
@@ -224,6 +249,13 @@ function registerDesktopIpc() {
   ipcMain.handle("desktop:get-window-settings", () => windowSettings);
   ipcMain.handle("desktop:get-terminal-logs", () => [...terminalLogs]);
   ipcMain.handle("desktop:get-startup-snapshot", () => getStartupSnapshot());
+  ipcMain.handle("desktop:get-update-recovery", () =>
+    updateRecoveryManager?.getNotice() ?? null,
+  );
+  ipcMain.handle("desktop:acknowledge-update-recovery", async () => {
+    await updateRecoveryManager?.acknowledgeNotice();
+    return { success: true };
+  });
   ipcMain.handle("desktop:get-language-preference", () => desktopLanguage);
   ipcMain.handle(
     "desktop:set-close-confirmation-ready",
@@ -319,6 +351,7 @@ function registerDesktopIpc() {
   ipcMain.handle("desktop:restart-app", () => {
     return requestAppRestart();
   });
+  ipcMain.handle("desktop:export-update-log", () => exportUpdateLog());
 }
 
 function emitStartupHardwareStage(stage: StartupHardwareStageUpdate) {
@@ -361,8 +394,7 @@ function broadcastStartupSnapshot() {
 
 async function runRemainingStartupChecks() {
   if (!serviceManager) {
-    blockStartup("backend", "Service manager is unavailable");
-    return null;
+    throw new Error("Service manager is unavailable");
   }
 
   const backendUrl = serviceManager.getBackendUrl();
@@ -409,8 +441,7 @@ async function runRemainingStartupChecks() {
 
   if (setupResult.status === "rejected") {
     await cleanupBlockedStartupHardware();
-    blockStartup("database", errorMessage(setupResult.reason));
-    return null;
+    throw setupResult.reason;
   }
 
   if (licenseResult.status === "rejected") {
@@ -865,6 +896,26 @@ function showFatalStartupError(error: unknown) {
   }
   showStartupPage();
   showTerminalLog(`[fatal] ${message}`);
+  void rollbackFailedUpdate(error);
+}
+
+async function rollbackFailedUpdate(error: unknown) {
+  if (!updateRecoveryManager) return;
+
+  try {
+    await serviceManager?.stopOwned(showTerminalLog);
+    await serviceManager?.stopManagedPorts(showTerminalLog);
+    const rollbackStarted = await updateRecoveryManager.rollbackAfterStartupFailure(error);
+    if (rollbackStarted) {
+      isQuitting = true;
+      app.exit(1);
+    }
+  } catch (rollbackError) {
+    const message = errorMessage(rollbackError);
+    startupError = `${errorMessage(error)} Rollback failed: ${message}`;
+    showTerminalLog(`[update] Rollback failed: ${message}`);
+    showStartupPage();
+  }
 }
 
 app.on("window-all-closed", () => {
@@ -922,6 +973,24 @@ async function requestAppRestart() {
   return restartPromise;
 }
 
+async function prepareUpdateInstall(targetVersion: string) {
+  if (!updateRecoveryManager || !serviceManager) {
+    throw new Error("Desktop update services are not ready.");
+  }
+
+  await updateRecoveryManager.prepare(targetVersion);
+  isQuitting = true;
+  reportShutdownStatus("Preparing machine and local services for update...");
+  try {
+    await serviceManager.stopOwned(reportShutdownStatus);
+    await serviceManager.stopManagedPorts(reportShutdownStatus);
+    reportShutdownStatus("Local services are ready for update.");
+  } catch (error) {
+    isQuitting = false;
+    throw error;
+  }
+}
+
 function requestRendererCloseConfirmation(window: BrowserWindow) {
   if (
     !closeConfirmationReady ||
@@ -975,6 +1044,35 @@ async function shutdownAndRestart() {
   }
 
   return { success: true };
+}
+
+async function exportUpdateLog() {
+  const timestamp = new Date().toISOString().replaceAll(":", "-").replace(".", "-");
+  const options = {
+    title: desktopLanguage === "vi" ? "Lưu nhật ký cập nhật" : "Save update log",
+    defaultPath: join(app.getPath("documents"), `AHSO-OCR-update-${timestamp}.log`),
+    filters: [{ name: "Log", extensions: ["log", "txt"] }],
+  };
+  const result =
+    mainWindow && !mainWindow.isDestroyed()
+      ? await dialog.showSaveDialog(mainWindow, options)
+      : await dialog.showSaveDialog(options);
+  if (result.canceled || !result.filePath) return { canceled: true, filePath: null };
+
+  writeFileSync(
+    result.filePath,
+    [
+      "AHSO OCR update diagnostic log",
+      `Exported at: ${new Date().toISOString()}`,
+      `App version: ${app.getVersion()}`,
+      `Platform: ${process.platform}`,
+      "",
+      ...terminalLogs.filter((line) => line.includes("[update]") || line.includes("[fatal]")),
+      "",
+    ].join("\r\n"),
+    "utf8",
+  );
+  return { canceled: false, filePath: result.filePath };
 }
 
 function showTerminalLog(message: string) {

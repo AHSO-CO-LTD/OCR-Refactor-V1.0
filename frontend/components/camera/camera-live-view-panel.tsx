@@ -24,6 +24,10 @@ import {
 import { CameraSettingsForm } from "@/components/camera/camera-settings-form";
 import { CameraDebugPanel } from "@/components/camera/camera-debug-panel";
 import { CameraConnectionTestPanel } from "@/components/camera/camera-connection-test-panel";
+import {
+  ConfigurationInspectionTestPanel,
+  type ConfigurationTestPreview,
+} from "@/components/camera/configuration-inspection-test-panel";
 import { CameraIdentitiesPanel } from "@/components/camera/camera-identities-panel";
 import { CameraRoiOverlay } from "@/components/camera/camera-roi-overlay";
 import { RoiSettingsPanel } from "@/components/camera/roi-settings-panel";
@@ -34,6 +38,7 @@ import {
   type RoiAssist,
 } from "@/components/camera/roi-editor-geometry";
 import { ProductProfilesPanel } from "@/components/products/product-profiles-panel";
+import { AiSettingsPanel } from "@/components/settings/ai-settings-panel";
 import {
   formatCameraApiError,
   formatCameraErrorMessage,
@@ -61,12 +66,14 @@ import {
   type ProductProfile,
   type ProductProfilePayload,
   type SessionUser,
+  type TestInspectionImageResult,
 } from "@/lib/api";
 import { useI18n, type TranslationKey } from "@/lib/i18n";
 import { getAccessToken, getStoredUser } from "@/lib/session";
 
 type ConfigurationTab =
   | "products"
+  | "ai"
   | "roi"
   | "camera"
   | "identities"
@@ -112,6 +119,15 @@ export function CameraLiveViewPanel({ configurationMode = false }: CameraLiveVie
   const [visitedTabs, setVisitedTabs] = useState<Set<ConfigurationTab>>(
     () => new Set(["camera"]),
   );
+  const [configurationTestPreview, setConfigurationTestPreview] =
+    useState<ConfigurationTestPreview | null>(null);
+  const [configurationTestResult, setConfigurationTestResult] =
+    useState<TestInspectionImageResult | null>(null);
+  const [configurationTestRunning, setConfigurationTestRunning] =
+    useState(false);
+  const [aiSettingsDirty, setAiSettingsDirty] = useState(false);
+  const [cameraSettingsDirty, setCameraSettingsDirty] = useState(false);
+  const [productSettingsDirty, setProductSettingsDirty] = useState(false);
   const user = useMemo(() => getStoredUser(), []);
   const canViewDebug = user?.isDev === true;
   const canManageCamera =
@@ -136,11 +152,26 @@ export function CameraLiveViewPanel({ configurationMode = false }: CameraLiveVie
   const streamMetaRef = useRef<StreamFrameMeta | null>(null);
   const streamFrameTimesRef = useRef<number[]>([]);
   const savedRoisRef = useRef(new Map<string, ProductProfile["roiRegions"]>());
+  const savedProductsRef = useRef(new Map<string, ProductProfile>());
 
   const selectedProduct = useMemo(
     () => products.find((product) => product.id === selectedProductId) ?? null,
     [products, selectedProductId],
   );
+  const savedSelectedProduct = selectedProduct
+    ? (savedProductsRef.current.get(selectedProduct.id) ?? selectedProduct)
+    : null;
+  const roiSettingsDirty = Boolean(
+    selectedProduct &&
+      savedSelectedProduct &&
+      roiRegionsFingerprint(selectedProduct.roiRegions) !==
+        roiRegionsFingerprint(savedSelectedProduct.roiRegions),
+  );
+  const hasUnsavedConfigurationChanges =
+    roiSettingsDirty ||
+    aiSettingsDirty ||
+    cameraSettingsDirty ||
+    productSettingsDirty;
   const overlappingRoiIndexes = useMemo(
     () => getOverlappingRegionIndexes(selectedProduct?.roiRegions ?? []),
     [selectedProduct?.roiRegions],
@@ -152,7 +183,12 @@ export function CameraLiveViewPanel({ configurationMode = false }: CameraLiveVie
       .map((product) => {
         const roiRegions = normalizeConfigurationRois(product.roiRegions);
         savedRoisRef.current.set(product.id, cloneRoiRegions(roiRegions));
-        return { ...product, roiRegions };
+        const normalizedProduct = { ...product, roiRegions };
+        savedProductsRef.current.set(
+          product.id,
+          cloneConfigurationProduct(normalizedProduct),
+        );
+        return normalizedProduct;
       });
   }, []);
 
@@ -168,10 +204,14 @@ export function CameraLiveViewPanel({ configurationMode = false }: CameraLiveVie
     setRoiRedoStack([]);
     setRoiSelectedIndexes([]);
     setRoiAssist(null);
+    setConfigurationTestPreview(null);
+    setConfigurationTestResult(null);
+    setConfigurationTestRunning(false);
   }, [prepareProducts]);
 
   function handleRoiDraftChange(regions: ProductProfile["roiRegions"]) {
     if (!selectedProduct) return;
+    setConfigurationTestResult(null);
     setProducts((current) =>
       current.map((product) =>
         product.id === selectedProduct.id
@@ -266,6 +306,7 @@ export function CameraLiveViewPanel({ configurationMode = false }: CameraLiveVie
     const requestedTab = new URLSearchParams(window.location.search).get("tab");
     const requestedTabAllowed =
       requestedTab === "products" ||
+      requestedTab === "ai" ||
       requestedTab === "roi" ||
       requestedTab === "camera" ||
       requestedTab === "identities" ||
@@ -383,6 +424,9 @@ export function CameraLiveViewPanel({ configurationMode = false }: CameraLiveVie
     setRoiRedoStack([]);
     setRoiSelectedIndexes([]);
     setRoiAssist(null);
+    setConfigurationTestPreview(null);
+    setConfigurationTestResult(null);
+    setConfigurationTestRunning(false);
 
     if (!product) return;
     setViewerTransform(toViewerTransform(product.camera));
@@ -762,6 +806,15 @@ export function CameraLiveViewPanel({ configurationMode = false }: CameraLiveVie
     const nextProduct = configurationMode
       ? { ...product, roiRegions: normalizeConfigurationRois(product.roiRegions) }
       : product;
+    savedRoisRef.current.set(
+      product.id,
+      cloneRoiRegions(nextProduct.roiRegions),
+    );
+    savedProductsRef.current.set(
+      product.id,
+      cloneConfigurationProduct(nextProduct),
+    );
+    setConfigurationTestResult(null);
     setProducts((current) =>
       current.map((item) => (item.id === product.id ? nextProduct : item)),
     );
@@ -896,11 +949,16 @@ export function CameraLiveViewPanel({ configurationMode = false }: CameraLiveVie
   }
 
   const connected = Boolean(status?.data?.connected);
-  const imageSource = streamFrameUrl
+  const cameraImageSource = streamFrameUrl
     ? streamFrameUrl
     : frame
       ? `data:${mediaTypeForFrame(frame.encode_format)};base64,${frame.image_base64}`
       : "";
+  const imageSource = configurationTestPreview?.imageSource || cameraImageSource;
+  const displayedFrame = configurationTestPreview
+    ? configurationTestPreview.frame
+    : frame;
+  const displayedLive = live && !configurationTestPreview;
 
   return (
     <div className="grid min-h-0 gap-5">
@@ -961,7 +1019,7 @@ export function CameraLiveViewPanel({ configurationMode = false }: CameraLiveVie
               <Camera className="h-4 w-4" />
               {live ? t("camera.stopLive") : t("camera.startLive")}
             </Button>
-            {canRunCameraAi ? (
+            {canRunCameraAi && !configurationMode ? (
               <Button
                 type="button"
                 variant={aiRunning ? "outline" : "default"}
@@ -982,11 +1040,11 @@ export function CameraLiveViewPanel({ configurationMode = false }: CameraLiveVie
           <CameraImageViewer
             key={buildViewerKey(selectedProduct)}
             imageSource={imageSource}
-            frame={frame}
+            frame={displayedFrame}
             imageHeight={selectedProduct?.camera.imageHeight}
             imageWidth={selectedProduct?.camera.imageWidth}
-            live={live}
-            liveStats={liveStats}
+            live={displayedLive}
+            liveStats={displayedLive ? liveStats : null}
             baseZoom={selectedProduct?.camera.zoomFactor ?? 1}
             initialPreviewPanX={selectedProduct?.camera.previewPanX ?? 0}
             initialPreviewPanY={selectedProduct?.camera.previewPanY ?? 0}
@@ -1009,6 +1067,12 @@ export function CameraLiveViewPanel({ configurationMode = false }: CameraLiveVie
                   previewRotation={viewerTransform.previewRotation}
                   regions={selectedProduct.roiRegions}
                   selectedIndexes={roiSelectedIndexes}
+                  testResult={
+                    hasUnsavedConfigurationChanges
+                      ? null
+                      : configurationTestResult
+                  }
+                  testRunning={configurationTestRunning}
                   zoomFactor={viewerTransform.zoomFactor}
                 />
               ) : null
@@ -1017,7 +1081,7 @@ export function CameraLiveViewPanel({ configurationMode = false }: CameraLiveVie
               <Button
                 type="button"
                 onClick={() => void handleSaveView()}
-                disabled={!selectedProduct || !imageSource || savingView || applyingCameraSettings}
+                disabled={!selectedProduct || !imageSource || savingView || applyingCameraSettings || configurationTestRunning}
                 className="h-10 border-cyan-700 bg-cyan-700 px-4 text-white hover:bg-cyan-800"
               >
                 {savingView
@@ -1027,6 +1091,27 @@ export function CameraLiveViewPanel({ configurationMode = false }: CameraLiveVie
             ) : null}
             title={t("camera.liveView")}
           />
+          {configurationMode &&
+          (configurationTestRunning || configurationTestResult) ? (
+            <div className="pointer-events-none absolute left-1/2 top-3 z-20 -translate-x-1/2">
+              <div
+                className={configurationTestResultClassName(
+                  configurationTestResult?.result,
+                  configurationTestRunning,
+                )}
+                role="status"
+              >
+                {configurationTestRunning
+                  ? t("configuration.test.running")
+                  : configurationTestResult?.result}
+                {configurationTestResult && !configurationTestRunning ? (
+                  <span className="ml-2 border-l border-current/30 pl-2 font-mono text-xs tabular-nums">
+                    {configurationTestResult.cycleTimeMs.toFixed(0)} ms
+                  </span>
+                ) : null}
+              </div>
+            </div>
+          ) : null}
           {switchingCamera || applyingCameraSettings ? (
             <div className="absolute inset-0 z-10 flex items-center justify-center bg-slate-950/80 text-white" role="status">
               <div className="flex items-center gap-3 border border-white/15 bg-slate-950 px-5 py-4">
@@ -1043,6 +1128,23 @@ export function CameraLiveViewPanel({ configurationMode = false }: CameraLiveVie
             </div>
           ) : null}
         </CardContent>
+        {configurationMode && canRunCameraAi ? (
+          <ConfigurationInspectionTestPanel
+            key={selectedProductId || "no-product"}
+            connected={connected}
+            disabled={
+              loading ||
+              connecting ||
+              switchingCamera ||
+              applyingCameraSettings
+            }
+            hasUnsavedChanges={hasUnsavedConfigurationChanges}
+            onPreviewChange={setConfigurationTestPreview}
+            onResultChange={setConfigurationTestResult}
+            onRunningChange={setConfigurationTestRunning}
+            product={savedSelectedProduct}
+          />
+        ) : null}
       </Card>
 
       {configurationMode ? (
@@ -1080,6 +1182,7 @@ export function CameraLiveViewPanel({ configurationMode = false }: CameraLiveVie
           devices={devices}
           hardwareRanges={hardwareRanges}
           disabled={loading || switchingCamera || applyingCameraSettings}
+          onDirtyChange={setCameraSettingsDirty}
           onApply={handleApplyCameraSettings}
         />
       </div>
@@ -1089,8 +1192,20 @@ export function CameraLiveViewPanel({ configurationMode = false }: CameraLiveVie
         <div hidden={activeTab !== "products"}>
         <ProductProfilesPanel
           unifiedConfiguration
+          onDirtyChange={setProductSettingsDirty}
           onProductsChanged={handleProductsChanged}
         />
+        </div>
+      ) : null}
+
+      {configurationMode && visitedTabs.has("ai") ? (
+        <div hidden={activeTab !== "ai"}>
+          <AiSettingsPanel
+            key={selectedProduct?.id ?? "no-product"}
+            onDirtyChange={setAiSettingsDirty}
+            product={selectedProduct}
+            onSaved={handleSavedProduct}
+          />
         </div>
       ) : null}
 
@@ -1141,6 +1256,12 @@ const configurationTabs: ConfigurationTabDefinition[] = [
     id: "products",
     icon: PackageSearch,
     labelKey: "nav.products",
+    permission: "product.manage",
+  },
+  {
+    id: "ai",
+    icon: BrainCircuit,
+    labelKey: "nav.aiSettings",
     permission: "product.manage",
   },
   {
@@ -1283,4 +1404,46 @@ function buildProductPayload(
     },
     roiRegions: product.roiRegions,
   };
+}
+
+function cloneConfigurationProduct(product: ProductProfile): ProductProfile {
+  return {
+    ...product,
+    camera: { ...product.camera },
+    roiRegions: cloneRoiRegions(product.roiRegions),
+  };
+}
+
+function roiRegionsFingerprint(regions: ProductProfile["roiRegions"]) {
+  return JSON.stringify(
+    [...regions]
+      .sort((left, right) => left.index - right.index)
+      .map(({ index, x, y, width, height, rotation }) => ({
+        index,
+        x,
+        y,
+        width,
+        height,
+        rotation,
+      })),
+  );
+}
+
+function configurationTestResultClassName(
+  result: TestInspectionImageResult["result"] | undefined,
+  running: boolean,
+) {
+  const baseClassName =
+    "border px-4 py-2 text-sm font-bold shadow-sm";
+
+  if (running) {
+    return `${baseClassName} border-amber-300 bg-amber-50 text-amber-900`;
+  }
+  if (result === "OK") {
+    return `${baseClassName} border-emerald-400 bg-emerald-700 text-white`;
+  }
+  if (result === "NG") {
+    return `${baseClassName} border-red-400 bg-red-700 text-white`;
+  }
+  return `${baseClassName} border-slate-300 bg-slate-950 text-white`;
 }

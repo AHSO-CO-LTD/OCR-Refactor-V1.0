@@ -276,6 +276,7 @@ model PlcConfig {
   waitingCheckingAddress Int?
   errorPulseDurationMs  Int            @default(500)
   okPulseDurationMs     Int            @default(500)
+  inactivityTimeoutEnabled Boolean     @default(true)
   sleepTimeSeconds      Int            @default(300)
   createdAt             DateTime       @default(now())
   updatedAt             DateTime       @updatedAt

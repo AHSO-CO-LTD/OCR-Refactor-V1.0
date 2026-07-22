@@ -581,7 +581,8 @@ input[type="radio"]:not(:disabled) {
 
 .operator-line-runtime {
   container-name: operator-runtime;
-  container-type: size;
+  container-type: inline-size;
+  align-content: start;
   gap: clamp(0.375rem, 1.2dvh, 0.75rem);
 }
 
@@ -696,6 +697,19 @@ input[type="radio"]:not(:disabled) {
   padding: clamp(0.25rem, 1cqh, 0.75rem);
 }
 
+.operator-line-runtime .operator-line-preview-body {
+  container-type: inline-size;
+  display: block;
+  overflow: visible;
+}
+
+.operator-line-runtime
+  .operator-line-preview-body
+  .operator-camera-preview-frame {
+  width: 100%;
+  max-height: none;
+}
+
 .operator-camera-preview-frame {
   border: 2px solid #009ee3;
 }
@@ -766,6 +780,44 @@ input[type="radio"]:not(:disabled) {
   height: clamp(0.875rem, 2.2cqh, 1.25rem);
 }
 
+.operator-test-runtime {
+  container-name: operator-test-runtime;
+  container-type: inline-size;
+  align-content: start;
+}
+
+.operator-test-runtime .operator-line-top-card {
+  max-height: none;
+  overflow: visible;
+}
+
+.operator-test-runtime .operator-line-preview-body {
+  container-type: inline-size;
+  display: block;
+  overflow: visible;
+}
+
+.operator-test-runtime .operator-line-preview-body .operator-camera-preview-frame {
+  width: 100%;
+  max-height: none;
+}
+
+.operator-test-runtime .operator-preview-clock-cluster {
+  width: min(78cqw, 960px);
+  max-width: 960px;
+}
+
+.operator-test-source-panel,
+.operator-test-operation-actions,
+.operator-test-action-row {
+  min-width: 0;
+}
+
+.operator-test-operation-actions,
+.operator-test-action-row {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 9.5rem), 1fr));
+}
+
 @media (min-width: 600px) {
   .operator-line-footer-actions {
     grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -802,38 +854,195 @@ input[type="radio"]:not(:disabled) {
   }
 }
 
+@media (max-width: 899px) {
+  .operator-line-runtime .operator-line-preview-card {
+    grid-row: 1;
+  }
+
+  .operator-line-runtime .operator-line-top-card {
+    grid-row: 2;
+  }
+
+  .operator-line-runtime .operator-line-footer-actions {
+    grid-row: 3;
+  }
+}
+
 @container operator-runtime (max-height: 500px) {
   .operator-line-top-card {
     overflow: auto;
   }
 }
 
-@media (min-aspect-ratio: 13/10) and (min-width: 1400px) {
-  .operator-line-top-card {
+@media (min-aspect-ratio: 13/10) and (min-width: 900px) {
+  .operator-line-shell-header .app-shell-header-grid {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+  }
+
+  .operator-line-shell-header .app-shell-brand {
+    grid-column: 1;
+    grid-row: 1;
+  }
+
+  .operator-line-shell-header .app-shell-primary-nav {
+    grid-column: 2;
+    grid-row: 1;
+  }
+
+  .operator-line-shell-header .app-shell-account {
+    grid-column: 3;
+    grid-row: 1;
+  }
+
+  .operator-line-shell-header .app-shell-primary-nav nav,
+  .operator-line-shell-header .app-shell-primary-nav > div {
+    justify-content: center;
+  }
+
+  .operator-line-runtime .operator-line-top-card {
     max-height: none;
     overflow: hidden;
   }
 
-  .operator-line-top-card .operator-line-top-content {
+  .operator-line-runtime .operator-line-top-card .operator-line-top-content {
     grid-template-columns:
-      clamp(260px, 18vw, 308px)
+      clamp(210px, 22vw, 300px)
       minmax(0, 1fr)
-      clamp(165px, 12vw, 190px);
+      clamp(210px, 22vw, 300px);
+    gap: clamp(0.375rem, 0.8vw, 0.75rem);
+    padding: clamp(0.5rem, 0.7vw, 0.75rem);
   }
 
-  .operator-line-top-card .operator-line-top-actions {
+  .operator-line-runtime .operator-line-product-box {
+    padding: 0.5rem;
+  }
+
+  .operator-line-runtime .operator-line-product-header {
+    margin-bottom: 0.375rem;
+  }
+
+  .operator-line-runtime .operator-line-product-title {
+    font-size: clamp(0.875rem, 1vw, 1rem);
+  }
+
+  .operator-line-runtime .operator-line-product-form,
+  .operator-line-runtime .operator-line-product-field,
+  .operator-line-runtime .operator-line-pack-row {
+    gap: 0.25rem;
+  }
+
+  .operator-line-runtime .operator-line-product-field label {
+    font-size: clamp(0.625rem, 0.7vw, 0.75rem);
+  }
+
+  .operator-line-runtime .operator-line-product-box .operator-line-form-control {
+    height: clamp(2rem, 2.2vw, 2.25rem);
+    font-size: clamp(0.6875rem, 0.8vw, 0.8125rem);
+  }
+
+  .operator-line-runtime
+    .operator-line-product-box
+    input.operator-line-form-control {
+    font-size: clamp(0.75rem, 0.9vw, 0.875rem);
+  }
+
+  .operator-line-runtime .operator-line-pack-row {
+    grid-template-columns: 2rem minmax(0, 1fr) 2rem;
+  }
+
+  .operator-line-runtime .operator-line-pack-editor {
+    grid-template-columns: minmax(0, 1fr) clamp(4.25rem, 4.5vw, 5rem);
+    align-items: end;
+  }
+
+  .operator-line-runtime .operator-line-save-button {
+    min-width: 0;
+    padding-inline: 0.375rem;
+    white-space: nowrap;
+  }
+
+  .operator-line-runtime .operator-line-top-card .operator-line-stats-shell {
+    grid-template-columns: minmax(0, 1fr) clamp(120px, 13vw, 220px);
+  }
+
+  .operator-line-runtime .operator-line-top-card .operator-line-stats-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .operator-line-runtime .operator-line-top-card .operator-line-status-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .operator-line-runtime .operator-line-top-card .operator-line-stats-shell,
+  .operator-line-runtime .operator-line-top-card .operator-line-stats-grid,
+  .operator-line-runtime .operator-line-top-card .operator-line-status-grid {
+    gap: clamp(0.25rem, 0.5vw, 0.5rem);
+  }
+
+  .operator-line-runtime .operator-line-top-card .operator-line-info-tile {
+    min-height: clamp(7.25rem, 8.5vw, 9rem);
+    padding: clamp(0.5rem, 0.65vw, 0.75rem);
+  }
+
+  .operator-line-runtime
+    .operator-line-top-card
+    .operator-line-info-tile
+    > div:first-child {
+    font-size: clamp(0.5625rem, 0.65vw, 0.6875rem);
+    white-space: nowrap;
+  }
+
+  .operator-line-runtime
+    .operator-line-top-card
+    .operator-line-info-tile
+    > div:last-child {
+    margin-top: clamp(0.25rem, 0.5vw, 0.5rem);
+    font-size: clamp(1.5rem, 2vw, 2.25rem);
+  }
+
+  .operator-line-runtime .operator-line-top-card .operator-line-okng-value {
+    font-size: clamp(1.75rem, 2.4vw, 2.75rem);
+  }
+
+  .operator-line-runtime .operator-line-top-card .operator-line-top-actions {
     display: block;
     grid-column: 3;
-    padding: clamp(0.5rem, 1.2cqh, 0.75rem);
+    padding: clamp(0.375rem, 0.55vw, 0.625rem);
   }
 
-  .operator-line-top-card .operator-line-action-button {
-    height: clamp(2.25rem, 4.6cqh, 2.75rem);
-    justify-content: flex-start;
-    font-size: clamp(0.75rem, 1.45cqh, 0.9rem);
+  .operator-line-runtime .operator-line-top-action-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .operator-line-footer-actions {
+  .operator-line-runtime .operator-line-top-card .operator-line-action-button {
+    height: clamp(2.25rem, 2.55vw, 2.625rem);
+    min-width: 0;
+    justify-content: center;
+    padding-inline: clamp(0.375rem, 0.6vw, 0.625rem);
+    font-size: clamp(0.6875rem, 0.75vw, 0.8125rem);
+    white-space: nowrap;
+  }
+
+  .operator-line-runtime .operator-line-footer-actions {
     display: none;
+  }
+
+  .operator-line-runtime .operator-line-preview-heading {
+    padding-block: clamp(0.1875rem, 0.35vw, 0.375rem);
+    font-size: clamp(0.875rem, 1.25vw, 1.125rem);
+  }
+
+  .operator-line-runtime .operator-line-preview-body {
+    padding: clamp(0.25rem, 0.5vw, 0.5rem);
+  }
+}
+
+@media (min-aspect-ratio: 13/10) and (min-width: 1400px) {
+  .operator-test-runtime .operator-line-top-content {
+    grid-template-columns: clamp(260px, 18vw, 308px) minmax(0, 1fr);
+  }
+
+  .operator-test-operation-actions {
+    grid-template-columns: repeat(6, minmax(0, 1fr));
   }
 }

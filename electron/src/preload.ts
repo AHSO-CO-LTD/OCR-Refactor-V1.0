@@ -7,14 +7,23 @@ contextBridge.exposeInMainWorld("ocrDesktop", {
   exitApp() {
     return ipcRenderer.invoke("desktop:exit-app");
   },
-  checkForUpdates() {
-    return ipcRenderer.invoke("desktop:check-for-updates");
+  checkForUpdates(accessToken: string) {
+    return ipcRenderer.invoke("desktop:check-for-updates", accessToken);
   },
-  downloadUpdate() {
-    return ipcRenderer.invoke("desktop:download-update");
+  getUpdateStatus() {
+    return ipcRenderer.invoke("desktop:get-update-status");
   },
-  installUpdate() {
-    return ipcRenderer.invoke("desktop:install-update");
+  getUpdateRecovery() {
+    return ipcRenderer.invoke("desktop:get-update-recovery");
+  },
+  acknowledgeUpdateRecovery() {
+    return ipcRenderer.invoke("desktop:acknowledge-update-recovery");
+  },
+  downloadUpdate(accessToken: string) {
+    return ipcRenderer.invoke("desktop:download-update", accessToken);
+  },
+  installUpdate(accessToken: string) {
+    return ipcRenderer.invoke("desktop:install-update", accessToken);
   },
   restartApp() {
     return ipcRenderer.invoke("desktop:restart-app");
@@ -33,6 +42,9 @@ contextBridge.exposeInMainWorld("ocrDesktop", {
   },
   exportStartupLog(context?: Record<string, unknown>) {
     return ipcRenderer.invoke("desktop:export-startup-log", context);
+  },
+  exportUpdateLog() {
+    return ipcRenderer.invoke("desktop:export-update-log");
   },
   getLanguagePreference() {
     return ipcRenderer.invoke("desktop:get-language-preference");

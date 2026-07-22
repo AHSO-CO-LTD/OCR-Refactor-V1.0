@@ -453,9 +453,16 @@ export type BulkProductOcrTestSettingsPayload = {
 export type BulkProductAiSettingsPayload = {
   thresholdAccept: number;
   thresholdMns: number;
-  rowThreshold: number;
+  rowThreshold?: number;
   applyToAll: boolean;
   productIds?: string[];
+};
+
+export type ProductAiSettingsPayload = {
+  modelPath?: string | null;
+  thresholdAccept?: number;
+  thresholdMns?: number;
+  rowThreshold?: number;
 };
 
 export type PlcKeyOperation = "watch_boolean" | "write_boolean" | "pulse";
@@ -483,6 +490,7 @@ export type PlcConfiguration = {
   waitingCheckingAddress: number | null;
   errorPulseDurationMs: number;
   okPulseDurationMs: number;
+  inactivityTimeoutEnabled: boolean;
   sleepTimeSeconds: number;
   customKeys: PlcCustomKey[];
   createdAt: string;
@@ -491,7 +499,12 @@ export type PlcConfiguration = {
 
 export type PlcConfigurationPayload = Omit<
   PlcConfiguration,
-  "id" | "createdAt" | "updatedAt" | "customKeys"
+  | "id"
+  | "createdAt"
+  | "updatedAt"
+  | "customKeys"
+  | "inactivityTimeoutEnabled"
+  | "sleepTimeSeconds"
 > & {
   customKeys: Array<Omit<PlcCustomKey, "id">>;
 };
@@ -579,6 +592,7 @@ export type MachineRuntimeStatus = {
   message: string | null;
   countdownSeconds: number | null;
   lastActivityAt: string | null;
+  inactivityTimeoutEnabled: boolean;
   sleepTimeSeconds: number;
   plcOffline: boolean;
   plcErrorMessage: string | null;
@@ -596,6 +610,8 @@ export type MachineRuntimeStatus = {
   liveCameraEnabled: boolean;
   realtimeAiEnabled: boolean;
   cameraFrameSequence: number;
+  testModeActive: boolean;
+  testOutputEnabled: boolean;
 };
 
 export type MachineRuntimeFrame = {
@@ -605,6 +621,12 @@ export type MachineRuntimeFrame = {
   width: number;
   height: number;
   capturedAt: string;
+};
+
+export type MachineInactivitySettings = {
+  enabled: boolean;
+  timeoutSeconds: number;
+  configured: boolean;
 };
 
 export type MachineRuntimeAction = MachineRuntimeStatus & {
@@ -1637,6 +1659,30 @@ export async function bulkUpdateProductAiSettings(
   return (await response.json()) as { data: { updatedCount: number } };
 }
 
+export async function updateProductAiSettings(
+  accessToken: string,
+  productId: string,
+  payload: ProductAiSettingsPayload,
+) {
+  const response = await fetch(
+    `${API_BASE_URL}/products/${productId}/ai-settings`,
+    {
+      method: "PATCH",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(payload),
+    },
+  );
+
+  if (!response.ok) {
+    throw new ApiError(await parseError(response), response.status);
+  }
+
+  return (await response.json()) as { data: ProductProfile };
+}
+
 export async function deleteProductProfile(
   accessToken: string,
   productId: string,
@@ -1774,6 +1820,32 @@ export async function getMachineRuntimeStatus(accessToken: string) {
   );
 }
 
+export async function getMachineInactivitySettings(accessToken: string) {
+  return plcRequest<{ data: MachineInactivitySettings }>(
+    accessToken,
+    "/plc/machine/inactivity-settings",
+  );
+}
+
+export async function updateMachineInactivitySettings(
+  accessToken: string,
+  settings: Pick<MachineInactivitySettings, "enabled" | "timeoutSeconds">,
+) {
+  return plcRequest<{ data: MachineInactivitySettings }>(
+    accessToken,
+    "/plc/machine/inactivity-settings",
+    { method: "PUT", body: JSON.stringify(settings) },
+  );
+}
+
+export async function notifyMachineUserActivity(accessToken: string) {
+  return plcRequest<{ data: MachineRuntimeStatus }>(
+    accessToken,
+    "/plc/machine/activity",
+    { method: "POST" },
+  );
+}
+
 export async function getMachineRuntimeFrame(accessToken: string) {
   return plcRequest<{
     data: { sequence: number; frame: MachineRuntimeFrame } | null;
@@ -1792,6 +1864,51 @@ export async function updateMachineRuntimeControls(
     accessToken,
     "/plc/machine/controls",
     { method: "PATCH", body: JSON.stringify(controls) },
+  );
+}
+
+export async function updateMachineTestMode(
+  accessToken: string,
+  clientId: string,
+  active: boolean,
+) {
+  return plcRequest<{ data: MachineRuntimeStatus }>(
+    accessToken,
+    "/plc/machine/test-mode",
+    {
+      method: "PATCH",
+      body: JSON.stringify({ clientId, active }),
+    },
+  );
+}
+
+export async function updateMachineTestOutput(
+  accessToken: string,
+  clientId: string,
+  enabled: boolean,
+) {
+  return plcRequest<{ data: MachineRuntimeStatus }>(
+    accessToken,
+    "/plc/machine/test-output",
+    {
+      method: "PATCH",
+      body: JSON.stringify({ clientId, enabled }),
+    },
+  );
+}
+
+export async function pulseMachineTestResult(
+  accessToken: string,
+  clientId: string,
+  result: "OK" | "NG",
+) {
+  return plcRequest<{ data: { pulsed: true; result: "OK" | "NG" } }>(
+    accessToken,
+    "/plc/machine/test-result-pulse",
+    {
+      method: "POST",
+      body: JSON.stringify({ clientId, result }),
+    },
   );
 }
 

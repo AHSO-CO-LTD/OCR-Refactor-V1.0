@@ -498,6 +498,18 @@ Function DbCredentialPageLeave
 FunctionEnd
 
 !macro customInstall
+  ReadEnvStr $0 "PROGRAMDATA"
+  ${If} $0 == ""
+    StrCpy $0 "C:\ProgramData"
+  ${EndIf}
+  CreateDirectory "$0\AHSO OCR\updates\installers"
+  CopyFiles /SILENT "$EXEPATH" "$0\AHSO OCR\updates\installers\$EXEFILE"
+
+  ${If} ${Silent}
+    DetailPrint "Automated update: preserving runtime configuration for startup validation."
+    Goto bootstrap_done
+  ${EndIf}
+
   DetailPrint "Bootstrapping local OCR runtime..."
   Call WriteDbConfig
   ExecWait '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File "$INSTDIR\resources\installer\bootstrap-installer.ps1" -InstallDir "$INSTDIR" -DbConfigPath "$DbConfigPath"' $0

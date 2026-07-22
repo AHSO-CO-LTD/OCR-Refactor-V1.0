@@ -23,6 +23,7 @@ import { toToolBooleanAddress } from './plc-address';
 const PLC_CONFIG_ID = 'default';
 const RECONNECT_DELAY_MS = 2000;
 const MAX_RECENT_EVENTS = 50;
+const DEFAULT_INACTIVITY_TIMEOUT_SECONDS = 300;
 
 type PlcConnectionState =
   | 'not_configured'
@@ -76,6 +77,11 @@ export class PlcRuntimeService
   private cameraPowerCommand: boolean | null = null;
   private cameraLightCommand: boolean | null = null;
   private waitingCheckingCommand: boolean | null = null;
+  private readonly fixedOutputRevision: Record<PlcFixedOutputKey, number> = {
+    cameraPower: 0,
+    cameraLight: 0,
+    waitingChecking: 0,
+  };
   private recentEvents: PlcRuntimeEvent[] = [];
   private watcherControllers: AbortController[] = [];
   private reconnectTimer: NodeJS.Timeout | null = null;
@@ -201,7 +207,6 @@ export class PlcRuntimeService
           waitingCheckingAddress: dto.waitingCheckingAddress,
           errorPulseDurationMs: dto.errorPulseDurationMs,
           okPulseDurationMs: dto.okPulseDurationMs,
-          sleepTimeSeconds: dto.sleepTimeSeconds,
         },
         update: {
           ipAddress: dto.ipAddress,
@@ -217,7 +222,6 @@ export class PlcRuntimeService
           waitingCheckingAddress: dto.waitingCheckingAddress,
           errorPulseDurationMs: dto.errorPulseDurationMs,
           okPulseDurationMs: dto.okPulseDurationMs,
-          sleepTimeSeconds: dto.sleepTimeSeconds,
         },
       });
       await tx.plcCustomKey.deleteMany({ where: { configId: PLC_CONFIG_ID } });
@@ -252,9 +256,37 @@ export class PlcRuntimeService
     return this.connect();
   }
 
-  async getSleepTimeMilliseconds() {
-    const config = await this.requireConfig();
-    return config.sleepTimeSeconds * 1000;
+  async getMachineInactivitySettings() {
+    const config = await this.loadConfig();
+    return {
+      data: {
+        enabled: config?.inactivityTimeoutEnabled ?? true,
+        timeoutSeconds:
+          config?.sleepTimeSeconds ?? DEFAULT_INACTIVITY_TIMEOUT_SECONDS,
+        configured: Boolean(config),
+      },
+    };
+  }
+
+  async updateMachineInactivitySettings(settings: {
+    enabled: boolean;
+    timeoutSeconds: number;
+  }) {
+    await this.requireConfig();
+    const config = await this.prisma.plcConfig.update({
+      where: { id: PLC_CONFIG_ID },
+      data: {
+        inactivityTimeoutEnabled: settings.enabled,
+        sleepTimeSeconds: settings.timeoutSeconds,
+      },
+    });
+    return {
+      data: {
+        enabled: config.inactivityTimeoutEnabled,
+        timeoutSeconds: config.sleepTimeSeconds,
+        configured: true,
+      },
+    };
   }
 
   private async performConnect() {
@@ -360,6 +392,7 @@ export class PlcRuntimeService
     await this.enqueue(() =>
       this.toolClient.writeBoolean(config.ipAddress, toolAddress, value),
     );
+    this.fixedOutputRevision[key] += 1;
     if (key === 'cameraPower') this.cameraPowerCommand = value;
     if (key === 'cameraLight') this.cameraLightCommand = value;
     if (key === 'waitingChecking') this.waitingCheckingCommand = value;
@@ -534,10 +567,13 @@ export class PlcRuntimeService
     key: Extract<PlcFixedOutputKey, 'waitingChecking'>,
   ) {
     await this.setFixedOutput(key, true);
+    const startupPulseRevision = this.fixedOutputRevision[key];
     try {
       await new Promise((resolve) => setTimeout(resolve, 300));
     } finally {
-      await this.setFixedOutput(key, false);
+      if (this.fixedOutputRevision[key] === startupPulseRevision) {
+        await this.setFixedOutput(key, false);
+      }
     }
   }
 
@@ -577,6 +613,9 @@ export class PlcRuntimeService
     this.cameraPowerCommand = null;
     this.cameraLightCommand = null;
     this.waitingCheckingCommand = null;
+    this.fixedOutputRevision.cameraPower += 1;
+    this.fixedOutputRevision.cameraLight += 1;
+    this.fixedOutputRevision.waitingChecking += 1;
   }
 
   private startWatchers(
@@ -784,6 +823,7 @@ export class PlcRuntimeService
       waitingCheckingAddress: config.waitingCheckingAddress,
       errorPulseDurationMs: config.errorPulseDurationMs,
       okPulseDurationMs: config.okPulseDurationMs,
+      inactivityTimeoutEnabled: config.inactivityTimeoutEnabled,
       sleepTimeSeconds: config.sleepTimeSeconds,
       customKeys: config.customKeys,
       createdAt: config.createdAt.toISOString(),

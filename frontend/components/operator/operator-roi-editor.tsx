@@ -204,6 +204,7 @@ export type OperatorRoiEditorProps = {
   roiTextAnimationMs?: number;
   interactive?: boolean;
   previewImageSrc?: string;
+  cameraDisplayName?: string;
   showClock?: boolean;
   connectionOverlay?: ReactNode;
   clockLeadingContent?: ReactNode;
@@ -223,6 +224,7 @@ export function OperatorRoiEditor({
   roiTextAnimationMs,
   interactive = true,
   previewImageSrc = "",
+  cameraDisplayName,
   showClock = false,
   connectionOverlay,
   clockLeadingContent,
@@ -854,9 +856,8 @@ export function OperatorRoiEditor({
         <div className="operator-preview-dimensions border border-white/15 bg-black/75 px-2 py-1 font-mono text-xs font-semibold text-white">
           {cameraWidth} x {cameraHeight}
         </div>
-        <div className="operator-preview-source border border-white/15 bg-black px-3 py-2 text-right text-xs text-white">
-          <div className="font-semibold">{t("operator.livePreview")}</div>
-          <div className="text-white/70">{product.camera.deviceName}</div>
+        <div className="operator-preview-source border border-white/15 bg-black px-3 py-2 text-right text-xs font-semibold text-white">
+          {cameraDisplayName || product.camera.deviceName}
         </div>
       </div>
       {showClock ? (

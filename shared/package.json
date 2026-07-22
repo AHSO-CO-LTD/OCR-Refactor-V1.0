@@ -1,6 +1,6 @@
 {
   "name": "@ocr/shared",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "private": true,
   "scripts": {
     "build": "echo \"shared build is not ready yet\"",
@@ -8,4 +8,3 @@
     "typecheck": "echo \"shared typecheck is not ready yet\""
   }
 }
-

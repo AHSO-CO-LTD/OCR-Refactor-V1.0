@@ -24,10 +24,12 @@ import { getAccessToken } from "@/lib/session";
 
 type ProductProfilesPanelProps = {
   unifiedConfiguration?: boolean;
+  onDirtyChange?: (dirty: boolean) => void;
   onProductsChanged?: (products: ProductProfile[]) => void;
 };
 
 export function ProductProfilesPanel({
+  onDirtyChange,
   onProductsChanged,
   unifiedConfiguration = false,
 }: ProductProfilesPanelProps = {}) {
@@ -284,6 +286,7 @@ export function ProductProfilesPanel({
           products={products}
           saving={saving}
           hideCameraAndRoi={unifiedConfiguration}
+          onDirtyChange={onDirtyChange}
           onCancel={() => {
             setCreateOpen(false);
             setEditingProduct(null);
@@ -323,6 +326,7 @@ export function ProductProfilesPanel({
       <ProductProfilesTable
         loading={loading}
         products={products}
+        simplified={unifiedConfiguration}
         selectedIds={selectedTargetIds}
         busyProductId={busyProductId}
         onToggleSelected={toggleSelected}

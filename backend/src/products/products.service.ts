@@ -15,6 +15,7 @@ import {
   RoiRegionDto,
 } from './dto/product-profile.dto';
 import { UpdateProductBatchSizeDto } from './dto/update-product-batch-size.dto';
+import { UpdateProductAiSettingsDto } from './dto/update-product-ai-settings.dto';
 import { UpdateProductProfileDto } from './dto/update-product-profile.dto';
 
 const defaultCamera: CameraProfileDto = {
@@ -282,11 +283,45 @@ export class ProductsService {
       data: {
         thresholdAccept: dto.thresholdAccept,
         thresholdMns: dto.thresholdMns,
-        rowThreshold: dto.rowThreshold,
+        ...(dto.rowThreshold !== undefined
+          ? { rowThreshold: dto.rowThreshold }
+          : {}),
       },
     });
 
     return { data: { updatedCount: result.count } };
+  }
+
+  async updateProductAiSettings(id: string, dto: UpdateProductAiSettingsDto) {
+    const existingProduct = await this.prisma.product.findUnique({
+      where: { id },
+      select: { id: true },
+    });
+
+    if (!existingProduct) {
+      throw new NotFoundException('Product not found');
+    }
+
+    const product = await this.prisma.product.update({
+      where: { id },
+      data: {
+        ...(dto.modelPath !== undefined
+          ? { modelPath: dto.modelPath?.trim() || null }
+          : {}),
+        ...(dto.thresholdAccept !== undefined
+          ? { thresholdAccept: dto.thresholdAccept }
+          : {}),
+        ...(dto.thresholdMns !== undefined
+          ? { thresholdMns: dto.thresholdMns }
+          : {}),
+        ...(dto.rowThreshold !== undefined
+          ? { rowThreshold: dto.rowThreshold }
+          : {}),
+      },
+      include: productInclude,
+    });
+
+    return { data: this.toProductProfile(product) };
   }
 
   async applyProductProfile(dto: ApplyProductProfileDto) {

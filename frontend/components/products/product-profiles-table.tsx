@@ -9,6 +9,7 @@ import { useI18n } from "@/lib/i18n";
 type ProductProfilesTableProps = {
   loading: boolean;
   products: ProductProfile[];
+  simplified?: boolean;
   selectedIds: string[];
   busyProductId?: string;
   onToggleSelected: (productId: string) => void;
@@ -20,6 +21,7 @@ type ProductProfilesTableProps = {
 export function ProductProfilesTable({
   loading,
   products,
+  simplified = false,
   selectedIds,
   busyProductId,
   onToggleSelected,
@@ -39,27 +41,36 @@ export function ProductProfilesTable({
       </div>
 
       <div className="max-w-full overflow-x-auto">
-        <table className="w-full min-w-[1180px] table-fixed border-collapse text-sm">
+        <table
+          className={[
+            "w-full table-fixed border-collapse text-sm",
+            simplified ? "min-w-[760px]" : "min-w-[1180px]",
+          ].join(" ")}
+        >
           <thead className="bg-slate-50 text-left text-xs font-semibold uppercase tracking-[0.08em] text-slate-500">
             <tr>
               <th className="w-12 border-b border-slate-200 px-3 py-3">
                 <span className="sr-only">{t("products.select")}</span>
               </th>
-              <th className="w-[15%] border-b border-slate-200 px-3 py-3">
+              <th className="w-[18%] border-b border-slate-200 px-3 py-3">
                 {t("products.code")}
               </th>
-              <th className="w-[17%] border-b border-slate-200 px-3 py-3">
+              <th className="w-[20%] border-b border-slate-200 px-3 py-3">
                 {t("products.name")}
               </th>
-              <th className="w-[13%] border-b border-slate-200 px-3 py-3">
-                {t("products.camera")}
-              </th>
+              {!simplified ? (
+                <th className="w-[13%] border-b border-slate-200 px-3 py-3">
+                  {t("products.camera")}
+                </th>
+              ) : null}
               <th className="w-[10%] border-b border-slate-200 px-3 py-3">
                 {t("products.batchSize")}
               </th>
-              <th className="w-[7%] border-b border-slate-200 px-3 py-3">
-                {t("products.roi")}
-              </th>
+              {!simplified ? (
+                <th className="w-[7%] border-b border-slate-200 px-3 py-3">
+                  {t("products.roi")}
+                </th>
+              ) : null}
               <th className="w-[12%] border-b border-slate-200 px-3 py-3">
                 {t("products.status")}
               </th>
@@ -71,7 +82,10 @@ export function ProductProfilesTable({
           <tbody>
             {loading ? (
               <tr>
-                <td colSpan={8} className="px-4 py-10 text-center text-sm text-slate-500">
+                <td
+                  colSpan={simplified ? 6 : 8}
+                  className="px-4 py-10 text-center text-sm text-slate-500"
+                >
                   {t("products.loading")}
                 </td>
               </tr>
@@ -79,7 +93,7 @@ export function ProductProfilesTable({
 
             {!loading && products.length === 0 ? (
               <tr>
-                <td colSpan={8} className="px-4 py-12 text-center">
+                <td colSpan={simplified ? 6 : 8} className="px-4 py-12 text-center">
                   <div className="mx-auto max-w-sm">
                     <div className="text-base font-semibold text-slate-950">
                       {t("products.emptyTitle")}
@@ -114,20 +128,24 @@ export function ProductProfilesTable({
                         {product.name}
                       </div>
                     </td>
-                    <td className="border-b border-slate-100 px-3 py-3 text-slate-600">
-                      <div
-                        className="truncate"
-                        title={product.camera.deviceName || product.camera.sourceType}
-                      >
-                        {product.camera.deviceName || product.camera.sourceType}
-                      </div>
-                    </td>
+                    {!simplified ? (
+                      <td className="border-b border-slate-100 px-3 py-3 text-slate-600">
+                        <div
+                          className="truncate"
+                          title={product.camera.deviceName || product.camera.sourceType}
+                        >
+                          {product.camera.deviceName || product.camera.sourceType}
+                        </div>
+                      </td>
+                    ) : null}
                     <td className="border-b border-slate-100 px-3 py-3 text-slate-600 tabular-nums">
                       {product.batchSize}
                     </td>
-                    <td className="border-b border-slate-100 px-3 py-3 text-slate-600 tabular-nums">
-                      {product.roiRegions.length}
-                    </td>
+                    {!simplified ? (
+                      <td className="border-b border-slate-100 px-3 py-3 text-slate-600 tabular-nums">
+                        {product.roiRegions.length}
+                      </td>
+                    ) : null}
                     <td className="border-b border-slate-100 px-3 py-3">
                       <span
                         className={

@@ -1,7 +1,7 @@
 "use client";
 
 import { Save } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { ConfirmModal } from "@/components/ui/confirm-modal";
@@ -20,6 +20,7 @@ type CameraSettingsFormProps = {
   devices: CameraDevice[];
   hardwareRanges: CameraHardwareRanges | null;
   disabled?: boolean;
+  onDirtyChange?: (dirty: boolean) => void;
   onApply: (camera: CameraProfile) => Promise<ProductProfile>;
 };
 
@@ -28,6 +29,7 @@ export function CameraSettingsForm({
   devices,
   hardwareRanges,
   disabled = false,
+  onDirtyChange,
   onApply,
 }: CameraSettingsFormProps) {
   const { t } = useI18n();
@@ -36,6 +38,19 @@ export function CameraSettingsForm({
   );
   const [saving, setSaving] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
+  const dirty = Boolean(
+    product &&
+      draft &&
+      JSON.stringify(draft) !== JSON.stringify(normalizeCamera(product.camera)),
+  );
+
+  useEffect(() => {
+    onDirtyChange?.(dirty);
+  }, [dirty, onDirtyChange]);
+
+  useEffect(() => {
+    return () => onDirtyChange?.(false);
+  }, [onDirtyChange]);
 
   if (!product || !draft) {
     return (

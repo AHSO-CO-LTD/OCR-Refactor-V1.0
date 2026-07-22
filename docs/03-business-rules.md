@@ -141,3 +141,7 @@ Frontend hiding alone is never enough.
 - App Grab never emits an OK/NG pulse to PLC.
 - With AI off, a trigger can only capture a frame when live camera is off; it must not inspect, latch, change counters, or pulse PLC.
 - An aggregate `UNKNOWN` result must not be latched, counted, logged, or sent to PLC.
+- Automatic inactivity pause defaults to enabled after setup with a 300-second timeout.
+- The inactivity clock is reset by a PLC capture edge, a manual Grab attempt, or active renderer interaction such as scrolling, pointer/touch input, keyboard input, or window focus.
+- Disabling automatic inactivity pause prevents the capture-timeout idle transition without changing PLC stop/start behavior.
+- Only `admin` and `dev` may change automatic inactivity settings.

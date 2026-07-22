@@ -7,6 +7,7 @@ import { toast } from "sonner";
 import { AccountMenu } from "@/components/account-menu";
 import { BrandLogo } from "@/components/brand/brand-logo";
 import { MachineRuntimeOverlay } from "@/components/plc/machine-runtime-overlay";
+import { useMachineUserActivity } from "@/components/plc/use-machine-user-activity";
 import { useDesktopLifecycle } from "@/components/system/desktop-lifecycle-provider";
 import type { SessionUser, SystemLicenseState } from "@/lib/api";
 import {
@@ -20,6 +21,7 @@ import {
 import type { TranslationKey } from "@/lib/i18n";
 import { useI18n } from "@/lib/i18n";
 import {
+  DASHBOARD_OVERVIEW_VISIBLE,
   getPostLoginRoute,
   isExpectedRuntimeCamera,
   selectOperatorStartupProduct,
@@ -50,6 +52,7 @@ const menuItems = [
     href: "/dashboard",
     permission: "dashboard.view",
     groupKey: "navGroup.overview",
+    hidden: !DASHBOARD_OVERVIEW_VISIBLE,
   },
   {
     labelKey: "nav.line",
@@ -83,6 +86,12 @@ const menuItems = [
     href: "/dashboard/configuration/plc",
     permission: "plc.manage",
     groupKey: "navGroup.configuration",
+  },
+  {
+    labelKey: "nav.testHistory",
+    href: "/dashboard/test-reports",
+    permission: "report.view",
+    groupKey: "navGroup.inspection",
   },
   {
     labelKey: "nav.reports",
@@ -142,6 +151,7 @@ export function AppShell({ children }: AppShellProps) {
     enabled: Boolean(user),
     onLicenseLost: handleLicenseLost,
   });
+  useMachineUserActivity(Boolean(user));
   const isOperatorLinePage = pathname === "/dashboard/line";
   const isConfigurationPage = pathname === "/dashboard/configuration";
 
@@ -212,7 +222,7 @@ export function AppShell({ children }: AppShellProps) {
     }
 
     toast.error(t("apiError.Missing required permission"));
-    router.replace(getPostLoginRoute(user));
+    router.replace(getPostLoginRoute());
   }, [pathname, router, t, user]);
 
   function handleLogout() {
@@ -319,9 +329,14 @@ export function AppShell({ children }: AppShellProps) {
   return (
     <main className="flex h-[100dvh] overflow-hidden bg-slate-100 text-slate-950">
       <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
-        <header className="relative z-20 shrink-0 border-b border-slate-200 bg-white px-4 py-2 sm:px-5 lg:px-6">
-          <div className="grid min-h-12 min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-x-2 gap-y-2 min-[1180px]:grid-cols-[auto_minmax(0,1fr)_auto]">
-            <div className="col-start-1 row-start-1 flex min-w-0 shrink-0 items-center">
+        <header
+          className={[
+            "app-shell-header relative z-20 shrink-0 border-b border-slate-200 bg-white px-4 py-2 sm:px-5 lg:px-6",
+            isOperatorLinePage ? "operator-line-shell-header" : "",
+          ].join(" ")}
+        >
+          <div className="app-shell-header-grid grid min-h-12 min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-x-2 gap-y-2 min-[1180px]:grid-cols-[auto_minmax(0,1fr)_auto]">
+            <div className="app-shell-brand col-start-1 row-start-1 flex min-w-0 shrink-0 items-center">
               <BrandLogo
                 className="h-auto w-[clamp(120px,18vw,200px)] max-w-full"
                 priority
@@ -331,7 +346,7 @@ export function AppShell({ children }: AppShellProps) {
             {usesSidebar ? (
               <div
                 ref={adminNavRef}
-                className="col-span-2 col-start-1 row-start-2 min-w-0 min-[1180px]:col-span-1 min-[1180px]:col-start-2 min-[1180px]:row-start-1"
+                className="app-shell-primary-nav col-span-2 col-start-1 row-start-2 min-w-0 min-[1180px]:col-span-1 min-[1180px]:col-start-2 min-[1180px]:row-start-1"
               >
                 <div className="overflow-x-auto">
                   <nav className="flex min-w-max items-center gap-2 sm:justify-center">
@@ -408,13 +423,13 @@ export function AppShell({ children }: AppShellProps) {
                 ) : null}
               </div>
             ) : showNavbar ? (
-              <div className="col-span-2 col-start-1 row-start-2 min-w-0 overflow-x-auto min-[1180px]:col-span-1 min-[1180px]:col-start-2 min-[1180px]:row-start-1">
+              <div className="app-shell-primary-nav col-span-2 col-start-1 row-start-2 min-w-0 overflow-x-auto min-[1180px]:col-span-1 min-[1180px]:col-start-2 min-[1180px]:row-start-1">
                 <div className="flex min-w-max items-center gap-2 px-0 sm:justify-center">
                   {navLinks}
                 </div>
               </div>
             ) : null}
-            <div className="col-start-2 row-start-1 flex min-w-0 items-center justify-end text-sm min-[1180px]:col-start-3">
+            <div className="app-shell-account col-start-2 row-start-1 flex min-w-0 items-center justify-end text-sm min-[1180px]:col-start-3">
               <AccountMenu
                 canManageDesktopSettings={canManageDesktopSettings}
                 donglePresent={license?.licensed === true && license.donglePresent === true}
@@ -434,9 +449,11 @@ export function AppShell({ children }: AppShellProps) {
                 className={[
                   "min-h-0 min-w-0 flex-1 overflow-x-hidden",
                   isOperatorLinePage
-                    ? "overflow-y-hidden p-2 sm:p-3 xl:p-4"
+                    ? "overflow-y-auto p-2 sm:p-3 xl:p-4"
                     : "overflow-y-auto p-3 sm:p-4 lg:p-5 xl:p-6",
-                  isConfigurationPage ? "[scrollbar-gutter:stable]" : "",
+                  isOperatorLinePage || isConfigurationPage
+                    ? "[scrollbar-gutter:stable]"
+                    : "",
                 ].join(" ")}
               >
                 {children}
@@ -449,9 +466,11 @@ export function AppShell({ children }: AppShellProps) {
               className={[
                 "min-h-0 min-w-0 flex-1 overflow-x-hidden",
                 isOperatorLinePage
-                  ? "overflow-y-hidden p-2 sm:p-3 xl:p-4"
+                  ? "overflow-y-auto p-2 sm:p-3 xl:p-4"
                   : "overflow-y-auto p-3 sm:p-4 lg:p-6",
-                isConfigurationPage ? "[scrollbar-gutter:stable]" : "",
+                isOperatorLinePage || isConfigurationPage
+                  ? "[scrollbar-gutter:stable]"
+                  : "",
               ].join(" ")}
             >
               {children}
