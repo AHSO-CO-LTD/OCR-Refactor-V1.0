@@ -1,5 +1,16 @@
 # Dongle / License Security
 
+## Login startup contract
+
+The login startup flow has two independent paths:
+
+1. API, license, and the physical USB dongle are checked first.
+2. A valid remembered session may auto-login immediately after those checks. PLC and camera checks never gate this auto-login path.
+3. If manual login is needed, the desktop app performs best-effort hardware preparation before showing the credential form: PLC connection, camera power, camera light, then camera connection with a real frame.
+4. Missing PLC configuration, omitted PLC output addresses, or camera errors are displayed as skipped/unavailable and do not block manual login.
+
+Dongle mock mode may still support explicit development login, but it is not accepted for remembered-session auto-login. Auto-login requires the real dongle result code `DONGLE_OK`.
+
 ## Purpose
 
 The project uses a USB dongle mechanism to protect the desktop application.
@@ -60,6 +71,9 @@ This behavior should be preserved conceptually in the new architecture.
 
 - avoid hard-coding secrets in frontend code
 - keep dongle secrets in native/backend layer
+- production builds should use the compiled `native/dongle-checker.exe` helper
+  instead of shipping the plaintext Python helper
+- keep `backend/scripts/check-dongle.py` for development/debug fallback only
 - limit diagnostic exposure
 - log failures without leaking implementation details
 

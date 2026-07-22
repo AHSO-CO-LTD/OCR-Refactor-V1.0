@@ -283,8 +283,8 @@ Tasks:
 Current Electron MVP:
 
 - `electron/` is a dedicated workspace.
-- Existing healthy services on ports `3969`, `3979`, and `8000` are reused.
-- Missing or unhealthy frontend/backend/Device Tool services are started on the first available fallback port in their local range and health-checked.
+- Existing healthy services on ports `3969`, `3979`, and `8668` are reused.
+- Missing or unhealthy frontend/backend services are started on the first available fallback port in their local range and health-checked; Device Tool stays on its own `tool/config.json` port.
 - Electron stops only child processes it owns.
 - Installer, bundled production artifacts, dongle gate, and service recovery UI remain pending.
 

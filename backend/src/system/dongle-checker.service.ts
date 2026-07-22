@@ -23,6 +23,11 @@ type DongleHelperPayload = {
   error?: string;
 };
 
+type DongleHelperCommand = {
+  command: string;
+  args: string[];
+};
+
 @Injectable()
 export class DongleCheckerService {
   constructor(private readonly configService: ConfigService) {}
@@ -52,21 +57,20 @@ export class DongleCheckerService {
       };
     }
 
-    const helperPath = resolve(process.cwd(), 'scripts', 'check-dongle.py');
+    const helper = this.resolveHelperCommand();
 
-    if (!existsSync(helperPath)) {
+    if (!helper) {
       return {
         ok: false,
         retcode: null,
         checkedAt: new Date().toISOString(),
         code: 'DONGLE_HELPER_NOT_FOUND',
-        message: 'Dongle helper script was not found',
+        message: 'Dongle helper executable or script was not found',
         dllPath,
       };
     }
 
     try {
-      const { command, args } = this.resolvePythonCommand();
       const retryCount = this.configService.get<string>(
         'DONGLE_RETRY_COUNT',
         '3',
@@ -79,10 +83,9 @@ export class DongleCheckerService {
         this.configService.get<string>('DONGLE_CHECK_TIMEOUT_MS', '7000'),
       );
       const { stdout } = await execFileAsync(
-        command,
+        helper.command,
         [
-          ...args,
-          helperPath,
+          ...helper.args,
           '--dll',
           dllPath,
           '--retry-count',
@@ -137,6 +140,59 @@ export class DongleCheckerService {
     }
 
     return join(process.cwd(), 'native', 'System8.dll');
+  }
+
+  private resolveHelperCommand(): DongleHelperCommand | null {
+    const nativeHelperPath = this.resolveNativeHelperPath();
+    if (nativeHelperPath && existsSync(nativeHelperPath)) {
+      return {
+        command: nativeHelperPath,
+        args: [],
+      };
+    }
+
+    if (!this.isPythonHelperAllowed()) {
+      return null;
+    }
+
+    const pythonHelperPath = resolve(
+      process.cwd(),
+      'scripts',
+      'check-dongle.py',
+    );
+    if (existsSync(pythonHelperPath)) {
+      const { command, args } = this.resolvePythonCommand();
+      return {
+        command,
+        args: [...args, pythonHelperPath],
+      };
+    }
+
+    return null;
+  }
+
+  private resolveNativeHelperPath() {
+    const configuredPath = this.configService.get<string>('DONGLE_HELPER_PATH');
+
+    if (configuredPath) {
+      return resolve(configuredPath);
+    }
+
+    return join(
+      process.cwd(),
+      'native',
+      process.platform === 'win32' ? 'dongle-checker.exe' : 'dongle-checker',
+    );
+  }
+
+  private isPythonHelperAllowed() {
+    if (
+      this.configService.get<string>('DONGLE_ALLOW_PYTHON_HELPER') === 'true'
+    ) {
+      return true;
+    }
+
+    return this.configService.get<string>('NODE_ENV') !== 'production';
   }
 
   private resolvePythonCommand() {

@@ -1,9 +1,22 @@
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { createConnection } from "node:net";
 import { dirname, join } from "node:path";
+import type {
+  StartupHardwareStageId,
+  StartupHardwareStageUpdate,
+  StartupServiceStageId,
+  StartupServiceStageUpdate,
+  StartupStageDetail,
+  StartupStageStatus,
+} from "./startup-types";
 
 export type LocalServiceName = "backend" | "device-tool" | "frontend";
+export type {
+  StartupHardwareStageUpdate,
+  StartupServiceStageUpdate,
+} from "./startup-types";
 
 type LocalServiceDefinition = {
   command: string;
@@ -39,23 +52,25 @@ const SHUTDOWN_TIMEOUT_MS = 45_000;
 const WATCHDOG_INTERVAL_MS = 5_000;
 const WATCHDOG_FAILURE_THRESHOLD = 3;
 const WATCHDOG_RESTART_COOLDOWN_MS = 20_000;
+const BACKEND_MIGRATION_TIMEOUT_MS = 120_000;
 const DEVICE_TOOL_API_PREFIX = "/tool/v1";
 const DEVICE_TOOL_HEALTH_PATH = "/";
 const DEFAULT_PORTS: Record<LocalServiceName, number> = {
   backend: readPortEnv("BACKEND_PORT", 3979),
-  "device-tool": readPortEnv("DEVICE_TOOL_PORT", 8000),
+  "device-tool": readPortEnv("DEVICE_TOOL_PORT", 8668),
   frontend: readPortEnv("FRONTEND_PORT", 3969),
 };
-const FALLBACK_PORTS: Record<LocalServiceName, { end: number; start: number }> = {
-  backend: readFallbackRange("BACKEND", DEFAULT_PORTS.backend),
-  "device-tool": readFallbackRange("DEVICE_TOOL", DEFAULT_PORTS["device-tool"]),
-  frontend: readFallbackRange("FRONTEND", DEFAULT_PORTS.frontend),
-};
+const FALLBACK_PORTS: Record<LocalServiceName, { end: number; start: number }> =
+  {
+    backend: readFallbackRange("BACKEND", DEFAULT_PORTS.backend),
+    "device-tool": readFallbackRange(
+      "DEVICE_TOOL",
+      DEFAULT_PORTS["device-tool"],
+    ),
+    frontend: readFallbackRange("FRONTEND", DEFAULT_PORTS.frontend),
+  };
 const FRONTEND_ORIGINS = buildFrontendOrigins()
-  .flatMap((port) => [
-    `http://127.0.0.1:${port}`,
-    `http://localhost:${port}`,
-  ])
+  .flatMap((port) => [`http://127.0.0.1:${port}`, `http://localhost:${port}`])
   .join(",");
 
 function readPortEnv(name: string, fallback: number) {
@@ -73,7 +88,10 @@ function readFallbackRange(
   namePrefix: string,
   defaultPort: number,
 ): { end: number; start: number } {
-  const start = readPortEnv(`${namePrefix}_FALLBACK_PORT_START`, defaultPort + 1);
+  const start = readPortEnv(
+    `${namePrefix}_FALLBACK_PORT_START`,
+    defaultPort + 1,
+  );
   const end = readPortEnv(`${namePrefix}_FALLBACK_PORT_END`, defaultPort + 99);
 
   if (start > end) {
@@ -101,13 +119,43 @@ function isValidPort(port: number) {
   return Number.isInteger(port) && port > 0 && port <= 65535;
 }
 
+function toStartupServiceStageId(
+  serviceName: LocalServiceName,
+): StartupServiceStageId {
+  if (serviceName === "device-tool") return "deviceTool";
+  return serviceName;
+}
+
 export class ServiceManager {
   private readonly services: ManagedService[];
+  private readonly desktopInternalToken = randomUUID();
+  private backendMigrationsReady = false;
   private logListener: ((message: string) => void) | null = null;
   private watchdogTimer: NodeJS.Timeout | null = null;
+  private readonly startupServiceStages = new Map<
+    StartupServiceStageId,
+    StartupStageStatus
+  >([
+    ["deviceTool", "pending"],
+    ["database", "pending"],
+    ["backend", "pending"],
+    ["frontend", "pending"],
+  ]);
+  private startupStageListener:
+    | ((stage: StartupServiceStageUpdate) => void)
+    | null = null;
+  private startupHardwarePromise: Promise<{
+    stages: StartupHardwareStageUpdate[];
+  }> | null = null;
+  private startupHardwareAttempt = 0;
 
   constructor(repoRoot: string) {
     const toolPython = resolveToolPython(repoRoot);
+    const deviceToolCommand = resolveDeviceToolCommand(
+      repoRoot,
+      toolPython,
+      DEFAULT_PORTS["device-tool"],
+    );
     const backendCommand = resolveBackendCommand(repoRoot);
     const frontendPath = join(repoRoot, "frontend");
     const frontendCommand = resolveFrontendCommand(
@@ -119,9 +167,9 @@ export class ServiceManager {
     this.services = [
       {
         name: "device-tool",
-        command: toolPython.command,
-        args: [...toolPython.args, "main.py"],
-        cwd: join(repoRoot, "tool"),
+        command: deviceToolCommand.command,
+        args: deviceToolCommand.args,
+        cwd: deviceToolCommand.cwd,
         healthUrl: `http://127.0.0.1:${DEFAULT_PORTS["device-tool"]}${DEVICE_TOOL_HEALTH_PATH}`,
         port: DEFAULT_PORTS["device-tool"],
         lastRestartAt: 0,
@@ -167,17 +215,213 @@ export class ServiceManager {
     ];
   }
 
-  async startAll(onStatus: (message: string) => void) {
-    for (const service of this.services) {
-      await this.ensureService(service, onStatus);
+  async startAll<T = void>(
+    onStatus: (message: string) => void,
+    onStage?: (stage: StartupServiceStageUpdate) => void,
+    onBackendReady?: () => Promise<T>,
+  ): Promise<T | undefined> {
+    this.startupStageListener = onStage ?? null;
+    const startService = async (service: ManagedService) => {
+      const stageId = toStartupServiceStageId(service.name);
+      this.updateStartupServiceStage(stageId, "running");
+      try {
+        await this.ensureService(service, onStatus);
+        this.updateStartupServiceStage(stageId, "done");
+      } catch (error) {
+        if (
+          service.name === "backend" &&
+          this.startupServiceStages.get("database") === "running"
+        ) {
+          this.updateStartupServiceStage("database", "failed");
+        }
+        this.updateStartupServiceStage(stageId, "failed");
+        throw error;
+      }
+    };
+
+    const deviceTool = this.services.find(
+      (service) => service.name === "device-tool",
+    );
+    const backend = this.services.find((service) => service.name === "backend");
+    const frontend = this.services.find(
+      (service) => service.name === "frontend",
+    );
+    if (!deviceTool || !backend || !frontend) {
+      throw new Error("Desktop service configuration is incomplete");
     }
 
+    const infrastructure = await Promise.allSettled([
+      startService(deviceTool),
+      startService(backend),
+    ]);
+    const infrastructureFailure = infrastructure.find(
+      (result): result is PromiseRejectedResult => result.status === "rejected",
+    );
+    if (infrastructureFailure) throw infrastructureFailure.reason;
+
+    const frontendOperation = startService(frontend);
+    const backendReadyOperation = onBackendReady?.();
+    const remaining = await Promise.allSettled([
+      frontendOperation,
+      ...(backendReadyOperation ? [backendReadyOperation] : []),
+    ]);
+    const remainingFailure = remaining.find(
+      (result): result is PromiseRejectedResult => result.status === "rejected",
+    );
+    if (remainingFailure) throw remainingFailure.reason;
+
     this.startWatchdog();
+    return backendReadyOperation
+      ? (remaining[1] as PromiseFulfilledResult<T>).value
+      : undefined;
+  }
+
+  getStartupServiceStages(): StartupServiceStageUpdate[] {
+    return [...this.startupServiceStages].map(([id, status]) => ({ id, status }));
   }
 
   getFrontendUrl() {
-    const frontend = this.services.find((service) => service.name === "frontend");
+    const frontend = this.services.find(
+      (service) => service.name === "frontend",
+    );
     return `http://127.0.0.1:${frontend?.port ?? DEFAULT_PORTS.frontend}/`;
+  }
+
+  getBackendUrl() {
+    const backend = this.services.find((service) => service.name === "backend");
+    return `http://127.0.0.1:${backend?.port ?? DEFAULT_PORTS.backend}/api/`;
+  }
+
+  prepareStartupHardware(
+    preferredProductId: string | undefined,
+    onStage: (stage: StartupHardwareStageUpdate) => void,
+  ) {
+    if (this.startupHardwarePromise) return this.startupHardwarePromise;
+    const attempt = ++this.startupHardwareAttempt;
+    const emitCurrentAttempt = (stage: StartupHardwareStageUpdate) => {
+      if (attempt === this.startupHardwareAttempt) onStage(stage);
+    };
+    const operation = this.performStartupHardwarePreparation(
+      preferredProductId,
+      emitCurrentAttempt,
+    );
+    this.startupHardwarePromise = operation.finally(() => {
+      if (attempt === this.startupHardwareAttempt) {
+        this.startupHardwarePromise = null;
+      }
+    });
+    return this.startupHardwarePromise;
+  }
+
+  async abortStartupHardware() {
+    this.startupHardwareAttempt += 1;
+    this.startupHardwarePromise = null;
+    const response = await fetch(
+      `http://127.0.0.1:${this.getServicePort("backend")}/api/internal/plc-runtime/startup/abort`,
+      {
+        method: "POST",
+        headers: {
+          "x-desktop-internal-token": this.desktopInternalToken,
+        },
+        signal: AbortSignal.timeout(15_000),
+      },
+    );
+    if (!response.ok) {
+      throw new Error((await response.text()) || `${response.status}`);
+    }
+  }
+
+  private async performStartupHardwarePreparation(
+    preferredProductId: string | undefined,
+    onStage: (stage: StartupHardwareStageUpdate) => void,
+  ) {
+    const stages: Array<{
+      body?: Record<string, string>;
+      id: StartupHardwareStageId;
+      path: string;
+    }> = [
+      { id: "plc", path: "startup/plc" },
+      { id: "cameraPower", path: "startup/camera-power" },
+      { id: "cameraLight", path: "startup/camera-light" },
+      {
+        id: "camera",
+        path: "startup/camera",
+        body: preferredProductId ? { productId: preferredProductId } : {},
+      },
+      { id: "plcSignals", path: "startup/plc-signals" },
+    ];
+    const results: StartupHardwareStageUpdate[] = [];
+
+    const runStage = async (stage: (typeof stages)[number]) => {
+      onStage({ id: stage.id, status: "running" });
+      try {
+        const response = await this.requestBackendStartupStage(
+          stage.path,
+          stage.body,
+        );
+        const hasFailures = response.details?.some(
+          (detail) => detail.status === "failed",
+        );
+        const result: StartupHardwareStageUpdate = {
+          id: stage.id,
+          status:
+            response.status === "skipped"
+              ? "skipped"
+              : hasFailures
+                ? "warning"
+                : "done",
+          details: response.details,
+        };
+        results.push(result);
+        onStage(result);
+        return result;
+      } catch (error) {
+        const result: StartupHardwareStageUpdate = {
+          id: stage.id,
+          status: "failed",
+        };
+        results.push(result);
+        onStage(result);
+        this.emitLog(
+          "backend",
+          `startup ${stage.id} failed (${error instanceof Error ? error.message : String(error)})`,
+        );
+        return result;
+      }
+    };
+
+    const skipStage = (stage: (typeof stages)[number]) => {
+      const result: StartupHardwareStageUpdate = {
+        id: stage.id,
+        status: "skipped",
+      };
+      results.push(result);
+      onStage(result);
+    };
+
+    const [plcStage, powerStage, lightStage, cameraStage, signalsStage] = stages;
+    const plc = await runStage(plcStage);
+    if (plc.status !== "done") {
+      for (const stage of [powerStage, lightStage, cameraStage, signalsStage]) {
+        skipStage(stage);
+      }
+      return { stages: results };
+    }
+
+    const cameraBranch = async () => {
+      const power = await runStage(powerStage);
+      if (power.status === "done") {
+        await runStage(lightStage);
+        await runStage(cameraStage);
+      } else {
+        skipStage(lightStage);
+        skipStage(cameraStage);
+      }
+    };
+
+    await Promise.all([cameraBranch(), runStage(signalsStage)]);
+
+    return { stages: results };
   }
 
   onLog(listener: (message: string) => void) {
@@ -188,14 +432,18 @@ export class ServiceManager {
     this.stopWatchdog();
     const ownedServices = [...this.services]
       .reverse()
-      .filter((service) => service.startedByApp || service.reusedExistingService);
+      .filter(
+        (service) => service.startedByApp || service.reusedExistingService,
+      );
 
     for (const service of ownedServices) {
       await this.stopOwnedService(service, onStatus);
     }
   }
 
-  async stopManagedPorts(onStatus: (message: string) => void = () => undefined) {
+  async stopManagedPorts(
+    onStatus: (message: string) => void = () => undefined,
+  ) {
     this.stopWatchdog();
 
     for (const service of [...this.services].reverse()) {
@@ -216,7 +464,10 @@ export class ServiceManager {
         this.emitLog(service.name, `port ${service.port} released`);
       } else {
         onStatus(`${service.name}: port ${service.port} is still open`);
-        this.emitLog(service.name, `port ${service.port} is still open after force cleanup`);
+        this.emitLog(
+          service.name,
+          `port ${service.port} is still open after force cleanup`,
+        );
       }
     }
   }
@@ -240,8 +491,8 @@ export class ServiceManager {
   }
 
   private async checkCriticalServices() {
-    const criticalServices = this.services.filter((service) =>
-      service.name === "backend" || service.name === "device-tool",
+    const criticalServices = this.services.filter(
+      (service) => service.name === "backend" || service.name === "device-tool",
     );
 
     for (const service of criticalServices) {
@@ -327,9 +578,18 @@ export class ServiceManager {
     service: ManagedService,
     onStatus: (message: string) => void,
   ) {
+    if (service.name === "backend") {
+      await this.ensureBackendMigrationsReady(service, onStatus);
+    }
+
     if (await isPortOpen(service.port)) {
-      onStatus(`${service.name}: using existing service on port ${service.port}`);
-      this.emitLog(service.name, `using existing service on port ${service.port}`);
+      onStatus(
+        `${service.name}: using existing service on port ${service.port}`,
+      );
+      this.emitLog(
+        service.name,
+        `using existing service on port ${service.port}`,
+      );
       if (!this.canReuseExistingService(service)) {
         onStatus(`${service.name}: port ${service.port} is occupied`);
         this.emitLog(
@@ -341,7 +601,10 @@ export class ServiceManager {
           return;
         }
 
-        this.emitLog(service.name, `port ${service.port} is still occupied; looking for fallback`);
+        this.emitLog(
+          service.name,
+          `port ${service.port} is still occupied; looking for fallback`,
+        );
         await this.prepareFallbackPort(service, onStatus);
         await this.startOwnedService(service, onStatus);
         return;
@@ -358,7 +621,8 @@ export class ServiceManager {
           },
         );
         onStatus(`${service.name}: ready`);
-        service.reusedExistingService = service.port === DEFAULT_PORTS[service.name];
+        service.reusedExistingService =
+          service.port === DEFAULT_PORTS[service.name];
         if (service.reusedExistingService) {
           this.emitLog(
             service.name,
@@ -380,7 +644,10 @@ export class ServiceManager {
           return;
         }
 
-        this.emitLog(service.name, `port ${service.port} is still occupied; starting fallback`);
+        this.emitLog(
+          service.name,
+          `port ${service.port} is still occupied; starting fallback`,
+        );
         await this.prepareFallbackPort(service, onStatus);
       }
     }
@@ -396,11 +663,15 @@ export class ServiceManager {
       return false;
     }
 
-    onStatus(`${service.name}: stopping stale listener on port ${service.port}`);
+    onStatus(
+      `${service.name}: stopping stale listener on port ${service.port}`,
+    );
     await terminateProcessOnPort(service.port);
 
-    const closed = await waitForPortClosed(service.port, SHUTDOWN_TIMEOUT_MS, () =>
-      terminateProcessOnPort(service.port),
+    const closed = await waitForPortClosed(
+      service.port,
+      SHUTDOWN_TIMEOUT_MS,
+      () => terminateProcessOnPort(service.port),
     );
 
     if (closed) {
@@ -428,12 +699,7 @@ export class ServiceManager {
 
     const child = spawn(service.command, service.args, {
       cwd: service.cwd,
-      env: {
-        ...process.env,
-        ...service.env,
-        ...this.createServiceEnv(service),
-        FRONTEND_ORIGIN: FRONTEND_ORIGINS,
-      },
+      env: this.createProcessEnv(service),
       stdio: ["ignore", "pipe", "pipe"],
       windowsHide: true,
     });
@@ -485,6 +751,12 @@ export class ServiceManager {
     service: ManagedService,
     onStatus: (message: string) => void,
   ) {
+    if (service.name === "device-tool") {
+      throw new Error(
+        `device-tool must run on configured port ${DEFAULT_PORTS["device-tool"]}; release that port and start again`,
+      );
+    }
+
     const range = FALLBACK_PORTS[service.name];
     const fallbackPort = await findAvailablePort(range.start, range.end);
 
@@ -502,7 +774,9 @@ export class ServiceManager {
 
   private canReuseExistingService(service: ManagedService) {
     if (service.name === "backend") {
-      return this.getServicePort("device-tool") === DEFAULT_PORTS["device-tool"];
+      return (
+        this.getServicePort("device-tool") === DEFAULT_PORTS["device-tool"]
+      );
     }
 
     if (service.name === "frontend") {
@@ -540,15 +814,13 @@ export class ServiceManager {
     const deviceToolPort = this.getServicePort("device-tool");
 
     if (service.name === "device-tool") {
-      return {
-        API_PORT: String(service.port),
-        DEVICE_TOOL_PORT: String(service.port),
-      };
+      return {};
     }
 
     if (service.name === "backend") {
       return {
         BACKEND_PORT: String(service.port),
+        DESKTOP_INTERNAL_TOKEN: this.desktopInternalToken,
         DEVICE_TOOL_BASE_URL: `http://127.0.0.1:${deviceToolPort}`,
         DEVICE_TOOL_API_PREFIX,
       };
@@ -559,6 +831,83 @@ export class ServiceManager {
       NEXT_PUBLIC_API_BASE_URL: `http://127.0.0.1:${backendPort}/api`,
       PORT: String(service.port),
     };
+  }
+
+  private createProcessEnv(service: ManagedService) {
+    return {
+      ...process.env,
+      ...service.env,
+      ...this.createServiceEnv(service),
+      FRONTEND_ORIGIN: FRONTEND_ORIGINS,
+    };
+  }
+
+  private async ensureBackendMigrationsReady(
+    service: ManagedService,
+    onStatus: (message: string) => void,
+  ) {
+    if (this.backendMigrationsReady) {
+      return;
+    }
+
+    if (process.env.BACKEND_AUTO_MIGRATE === "false") {
+      this.emitLog(
+        "backend",
+        "database migration check skipped by BACKEND_AUTO_MIGRATE=false",
+      );
+      this.backendMigrationsReady = true;
+      this.updateStartupServiceStage("database", "skipped");
+      return;
+    }
+
+    if (!existsSync(join(service.cwd, "prisma", "schema.prisma"))) {
+      this.emitLog(
+        "backend",
+        "database migration check skipped; Prisma schema not found",
+      );
+      this.backendMigrationsReady = true;
+      this.updateStartupServiceStage("database", "skipped");
+      return;
+    }
+
+    onStatus("backend: checking database migrations");
+    this.updateStartupServiceStage("database", "running");
+    this.emitLog("backend", "checking database migrations");
+
+    const command = resolveNpmCommand([
+      "exec",
+      "--",
+      "prisma",
+      "migrate",
+      "deploy",
+    ]);
+    const result = spawnSync(command.command, command.args, {
+      cwd: service.cwd,
+      encoding: "utf8",
+      env: this.createProcessEnv(service),
+      timeout: BACKEND_MIGRATION_TIMEOUT_MS,
+      windowsHide: true,
+    });
+
+    this.emitSyncOutput("backend", result.stdout, "out");
+    this.emitSyncOutput("backend", result.stderr, "err");
+
+    if (result.error) {
+      throw new Error(
+        `backend database migration failed (${result.error.message})`,
+      );
+    }
+
+    if (result.status !== 0) {
+      throw new Error(
+        `backend database migration failed with code ${result.status ?? "unknown"}`,
+      );
+    }
+
+    this.backendMigrationsReady = true;
+    this.updateStartupServiceStage("database", "done");
+    onStatus("backend: database migrations ready");
+    this.emitLog("backend", "database migrations ready");
   }
 
   private getRuntimeRoot() {
@@ -599,6 +948,18 @@ export class ServiceManager {
     }
   }
 
+  private emitSyncOutput(
+    serviceName: LocalServiceName,
+    chunk: string | null,
+    stream: "err" | "out",
+  ) {
+    if (!chunk) {
+      return;
+    }
+
+    this.emitChunk(serviceName, chunk, stream);
+  }
+
   private emitLog(serviceName: LocalServiceName, message: string) {
     this.logListener?.(
       `[${new Date().toLocaleTimeString("en-GB", { hour12: false })}] [${serviceName}] ${message}`,
@@ -614,6 +975,10 @@ export class ServiceManager {
 
     if (service.name === "device-tool") {
       await this.stopDeviceToolRuntime(service);
+    }
+
+    if (service.name === "backend") {
+      await this.stopBackendRuntime(service);
     }
 
     const child = service.process;
@@ -642,8 +1007,10 @@ export class ServiceManager {
       await terminateProcessOnPort(service.port);
     }
 
-    const closed = await waitForPortClosed(service.port, SHUTDOWN_TIMEOUT_MS, () =>
-      terminateProcessOnPort(service.port),
+    const closed = await waitForPortClosed(
+      service.port,
+      SHUTDOWN_TIMEOUT_MS,
+      () => terminateProcessOnPort(service.port),
     );
 
     if (closed) {
@@ -651,7 +1018,10 @@ export class ServiceManager {
       this.emitLog(service.name, "stopped");
     } else {
       onStatus(`${service.name}: port ${service.port} is still open`);
-      this.emitLog(service.name, `port ${service.port} is still open after shutdown`);
+      this.emitLog(
+        service.name,
+        `port ${service.port} is still open after shutdown`,
+      );
     }
 
     service.startedByApp = false;
@@ -672,6 +1042,62 @@ export class ServiceManager {
         // Device cleanup is best-effort; process shutdown below is the fallback.
       }
     }
+  }
+
+  private async stopBackendRuntime(service: ManagedService) {
+    try {
+      await fetch(
+        `http://127.0.0.1:${service.port}/api/internal/plc-runtime/shutdown`,
+        {
+          method: "POST",
+          headers: {
+            "x-desktop-internal-token": this.desktopInternalToken,
+          },
+          signal: AbortSignal.timeout(10_000),
+        },
+      );
+    } catch {
+      // Nest lifecycle shutdown remains the fallback for non-desktop runtimes.
+    }
+  }
+
+  private async requestBackendStartupStage(
+    path: string,
+    body?: Record<string, string>,
+  ) {
+    const response = await fetch(
+      `http://127.0.0.1:${this.getServicePort("backend")}/api/internal/plc-runtime/${path}`,
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-desktop-internal-token": this.desktopInternalToken,
+        },
+        body: JSON.stringify(body ?? {}),
+        signal: AbortSignal.timeout(25_000),
+      },
+    );
+    if (!response.ok) {
+      throw new Error((await response.text()) || `${response.status}`);
+    }
+    const payload = (await response.json()) as {
+      data?: {
+        status?: "done" | "skipped";
+        checks?: StartupStageDetail[];
+      };
+    };
+    return {
+      status: payload.data?.status ?? "done",
+      details: payload.data?.checks,
+    };
+  }
+
+  private updateStartupServiceStage(
+    id: StartupServiceStageId,
+    status: StartupStageStatus,
+  ) {
+    this.startupServiceStages.set(id, status);
+    this.startupStageListener?.({ id, status });
   }
 
   private async getDeviceToolCleanupUrls(baseUrl: string) {
@@ -875,6 +1301,35 @@ function resolveToolPython(repoRoot: string) {
   }
 
   return { command: "py", args: ["-3.11"] };
+}
+
+function resolveDeviceToolCommand(
+  repoRoot: string,
+  toolPython: { args: string[]; command: string },
+  port: number,
+): ServiceCommand {
+  const toolPath = join(repoRoot, "tool");
+
+  if (port === 8668) {
+    return {
+      command: toolPython.command,
+      args: [...toolPython.args, "main.py"],
+      cwd: toolPath,
+    };
+  }
+
+  const launchScript = [
+    "import os",
+    "os.environ.setdefault('DEVICE_API_HOME', os.getcwd())",
+    "import uvicorn",
+    `uvicorn.run('api.app:app', host='0.0.0.0', port=${port}, log_level='info', ws_ping_interval=None, ws_ping_timeout=None, ws_per_message_deflate=False)`,
+  ].join("; ");
+
+  return {
+    command: toolPython.command,
+    args: [...toolPython.args, "-c", launchScript],
+    cwd: toolPath,
+  };
 }
 
 function canRun(command: string, args: string[]) {

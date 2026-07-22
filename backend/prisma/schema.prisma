@@ -35,6 +35,31 @@ enum TestSessionImageResult {
   ERROR
 }
 
+enum LineResultSavePolicy {
+  all
+  ok
+  ng
+  none
+}
+
+enum LineSessionEndReason {
+  line_stop
+  product_change
+  plc_stop
+  app_shutdown
+}
+
+enum PlcProtocol {
+  modbus_tcp
+  slmp
+}
+
+enum PlcKeyOperation {
+  watch_boolean
+  write_boolean
+  pulse
+}
+
 model User {
   id             String           @id @default(cuid())
   username       String           @unique
@@ -104,7 +129,7 @@ model Product {
   thresholdMns    Decimal  @default(0.5) @db.Decimal(4, 2)
   rowThreshold    Int      @default(20)
   modelPath       String?
-  rotateTestImageClockwise Boolean @default(false)
+  rotateTestImageClockwise Boolean @default(true)
   active          Boolean  @default(true)
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
@@ -145,7 +170,7 @@ model CameraConfig {
   zoomFactor Decimal  @default(0.4) @db.Decimal(4, 2)
   previewPanX Decimal @default(0) @db.Decimal(6, 4)
   previewPanY Decimal @default(0) @db.Decimal(6, 4)
-  previewRotation Decimal @default(90) @db.Decimal(6, 2)
+  previewRotation Decimal @default(0) @db.Decimal(6, 2)
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
   product    Product? @relation(fields: [productId], references: [id], onDelete: Cascade)
@@ -169,22 +194,29 @@ model RoiRegion {
 }
 
 model InspectionJob {
-  id          String           @id @default(cuid())
-  productId   String
-  operatorId  String
-  status      InspectionStatus @default(pending)
-  startedAt   DateTime?
-  stoppedAt   DateTime?
-  note        String?
-  createdAt   DateTime         @default(now())
-  updatedAt   DateTime         @updatedAt
-  operator    User             @relation(fields: [operatorId], references: [id])
-  logs        InspectionLog[]
+  id                      String                @id @default(cuid())
+  productId               String
+  operatorId              String
+  status                  InspectionStatus      @default(pending)
+  startedAt               DateTime?
+  stoppedAt               DateTime?
+  endReason               LineSessionEndReason?
+  note                    String?
+  resultSaveFolderPath    String?
+  resultSavePolicy        LineResultSavePolicy?
+  resultSessionFolderName String?
+  resultSavedAt           DateTime?
+  resultSaveError         String?
+  createdAt               DateTime              @default(now())
+  updatedAt               DateTime              @updatedAt
+  operator                User                  @relation(fields: [operatorId], references: [id])
+  logs                    InspectionLog[]
 }
 
 model InspectionLog {
   id           String           @id @default(cuid())
   jobId        String
+  plcCaptureId String?
   slotIndex    Int?
   slotLabel    String?
   expectedText String?
@@ -196,6 +228,8 @@ model InspectionLog {
   errorMessage String?
   capturedAt   DateTime         @default(now())
   job          InspectionJob    @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  @@index([plcCaptureId])
 }
 
 model AuditLog {
@@ -214,6 +248,54 @@ model LicenseLog {
   code      String?
   message   String?
   createdAt DateTime @default(now())
+}
+
+model LineResultSettings {
+  id                          String               @id @default("default")
+  saveFolderPath              String?
+  savePolicy                  LineResultSavePolicy @default(all)
+  saveBySession               Boolean              @default(true)
+  newSessionOnLineStop        Boolean              @default(true)
+  newSessionOnProductChange   Boolean              @default(true)
+  createdAt                   DateTime             @default(now())
+  updatedAt                   DateTime             @updatedAt
+}
+
+model PlcConfig {
+  id                    String         @id @default("default")
+  ipAddress             String
+  protocol              PlcProtocol    @default(modbus_tcp)
+  port                  Int            @default(502)
+  captureTriggerAddress Int?
+  stopTriggerAddress    Int?
+  startTriggerAddress   Int?
+  cameraPowerAddress    Int?
+  cameraLightAddress    Int?
+  errorPulseAddress     Int?
+  okResultAddress       Int?
+  waitingCheckingAddress Int?
+  errorPulseDurationMs  Int            @default(500)
+  okPulseDurationMs     Int            @default(500)
+  inactivityTimeoutEnabled Boolean     @default(true)
+  sleepTimeSeconds      Int            @default(300)
+  createdAt             DateTime       @default(now())
+  updatedAt             DateTime       @updatedAt
+  customKeys            PlcCustomKey[]
+}
+
+model PlcCustomKey {
+  id        String          @id @default(cuid())
+  configId  String
+  name      String
+  address   Int
+  operation PlcKeyOperation
+  enabled   Boolean         @default(true)
+  createdAt DateTime        @default(now())
+  updatedAt DateTime        @updatedAt
+  config    PlcConfig       @relation(fields: [configId], references: [id], onDelete: Cascade)
+
+  @@unique([configId, name])
+  @@index([configId, address])
 }
 
 model TestSessionReport {

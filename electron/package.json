@@ -1,13 +1,14 @@
 {
   "name": "@ocr/electron",
-  "version": "0.1.0",
+  "version": "1.1.0",
   "description": "Desktop shell for the AHSO OCR local station.",
   "author": "AHSO",
   "private": true,
   "main": "dist/main.js",
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "dist:win": "npm run build && electron-builder --win nsis --x64",
+    "dist:win": "npm run build && electron-builder --win nsis --x64 --publish never",
+    "dist:win:publish": "npm run build && electron-builder --win nsis --x64 --publish always",
     "dev": "powershell -ExecutionPolicy Bypass -File ../scripts/dev/ensure-tool-python.ps1 && npm run build && node scripts/launch-electron.cjs",
     "lint": "eslint \"src/**/*.ts\"",
     "typecheck": "tsc -p tsconfig.json --noEmit"
@@ -42,12 +43,18 @@
         "to": "installer",
         "filter": [
           "**/*.ps1",
+          "**/*.json",
           "**/*.md"
         ]
+      },
+      {
+        "from": "../shared/logo/applogo.ico",
+        "to": "logo/applogo.ico"
       }
     ],
     "asar": true,
     "win": {
+      "icon": "../shared/logo/applogo.ico",
       "target": [
         {
           "target": "nsis",
@@ -66,6 +73,8 @@
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
       "runAfterFinish": true,
+      "installerIcon": "../shared/logo/applogo.ico",
+      "uninstallerIcon": "../shared/logo/applogo.ico",
       "include": "../build/installer.nsh"
     },
     "publish": [

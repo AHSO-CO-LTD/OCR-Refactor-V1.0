@@ -15,6 +15,7 @@ import {
   RoiRegionDto,
 } from './dto/product-profile.dto';
 import { UpdateProductBatchSizeDto } from './dto/update-product-batch-size.dto';
+import { UpdateProductAiSettingsDto } from './dto/update-product-ai-settings.dto';
 import { UpdateProductProfileDto } from './dto/update-product-profile.dto';
 
 const defaultCamera: CameraProfileDto = {
@@ -29,7 +30,7 @@ const defaultCamera: CameraProfileDto = {
   zoomFactor: 0.4,
   previewPanX: 0,
   previewPanY: 0,
-  previewRotation: 90,
+  previewRotation: 0,
 };
 
 const productInclude = {
@@ -69,7 +70,7 @@ export class ProductsService {
         thresholdMns: dto.thresholdMns,
         rowThreshold: dto.rowThreshold ?? 20,
         modelPath: dto.modelPath || null,
-        rotateTestImageClockwise: dto.rotateTestImageClockwise ?? false,
+        rotateTestImageClockwise: dto.rotateTestImageClockwise ?? true,
         active: dto.active,
         cameraConfig: { create: this.toCameraData(dto.camera) },
         roiRegions: {
@@ -160,6 +161,42 @@ export class ProductsService {
     return { data: { success: true } };
   }
 
+  async updateProductRoiRegions(id: string, roiRegions: RoiRegionDto[]) {
+    const existingProduct = await this.prisma.product.findUnique({
+      where: { id },
+      select: { id: true },
+    });
+
+    if (!existingProduct) {
+      throw new NotFoundException('Product not found');
+    }
+
+    this.ensureValidRoiRegions(roiRegions);
+
+    if (
+      roiRegions.some((region) => region.width !== 300 || region.height !== 440)
+    ) {
+      throw new BadRequestException('ROI size must be exactly 300 x 440');
+    }
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.roiRegion.deleteMany({ where: { productId: id } });
+      await tx.roiRegion.createMany({
+        data: roiRegions.map((region) => ({
+          productId: id,
+          ...this.toRoiData(region),
+        })),
+      });
+    });
+
+    const product = await this.prisma.product.findUniqueOrThrow({
+      where: { id },
+      include: productInclude,
+    });
+
+    return { data: this.toProductProfile(product) };
+  }
+
   async updateProductBatchSize(id: string, dto: UpdateProductBatchSizeDto) {
     const existingProduct = await this.prisma.product.findUnique({
       where: { id },
@@ -246,11 +283,45 @@ export class ProductsService {
       data: {
         thresholdAccept: dto.thresholdAccept,
         thresholdMns: dto.thresholdMns,
-        rowThreshold: dto.rowThreshold,
+        ...(dto.rowThreshold !== undefined
+          ? { rowThreshold: dto.rowThreshold }
+          : {}),
       },
     });
 
     return { data: { updatedCount: result.count } };
+  }
+
+  async updateProductAiSettings(id: string, dto: UpdateProductAiSettingsDto) {
+    const existingProduct = await this.prisma.product.findUnique({
+      where: { id },
+      select: { id: true },
+    });
+
+    if (!existingProduct) {
+      throw new NotFoundException('Product not found');
+    }
+
+    const product = await this.prisma.product.update({
+      where: { id },
+      data: {
+        ...(dto.modelPath !== undefined
+          ? { modelPath: dto.modelPath?.trim() || null }
+          : {}),
+        ...(dto.thresholdAccept !== undefined
+          ? { thresholdAccept: dto.thresholdAccept }
+          : {}),
+        ...(dto.thresholdMns !== undefined
+          ? { thresholdMns: dto.thresholdMns }
+          : {}),
+        ...(dto.rowThreshold !== undefined
+          ? { rowThreshold: dto.rowThreshold }
+          : {}),
+      },
+      include: productInclude,
+    });
+
+    return { data: this.toProductProfile(product) };
   }
 
   async applyProductProfile(dto: ApplyProductProfileDto) {

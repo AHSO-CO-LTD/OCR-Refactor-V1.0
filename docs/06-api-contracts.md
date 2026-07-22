@@ -27,7 +27,7 @@ Recommended local defaults:
 ```text
 Frontend: http://localhost:3969
 Backend:  http://localhost:3979/api
-Tool:     http://localhost:8000/tool/v1
+Tool:     http://localhost:8668/tool/v1
 ```
 
 These ports can change later, but the responsibility split should stay the same.
@@ -67,6 +67,7 @@ type RoleCode = "dev" | "admin" | "engineer" | "operator";
 
 ```ts
 type PermissionKey =
+  | "dashboard.view"
   | "user.manage"
   | "role.manage"
   | "permission.manage"
@@ -153,6 +154,14 @@ Response:
   }
 }
 ```
+
+### Restore Remembered Session
+
+```http
+GET /auth/restore
+```
+
+Uses the same bearer token response shape as `GET /auth/me`, but is reserved for startup auto-login. It rejects dongle mock mode and succeeds only after a real physical dongle check returns `DONGLE_OK`. PLC and camera state are not part of this authentication decision.
 
 ### Logout
 
@@ -332,7 +341,7 @@ Response:
       "thresholdAccept": 0.5,
       "thresholdMns": 0.5,
       "modelPath": "models/SL-40_150_0.998.pt",
-      "rotateTestImageClockwise": false,
+      "rotateTestImageClockwise": true,
       "active": true,
       "camera": {
         "sourceType": "usb",
@@ -372,7 +381,7 @@ Request:
   "thresholdAccept": 0.5,
   "thresholdMns": 0.5,
   "modelPath": "models/SL-40_150_0.998.pt",
-  "rotateTestImageClockwise": false,
+  "rotateTestImageClockwise": true,
   "active": true,
   "camera": {
     "sourceType": "usb",
@@ -398,9 +407,30 @@ Request:
 PATCH /products/:id
 ```
 
-### Update OCR Test Settings
+### Update Product AI Settings
 
-Only `dev` can update these test-only OCR settings.
+The Configuration screen keeps model and OCR tuning separate from basic
+product data. `rowThreshold` is accepted only for the `dev` role.
+
+```http
+PATCH /products/:id/ai-settings
+```
+
+```json
+{
+  "modelPath": "models/SL-40.pt",
+  "thresholdAccept": 0.5,
+  "thresholdMns": 0.5,
+  "rowThreshold": 20
+}
+```
+
+Every field is optional so the client can update the model path without
+overwriting thresholds, or update thresholds without changing the model.
+
+### Update Line OCR Crop Rotation Settings
+
+Only `dev` can update this OCR crop rotation setting. It is applied to the real line inspection flow, Camera AI flow, and line validation tools. New product profiles default `rotateTestImageClockwise` to `true`, so future products rotate the ROI crop before OCR unless explicitly changed.
 
 ```http
 PATCH /products/:id/ocr-test-settings
@@ -701,6 +731,67 @@ POST /system/shutdown
 ```
 
 This endpoint must require a high-level permission such as `system.shutdown`.
+
+## Product XLSX Import
+
+```http
+GET /products/import/template?language=vi
+POST /products/import
+```
+
+- Template là XLSX chỉ có hai cột `Mã sản phẩm` và `Link model`.
+- Upload dùng `multipart/form-data`, field `file`, tối đa 5 MB và chỉ nhận `.xlsx`.
+- Mã mới tạo sản phẩm với tên bằng mã và các thông số mặc định; mã đã tồn tại cập nhật link model.
+- Yêu cầu quyền `product.manage`.
+
+## Machine Runtime Controls
+
+```http
+GET /plc/machine/status
+GET /plc/machine/frame
+GET /plc/machine/inactivity-settings
+PATCH /plc/machine/controls
+PATCH /plc/machine/test-mode
+PATCH /plc/machine/test-output
+PUT /plc/machine/inactivity-settings
+POST /plc/machine/activity
+POST /plc/machine/test-result-pulse
+POST /plc/machine/grab
+```
+
+`PATCH /plc/machine/controls` accepts any subset of:
+
+```json
+{
+  "mode": "manual",
+  "liveCameraEnabled": true,
+  "realtimeAiEnabled": false
+}
+```
+
+- `mode` is `manual` or `auto`.
+- `machine/grab` is rejected as an action in Auto and never emits a PLC result pulse.
+- `machine/frame` returns the latest frame captured by runtime plus its sequence; the frontend fetches it only when the sequence changes.
+- `machine/status` exposes the three controls, `cameraFrameSequence`, `testModeActive`, and `testOutputEnabled` with the existing machine state.
+- `machine/inactivity-settings` stores whether automatic inactivity pause is enabled and its timeout in seconds. Defaults are enabled and `300` seconds. Only `admin` and `dev` can read or update this settings screen contract.
+- `machine/activity` records authenticated interaction from the renderer. App scroll, wheel, pointer, touch, keyboard, and focus activity is throttled client-side and resets the inactivity timer only while the machine is running.
+- A PLC capture edge and a manual Grab attempt reset inactivity immediately when received, even if the current mode, AI state, live-camera state, or an in-progress capture causes the inspection action itself to be ignored.
+- `machine/test-mode` acquires or renews a short-lived isolated test lease by `clientId`. While any lease is active, PLC capture triggers remain observable by test screens but do not execute the production machine-runtime latch or result pulse.
+- `machine/test-output` enables or disables only the `OK`/`NG` result pulses for that test lease. The yellow waiting/checking output turns on automatically while either test page is active, independent of this option. When result pulses are enabled, an `OK` or `NG` result turns the yellow output off, emits the configured result pulse for its own `okPulseDurationMs` or `errorPulseDurationMs`, then restores the yellow output as soon as that pulse completes. `UNKNOWN` and test errors keep the yellow output on and emit no result pulse.
+- `machine/test-result-pulse` accepts the active test `clientId` plus `result: "OK" | "NG"` and emits exactly the requested configured PLC pulse. `UNKNOWN` and test errors are never accepted as pulse results. Releasing or losing the final test lease restores the production waiting/checking output according to the machine runtime state.
+- Test-screen PLC output is disabled by default in the frontend and is never persisted across page visits.
+
+## Line Operation Reports
+
+```http
+GET /inspections/line-reports/summary?from=<ISO>&to=<ISO>&groupBy=day|month|year
+GET /inspections/line-reports/export?from=<ISO>&to=<ISO>&groupBy=day|month|year
+```
+
+- Dữ liệu lấy từ các snapshot được PLC chốt trong session Line thực tế.
+- Endpoint `summary` trả tổng session, kết quả OK/NG/UNKNOWN, ROI và thống kê theo kỳ.
+- Endpoint `export` tải file XLSX gồm Summary, Statistics, Results và ROI details.
+- Yêu cầu quyền `report.view`.
 
 ## Backend To Device/OCR Tool Contract
 

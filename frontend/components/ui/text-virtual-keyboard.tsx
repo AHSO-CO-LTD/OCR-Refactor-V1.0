@@ -127,6 +127,14 @@ export function TextVirtualKeyboard({
         layoutName={layoutName}
         display={display}
         mergeDisplay
+        buttonTheme={[
+          {
+            class: "vk-key--function",
+            buttons: "{shift} {symbols} {abc} {bksp}",
+          },
+          { class: "vk-key--space", buttons: "{space}" },
+          { class: "vk-key--enter", buttons: "{enter}" },
+        ]}
         useButtonTag
         preventMouseDownDefault
         stopMouseDownPropagation

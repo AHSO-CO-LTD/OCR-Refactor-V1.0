@@ -24,11 +24,12 @@ export class BulkUpdateProductAiSettingsDto {
   @Max(1)
   thresholdMns!: number;
 
-  @ApiProperty({ example: 20 })
+  @ApiPropertyOptional({ example: 20 })
+  @IsOptional()
   @IsInt()
   @Min(0)
   @Max(500)
-  rowThreshold!: number;
+  rowThreshold?: number;
 
   @ApiProperty({ example: false })
   @IsBoolean()

@@ -40,4 +40,10 @@ export class CreateInitialAdminDto {
   @IsString()
   @MaxLength(40)
   employeeNo?: string;
+
+  @ApiProperty({ example: 'C:\\OCR\\LineResults' })
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(500)
+  lineResultSaveFolderPath!: string;
 }

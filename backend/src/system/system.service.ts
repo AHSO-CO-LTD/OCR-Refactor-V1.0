@@ -60,6 +60,16 @@ export class SystemService {
     return true;
   }
 
+  async assertAutoLoginAllowed() {
+    const response = await this.checkLicenseStatus();
+
+    return (
+      response.data.licensed === true &&
+      response.data.donglePresent === true &&
+      response.data.code === 'DONGLE_OK'
+    );
+  }
+
   async getLicenseStatus() {
     const latestLog = await this.prisma.licenseLog.findFirst({
       orderBy: { createdAt: 'desc' },

@@ -1,3 +1,8 @@
+!macro AhsoCreateReadOnlyScrollBox X Y W H OUTVAR
+  nsDialogs::CreateControl EDIT 0x54000000|0x00010000|0x00200000|0x0004|0x0040|0x0800 0x00000200 ${X} ${Y} ${W} ${H} ""
+  Pop ${OUTVAR}
+!macroend
+
 !ifndef BUILD_UNINSTALLER
 !include nsDialogs.nsh
 !include LogicLib.nsh
@@ -25,12 +30,175 @@ Var DbConfigPath
 Var DbProbeStatusPath
 Var DbScanState
 Var DbScanMessage
+Var EnvPreflightStatusPath
+Var EnvPreflightState
+Var EnvPreflightMessage
+Var EnvPreflightSummary
+Var EnvPreflightNode
+Var EnvPreflightPython
+Var EnvPreflightPostgresql
+Var EnvPreflightPostgresAdminPassword
+Var EnvPreflightMode
+Var EnvPreflightMissingCount
+Var EnvPreflightMissingList
+Var EnvPreflightTitleLabel
+Var EnvPreflightBodyLabel
+Var EnvPreflightStatusBox
+Var EnvPreflightActionLabel
+Var EnvPreflightRecheckButton
 
 !macro customPageAfterChangeDir
+  Page custom EnvPreflightIntroPageCreate EnvPreflightIntroPageLeave
+  Page custom EnvPreflightReadyPageCreate EnvPreflightReadyPageLeave
   Page custom DbTargetPageCreate DbTargetPageLeave
   Page custom DbAdminProbePageCreate DbAdminProbePageLeave
   Page custom DbCredentialPageCreate DbCredentialPageLeave
 !macroend
+
+Function EnsureEnvironmentPreflightFiles
+  InitPluginsDir
+  SetOutPath "$PLUGINSDIR"
+  File /oname=preflight-environment.ps1 "${PROJECT_DIR}\..\scripts\release\preflight-environment.ps1"
+  File /oname=online-runtime-manifest.json "${PROJECT_DIR}\..\scripts\release\online-runtime-manifest.json"
+FunctionEnd
+
+Function RunEnvironmentPreflight
+  InitPluginsDir
+  Call EnsureEnvironmentPreflightFiles
+  ${If} $EnvPreflightMode == ""
+    StrCpy $EnvPreflightMode "install"
+  ${EndIf}
+  StrCpy $EnvPreflightStatusPath "$PLUGINSDIR\environment-preflight.ini"
+  Delete "$EnvPreflightStatusPath"
+  ExecWait '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File "$PLUGINSDIR\preflight-environment.ps1" -StatusPath "$EnvPreflightStatusPath" -ManifestPath "$PLUGINSDIR\online-runtime-manifest.json" -Mode "$EnvPreflightMode"' $0
+  ReadINIStr $EnvPreflightState "$EnvPreflightStatusPath" "environment" "state"
+  ReadINIStr $EnvPreflightMessage "$EnvPreflightStatusPath" "environment" "message"
+  ReadINIStr $EnvPreflightSummary "$EnvPreflightStatusPath" "environment" "summary"
+  ReadINIStr $EnvPreflightNode "$EnvPreflightStatusPath" "environment" "node"
+  ReadINIStr $EnvPreflightPython "$EnvPreflightStatusPath" "environment" "python"
+  ReadINIStr $EnvPreflightPostgresql "$EnvPreflightStatusPath" "environment" "postgresql"
+  ReadINIStr $EnvPreflightPostgresAdminPassword "$EnvPreflightStatusPath" "environment" "postgresAdminPassword"
+  ReadINIStr $EnvPreflightMissingCount "$EnvPreflightStatusPath" "environment" "missingCount"
+  ReadINIStr $EnvPreflightMissingList "$EnvPreflightStatusPath" "environment" "missingList"
+
+  ${If} $EnvPreflightMessage == ""
+    StrCpy $EnvPreflightMessage "Environment preflight returned code $0. No detail was returned."
+  ${EndIf}
+
+  ${If} $0 == 20
+    MessageBox MB_ICONEXCLAMATION|MB_OK "Setup requires an internet connection to download missing runtime components.$\r$\n$\r$\nConnect this PC to the internet, then run setup again."
+    Quit
+  ${EndIf}
+
+  ${If} $0 != 0
+    MessageBox MB_ICONEXCLAMATION|MB_OK "Environment setup failed.$\r$\n$\r$\n$EnvPreflightMessage$\r$\n$\r$\nOpen C:\ProgramData\AHSO OCR\preflight-environment.log for details."
+    Abort
+  ${EndIf}
+
+  ${If} $EnvPreflightPostgresAdminPassword != ""
+    StrCpy $DbAdminPassword "$EnvPreflightPostgresAdminPassword"
+  ${EndIf}
+FunctionEnd
+
+Function EnvPreflightIntroPageCreate
+  nsDialogs::Create 1018
+  Pop $0
+  ${If} $0 == error
+    Abort
+  ${EndIf}
+
+  ${NSD_CreateLabel} 0u 0u 300u 24u "Step 1: check required runtime frameworks."
+  Pop $0
+
+  !insertmacro AhsoCreateReadOnlyScrollBox 0u 32u 300u 62u $0
+  ${NSD_SetText} $0 "Setup will scan this PC for Node.js, npm, and PostgreSQL first. Python 3.11 is already bundled with the encrypted Device Tool. If anything else is missing, you can install it manually and check again, or click Next to let setup download and install it automatically."
+
+  ${NSD_CreateLabel} 0u 104u 300u 32u "Click Next to scan the environment before the actual OCR database setup starts."
+  Pop $0
+
+  nsDialogs::Show
+FunctionEnd
+
+Function EnvPreflightIntroPageLeave
+  StrCpy $EnvPreflightMode "scan"
+  Call RunEnvironmentPreflight
+FunctionEnd
+
+Function EnvPreflightReadyPageCreate
+  ${If} $EnvPreflightState == ""
+    Abort
+  ${EndIf}
+
+  nsDialogs::Create 1018
+  Pop $0
+  ${If} $0 == error
+    Abort
+  ${EndIf}
+
+  ${NSD_CreateLabel} 0u 0u 300u 22u ""
+  Pop $EnvPreflightTitleLabel
+
+  !insertmacro AhsoCreateReadOnlyScrollBox 0u 28u 300u 44u $EnvPreflightBodyLabel
+
+  !insertmacro AhsoCreateReadOnlyScrollBox 0u 80u 300u 48u $EnvPreflightStatusBox
+
+  ${NSD_CreateLabel} 0u 138u 196u 30u ""
+  Pop $EnvPreflightActionLabel
+
+  ${NSD_CreateButton} 210u 140u 80u 16u "Check again"
+  Pop $EnvPreflightRecheckButton
+  ${NSD_OnClick} $EnvPreflightRecheckButton EnvPreflightRecheckClicked
+
+  Call RefreshEnvironmentPreflightReview
+
+  nsDialogs::Show
+FunctionEnd
+
+Function EnvPreflightReadyPageLeave
+  ${If} $EnvPreflightState == "ready"
+    Return
+  ${EndIf}
+
+  ${If} $EnvPreflightState == "missing"
+    StrCpy $EnvPreflightMode "install"
+    Call RunEnvironmentPreflight
+    Call RefreshEnvironmentPreflightReview
+    ${If} $EnvPreflightState == "ready"
+      Abort
+    ${EndIf}
+  ${EndIf}
+
+  MessageBox MB_ICONEXCLAMATION|MB_OK "Environment setup did not finish successfully.$\r$\n$\r$\n$EnvPreflightMessage"
+  Abort
+FunctionEnd
+
+Function RefreshEnvironmentPreflightReview
+  ${NSD_SetText} $EnvPreflightStatusBox "Node.js: $EnvPreflightNode$\r$\nPython: $EnvPreflightPython$\r$\nPostgreSQL: $EnvPreflightPostgresql"
+
+  ${If} $EnvPreflightState == "ready"
+    ${NSD_SetText} $EnvPreflightTitleLabel "All required frameworks are ready."
+    ${NSD_SetText} $EnvPreflightBodyLabel "This PC already has all required runtime frameworks for AHSO OCR. Click Next to continue to the actual OCR database setup."
+    ${NSD_SetText} $EnvPreflightActionLabel "You can check again if you changed the environment."
+    Return
+  ${EndIf}
+
+  ${If} $EnvPreflightState == "missing"
+    ${NSD_SetText} $EnvPreflightTitleLabel "Missing runtime frameworks found."
+    ${NSD_SetText} $EnvPreflightBodyLabel "Missing: $EnvPreflightMissingList$\r$\nInstall them manually and click Check again, or click Next to let setup download and install them automatically."
+    ${NSD_SetText} $EnvPreflightActionLabel "Manual install done? Click Check again before continuing."
+    Return
+  ${EndIf}
+
+  ${NSD_SetText} $EnvPreflightTitleLabel "Environment check needs attention."
+  ${NSD_SetText} $EnvPreflightBodyLabel "$EnvPreflightMessage"
+  ${NSD_SetText} $EnvPreflightActionLabel "Check the setup log, then try again."
+FunctionEnd
+
+Function EnvPreflightRecheckClicked
+  StrCpy $EnvPreflightMode "scan"
+  Call RunEnvironmentPreflight
+  Call RefreshEnvironmentPreflightReview
+FunctionEnd
 
 Function InitDatabaseDefaults
   ${If} $DbHost == ""
@@ -97,7 +265,7 @@ Function DbTargetPageCreate
     Abort
   ${EndIf}
 
-  ${NSD_CreateLabel} 0u 0u 300u 20u "Step 1: enter the PostgreSQL target. Setup will scan this database before asking for passwords."
+  ${NSD_CreateLabel} 0u 0u 300u 20u "Step 2: enter the PostgreSQL target. Setup will scan this database before asking for passwords."
   Pop $0
 
   ${NSD_CreateLabel} 0u 28u 90u 12u "Host"
@@ -119,8 +287,8 @@ Function DbTargetPageCreate
   ${NSD_CreateText} 95u 70u 180u 12u "$DbUser"
   Pop $DbUserInput
 
-  ${NSD_CreateLabel} 0u 98u 300u 28u "If this database exists, setup will let you choose another database name or delete and recreate it."
-  Pop $0
+  !insertmacro AhsoCreateReadOnlyScrollBox 0u 98u 300u 32u $0
+  ${NSD_SetText} $0 "If this database exists, setup will let you choose another database name or delete and recreate it."
 
   nsDialogs::Show
 FunctionEnd
@@ -166,8 +334,8 @@ Function DbAdminProbePageCreate
     Abort
   ${EndIf}
 
-  ${NSD_CreateLabel} 0u 0u 300u 26u "Setup could not scan the database without PostgreSQL admin access. Enter admin credentials to check whether the DB exists."
-  Pop $0
+  !insertmacro AhsoCreateReadOnlyScrollBox 0u 0u 300u 28u $0
+  ${NSD_SetText} $0 "Setup could not scan the database without PostgreSQL admin access. Enter admin credentials to check whether the DB exists."
 
   ${NSD_CreateLabel} 0u 34u 90u 12u "Admin user"
   Pop $0
@@ -179,8 +347,8 @@ Function DbAdminProbePageCreate
   ${NSD_CreatePassword} 95u 54u 180u 12u "$DbAdminPassword"
   Pop $DbAdminPasswordInput
 
-  ${NSD_CreateLabel} 0u 82u 300u 34u "Last scan result: $DbScanMessage"
-  Pop $0
+  !insertmacro AhsoCreateReadOnlyScrollBox 0u 82u 300u 46u $0
+  ${NSD_SetText} $0 "Last scan result:$\r$\n$DbScanMessage"
 
   nsDialogs::Show
 FunctionEnd
@@ -214,8 +382,8 @@ Function DbCredentialPageCreate
   ${EndIf}
 
   ${If} $DbScanState == "exists"
-    ${NSD_CreateLabel} 0u 0u 300u 24u "Database '$DbName' already exists. Choose how setup should continue."
-    Pop $0
+    !insertmacro AhsoCreateReadOnlyScrollBox 0u 0u 300u 24u $0
+    ${NSD_SetText} $0 "Database '$DbName' already exists. Choose how setup should continue."
 
     ${NSD_CreateRadioButton} 0u 30u 300u 12u "Use a different database name"
     Pop $DbExistsRenameRadio
@@ -226,50 +394,47 @@ Function DbCredentialPageCreate
     ${NSD_CreateText} 105u 49u 170u 12u "$DbName_new"
     Pop $DbRenameInput
 
-    ${NSD_CreateRadioButton} 0u 76u 300u 12u "Delete existing '$DbName' and create a clean database"
+    ${NSD_CreateRadioButton} 0u 62u 300u 12u "Delete existing '$DbName' and create a clean database"
     Pop $DbExistsRecreateRadio
 
-    ${NSD_CreateLabel} 14u 96u 280u 20u "This permanently removes the selected database before migrations run."
-    Pop $0
+    !insertmacro AhsoCreateReadOnlyScrollBox 14u 80u 280u 26u $0
+    ${NSD_SetText} $0 "This permanently removes the selected database before migrations run.$\r$\nLeave app DB password empty to let setup generate one automatically."
 
-    ${NSD_CreateLabel} 0u 124u 90u 12u "Admin user"
+    ${NSD_CreateLabel} 0u 114u 90u 12u "Admin user"
     Pop $0
-    ${NSD_CreateText} 95u 122u 180u 12u "$DbAdminUser"
+    ${NSD_CreateText} 95u 112u 180u 12u "$DbAdminUser"
     Pop $DbAdminUserInput
 
-    ${NSD_CreateLabel} 0u 146u 90u 12u "Admin password"
+    ${NSD_CreateLabel} 0u 136u 90u 12u "Admin password"
     Pop $0
-    ${NSD_CreatePassword} 95u 144u 180u 12u "$DbAdminPassword"
+    ${NSD_CreatePassword} 95u 134u 180u 12u "$DbAdminPassword"
     Pop $DbAdminPasswordInput
 
-    ${NSD_CreateLabel} 0u 168u 90u 12u "App DB password"
+    ${NSD_CreateLabel} 0u 158u 90u 12u "App DB password"
     Pop $0
-    ${NSD_CreatePassword} 95u 166u 180u 12u "$DbPassword"
+    ${NSD_CreatePassword} 95u 156u 180u 12u "$DbPassword"
     Pop $DbPasswordInput
-
-    ${NSD_CreateLabel} 0u 190u 300u 18u "Leave app DB password empty to let setup generate one automatically."
-    Pop $0
   ${Else}
-    ${NSD_CreateLabel} 0u 0u 300u 28u "Database '$DbName' does not exist. Setup will create it with PostgreSQL admin access."
-    Pop $0
+    !insertmacro AhsoCreateReadOnlyScrollBox 0u 0u 300u 32u $0
+    ${NSD_SetText} $0 "Database '$DbName' does not exist. Setup will create it with PostgreSQL admin access."
 
-    ${NSD_CreateLabel} 0u 38u 90u 12u "Admin user"
+    ${NSD_CreateLabel} 0u 44u 90u 12u "Admin user"
     Pop $0
-    ${NSD_CreateText} 95u 36u 180u 12u "$DbAdminUser"
+    ${NSD_CreateText} 95u 42u 180u 12u "$DbAdminUser"
     Pop $DbAdminUserInput
 
-    ${NSD_CreateLabel} 0u 60u 90u 12u "Admin password"
+    ${NSD_CreateLabel} 0u 66u 90u 12u "Admin password"
     Pop $0
-    ${NSD_CreatePassword} 95u 58u 180u 12u "$DbAdminPassword"
+    ${NSD_CreatePassword} 95u 64u 180u 12u "$DbAdminPassword"
     Pop $DbAdminPasswordInput
 
-    ${NSD_CreateLabel} 0u 84u 90u 12u "App DB password"
+    ${NSD_CreateLabel} 0u 90u 90u 12u "App DB password"
     Pop $0
-    ${NSD_CreatePassword} 95u 82u 180u 12u "$DbPassword"
+    ${NSD_CreatePassword} 95u 88u 180u 12u "$DbPassword"
     Pop $DbPasswordInput
 
-    ${NSD_CreateLabel} 0u 108u 300u 26u "Leave app DB password empty to let setup generate one automatically."
-    Pop $0
+    !insertmacro AhsoCreateReadOnlyScrollBox 0u 114u 300u 32u $0
+    ${NSD_SetText} $0 "Leave app DB password empty to let setup generate one automatically."
   ${EndIf}
 
   nsDialogs::Show
@@ -333,6 +498,18 @@ Function DbCredentialPageLeave
 FunctionEnd
 
 !macro customInstall
+  ReadEnvStr $0 "PROGRAMDATA"
+  ${If} $0 == ""
+    StrCpy $0 "C:\ProgramData"
+  ${EndIf}
+  CreateDirectory "$0\AHSO OCR\updates\installers"
+  CopyFiles /SILENT "$EXEPATH" "$0\AHSO OCR\updates\installers\$EXEFILE"
+
+  ${If} ${Silent}
+    DetailPrint "Automated update: preserving runtime configuration for startup validation."
+    Goto bootstrap_done
+  ${EndIf}
+
   DetailPrint "Bootstrapping local OCR runtime..."
   Call WriteDbConfig
   ExecWait '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File "$INSTDIR\resources\installer\bootstrap-installer.ps1" -InstallDir "$INSTDIR" -DbConfigPath "$DbConfigPath"' $0
@@ -350,27 +527,80 @@ FunctionEnd
   bootstrap_done:
 !macroend
 !else
+!include nsDialogs.nsh
 !include LogicLib.nsh
+
+Var UninstallKeepDatabase
+Var UninstallKeepFrameworks
+Var UninstallKeepDatabaseCheckbox
+Var UninstallKeepFrameworksCheckbox
+
+!macro customUnWelcomePage
+  !insertmacro MUI_UNPAGE_WELCOME
+  UninstPage custom un.UninstallOptionsPageCreate un.UninstallOptionsPageLeave
+!macroend
+
+Function un.UninstallOptionsPageCreate
+  StrCpy $UninstallKeepDatabase "false"
+  StrCpy $UninstallKeepFrameworks "false"
+
+  nsDialogs::Create 1018
+  Pop $0
+  ${If} $0 == error
+    Abort
+  ${EndIf}
+
+  ${NSD_CreateLabel} 0u 0u 300u 24u "Choose uninstall options before removing AHSO OCR."
+  Pop $0
+
+  !insertmacro AhsoCreateReadOnlyScrollBox 0u 30u 300u 48u $0
+  ${NSD_SetText} $0 "Default clean uninstall removes the app, local OCR database/config, and runtime frameworks installed by this setup. Frameworks that already existed before setup are not removed automatically."
+
+  ${NSD_CreateCheckbox} 0u 90u 300u 14u "Keep local PostgreSQL database and runtime config"
+  Pop $UninstallKeepDatabaseCheckbox
+
+  ${NSD_CreateCheckbox} 0u 114u 300u 14u "Keep runtime frameworks installed by setup"
+  Pop $UninstallKeepFrameworksCheckbox
+
+  !insertmacro AhsoCreateReadOnlyScrollBox 0u 140u 300u 28u $0
+  ${NSD_SetText} $0 "You can select both checkboxes to remove only the AHSO OCR application files and shortcuts."
+
+  nsDialogs::Show
+FunctionEnd
+
+Function un.UninstallOptionsPageLeave
+  ${NSD_GetState} $UninstallKeepDatabaseCheckbox $0
+  ${If} $0 == ${BST_CHECKED}
+    StrCpy $UninstallKeepDatabase "true"
+  ${EndIf}
+
+  ${NSD_GetState} $UninstallKeepFrameworksCheckbox $0
+  ${If} $0 == ${BST_CHECKED}
+    StrCpy $UninstallKeepFrameworks "true"
+  ${EndIf}
+FunctionEnd
 
 !macro customUnInstall
   ${If} ${Silent}
-    DetailPrint "Keeping local PostgreSQL database during silent uninstall."
-    Goto uninstall_database_done
+    StrCpy $UninstallKeepDatabase "false"
+    StrCpy $UninstallKeepFrameworks "false"
+    Goto uninstall_options_done
   ${EndIf}
 
-  MessageBox MB_ICONQUESTION|MB_YESNOCANCEL "Do you want to keep the local PostgreSQL database?$\r$\n$\r$\nYes = keep database and runtime config.$\r$\nNo = delete database and local runtime credentials.$\r$\nCancel = stop uninstall." IDYES keep_database IDNO delete_database
-  Abort "Uninstall cancelled."
+  uninstall_options_done:
+    DetailPrint "Running selected AHSO OCR uninstall cleanup..."
+    StrCpy $0 ""
+    ${If} $UninstallKeepDatabase == "true"
+      StrCpy $0 "$0 -KeepDatabase"
+    ${EndIf}
+    ${If} $UninstallKeepFrameworks == "true"
+      StrCpy $0 "$0 -KeepFrameworks"
+    ${EndIf}
 
-  keep_database:
-    DetailPrint "Keeping local PostgreSQL database."
-    Goto uninstall_database_done
+    ExecWait '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File "$INSTDIR\resources\installer\uninstall-runtime.ps1"$0' $1
+    IntCmp $1 0 uninstall_cleanup_done 0 0
+      MessageBox MB_ICONEXCLAMATION|MB_OK "The app will be removed, but selected uninstall cleanup failed. Open C:\ProgramData\AHSO OCR\uninstall.log for details."
 
-  delete_database:
-    DetailPrint "Deleting local PostgreSQL database..."
-    ExecWait '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File "$INSTDIR\resources\installer\uninstall-database.ps1"' $0
-    IntCmp $0 0 uninstall_database_done 0 0
-      MessageBox MB_ICONEXCLAMATION|MB_OK "The app will be removed, but setup could not delete the local PostgreSQL database. Open C:\ProgramData\AHSO OCR\uninstall.log for details."
-
-  uninstall_database_done:
+  uninstall_cleanup_done:
 !macroend
 !endif

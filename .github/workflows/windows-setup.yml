@@ -2,6 +2,11 @@ name: Windows Setup
 
 on:
   workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "Existing v* tag to publish or repair; leave empty for a build-only run"
+        required: false
+        type: string
   push:
     tags:
       - "v*"
@@ -16,6 +21,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.release_tag || github.ref }}
 
       - name: Setup Node.js
         uses: actions/setup-node@v5
@@ -28,17 +35,66 @@ jobs:
 
       - name: Prepare runtime
         shell: powershell
-        run: powershell -ExecutionPolicy Bypass -File ./scripts/release/prepare-runtime.ps1
+        env:
+          GH_TOKEN: ${{ secrets.TOOL_RELEASE_TOKEN }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:GH_TOKEN)) {
+            throw "Repository secret TOOL_RELEASE_TOKEN is required to download the encrypted private Tool release."
+          }
+          powershell -ExecutionPolicy Bypass -File ./scripts/release/prepare-runtime.ps1
 
       - name: Build setup artifact
-        if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
         run: npm run dist:win -w @ocr/electron
 
-      - name: Build and publish release
-        if: ${{ startsWith(github.ref, 'refs/tags/v') }}
+      - name: Publish release assets
+        if: ${{ startsWith(github.ref, 'refs/tags/v') || inputs.release_tag != '' }}
+        shell: powershell
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: npm run dist:win -w @ocr/electron -- --publish always
+          RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          if ($env:RELEASE_TAG -notmatch '^v\d+\.\d+\.\d+(?:[-+].+)?$') {
+            throw "Release tag must follow the vX.Y.Z format. Received: $env:RELEASE_TAG"
+          }
+
+          $assets = @(
+            Get-ChildItem -LiteralPath "release" -File |
+              Where-Object { $_.Name -match '\.(exe|blockmap|yml)$' } |
+              Select-Object -ExpandProperty FullName
+          )
+          $installers = @($assets | Where-Object { $_ -like '*.exe' })
+          if ($installers.Count -ne 1) {
+            throw "Expected exactly one Windows Setup .exe, found $($installers.Count)."
+          }
+
+          gh release view $env:RELEASE_TAG --repo $env:GITHUB_REPOSITORY *> $null
+          if ($LASTEXITCODE -eq 0) {
+            & gh release upload $env:RELEASE_TAG --repo $env:GITHUB_REPOSITORY --clobber @assets
+          } else {
+            $releaseTitle = $env:RELEASE_TAG.TrimStart('v')
+            & gh release create $env:RELEASE_TAG --repo $env:GITHUB_REPOSITORY --title $releaseTitle --generate-notes @assets
+          }
+          if ($LASTEXITCODE -ne 0) {
+            throw "GitHub Release asset upload failed for $env:RELEASE_TAG."
+          }
+
+          $release = gh release view $env:RELEASE_TAG --repo $env:GITHUB_REPOSITORY --json assets | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0) {
+            throw "Could not verify GitHub Release assets for $env:RELEASE_TAG."
+          }
+
+          $localInstaller = Get-Item -LiteralPath $installers[0]
+          $publishedInstaller = @($release.assets | Where-Object { $_.name -eq $localInstaller.Name })
+          if ($publishedInstaller.Count -ne 1) {
+            throw "GitHub Release is missing $($localInstaller.Name)."
+          }
+          if ([int64]$publishedInstaller[0].size -ne $localInstaller.Length) {
+            throw "GitHub Release installer size does not match the built installer."
+          }
+
+          Write-Host "Verified installer asset: $($localInstaller.Name) ($($localInstaller.Length) bytes)"
 
       - name: Upload setup artifact
         uses: actions/upload-artifact@v4

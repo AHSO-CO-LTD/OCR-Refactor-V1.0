@@ -87,6 +87,8 @@ scripts/   future automation scripts
 - The active `tool/` directory now uses the API-Tool-v1 Device/OCR API. Backend access is routed through configurable `DEVICE_TOOL_API_PREFIX`, defaulting to `/tool/v1`; camera control and AI/yolo_ocr OCR runtime live there. The previous Device Tool was renamed to `tool-test/` for reference.
 - Backend license foundation now checks the USB dongle through the legacy `System8.dll` flow, records `license_logs`, exposes `/api/system/license/public` for login and `/api/system/license` for authenticated status, and blocks login when the dongle is missing unless `DONGLE_MOCK_MODE=true`.
 - Dedicated Camera page exists at `/dashboard/camera` with product-profile selection, Device Tool status/device discovery, connect/grab/live controls, view adjustment persistence, and manual refresh for camera status/devices.
+- The unified Configuration page has separate Product, AI settings, ROI, Camera, camera identity, and developer diagnostics tabs. AI model path and OCR thresholds are no longer edited in the basic Product form.
+- The same Configuration page includes a saved-profile-only inspection test: Manual runs one test, Auto reacts to the PLC capture trigger, and the source can be the connected camera or an uploaded image. The test is diagnostic only and does not save production logs/counters or pulse OK/NG back to the PLC.
 - AppShell warms up camera status/device discovery in the background for users with camera or inspection permissions.
 
 ### In Progress
@@ -196,7 +198,7 @@ Current UI behavior:
 - `/dashboard` currently hosts the operator runtime foundation instead of a separate dedicated runtime module route.
 - On the operator runtime screen, `quantity` should be shown before `count` because `quantity` is the batch-progress number and `count` is only the current-scan recognized amount.
 - `roi`, `history`, and `reports` are present in menu permissions but do not have their own pages yet.
-- Camera operations now have a dedicated page at `/dashboard/camera`; the page still depends on the Device Tool running locally, usually at `http://localhost:8000`.
+- Camera operations now have a dedicated page at `/dashboard/camera`; the page still depends on the Device Tool running locally, usually at `http://localhost:8668`.
 - Product preview uses `frontend/public/preview-background.png` to simulate camera output when no live camera preview is available.
 - Product profile save must reject overlapping ROI regions.
 

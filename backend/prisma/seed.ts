@@ -4,17 +4,25 @@ import * as bcrypt from 'bcrypt';
 const prisma = new PrismaClient();
 
 const permissions = [
+  { key: 'dashboard.view', name: 'View dashboard', group: 'dashboard' },
   { key: 'user.manage', name: 'Manage users', group: 'user' },
   { key: 'role.manage', name: 'Manage roles', group: 'role' },
   { key: 'permission.manage', name: 'Manage permissions', group: 'role' },
   { key: 'product.manage', name: 'Manage products', group: 'product' },
+  { key: 'roi.edit', name: 'Edit product ROI', group: 'product' },
   { key: 'camera.manage', name: 'Manage camera settings', group: 'camera' },
   {
     key: 'camera.identity.manage',
     name: 'Manage camera identities',
     group: 'camera',
   },
-  { key: 'camera.debug.view', name: 'View camera diagnostics', group: 'camera' },
+  {
+    key: 'camera.debug.view',
+    name: 'View camera diagnostics',
+    group: 'camera',
+  },
+  { key: 'plc.manage', name: 'Manage PLC configuration', group: 'plc' },
+  { key: 'plc.operate', name: 'Operate PLC controls', group: 'plc' },
   { key: 'inspection.start', name: 'Start inspection', group: 'inspection' },
   { key: 'inspection.stop', name: 'Stop inspection', group: 'inspection' },
   { key: 'inspection.test', name: 'Run line tests', group: 'inspection' },
@@ -30,14 +38,23 @@ const rolePermissionMap: Record<RoleCode, string[]> = {
     .filter((permission) => !permission.devOnly)
     .map((permission) => permission.key),
   engineer: [
+    'dashboard.view',
     'product.manage',
     'camera.manage',
     'camera.identity.manage',
     'camera.debug.view',
+    'plc.manage',
+    'plc.operate',
     'inspection.test',
     'report.view',
   ],
-  operator: ['inspection.start', 'inspection.stop'],
+  operator: [
+    'dashboard.view',
+    'inspection.start',
+    'inspection.stop',
+    'plc.manage',
+    'plc.operate',
+  ],
 };
 
 async function seed() {

@@ -234,6 +234,7 @@ export type InitialAdminPayload = {
   fullName: string;
   department?: string;
   employeeNo?: string;
+  lineResultSaveFolderPath: string;
 };
 
 export type SystemLicenseState = {
@@ -253,6 +254,7 @@ export type InspectionSlotState = {
   rows?: string[];
   result: "OK" | "NG" | "UNKNOWN";
   errorMessage: string | null;
+  imagePath?: string | null;
   toolDebugImageBase64?: string | null;
 };
 
@@ -270,6 +272,33 @@ export type TestInspectionImageResult = {
 };
 
 export type TestSessionImageResult = "OK" | "NG" | "UNKNOWN" | "ERROR";
+
+export type LineResultSavePolicy = "all" | "ok" | "ng" | "none";
+
+export type LineSessionEndReason =
+  | "line_stop"
+  | "product_change"
+  | "plc_stop"
+  | "app_shutdown";
+
+export type LineResultSettings = {
+  id: string;
+  saveFolderPath: string | null;
+  savePolicy: LineResultSavePolicy;
+  saveBySession: boolean;
+  newSessionOnLineStop: boolean;
+  newSessionOnProductChange: boolean;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type LineResultSettingsPayload = {
+  saveFolderPath?: string | null;
+  savePolicy?: LineResultSavePolicy;
+  saveBySession?: boolean;
+  newSessionOnLineStop?: boolean;
+  newSessionOnProductChange?: boolean;
+};
 
 export type TestSessionReportPayload = {
   productId: string;
@@ -370,6 +399,12 @@ export type CurrentInspectionState = {
   operatorId: string;
   startedAt: string | null;
   stoppedAt: string | null;
+  endReason: LineSessionEndReason | null;
+  resultSavePolicy: LineResultSavePolicy | null;
+  resultSaveFolderPath: string | null;
+  resultSessionFolderName: string | null;
+  resultSavedAt: string | null;
+  resultSaveError: string | null;
   batchSize: number;
   quantity: number;
   count: number;
@@ -381,6 +416,7 @@ export type CurrentInspectionState = {
     result: "OK" | "NG" | "UNKNOWN";
     text: string | null;
     confidence: number | null;
+    imagePath?: string | null;
     capturedAt: string;
   } | null;
   slots: InspectionSlotState[];
@@ -417,9 +453,185 @@ export type BulkProductOcrTestSettingsPayload = {
 export type BulkProductAiSettingsPayload = {
   thresholdAccept: number;
   thresholdMns: number;
-  rowThreshold: number;
+  rowThreshold?: number;
   applyToAll: boolean;
   productIds?: string[];
+};
+
+export type ProductAiSettingsPayload = {
+  modelPath?: string | null;
+  thresholdAccept?: number;
+  thresholdMns?: number;
+  rowThreshold?: number;
+};
+
+export type PlcKeyOperation = "watch_boolean" | "write_boolean" | "pulse";
+
+export type PlcCustomKey = {
+  id?: string;
+  name: string;
+  address: number;
+  operation: PlcKeyOperation;
+  enabled: boolean;
+};
+
+export type PlcConfiguration = {
+  id: string;
+  ipAddress: string;
+  protocol: "modbus_tcp" | "slmp";
+  port: number;
+  captureTriggerAddress: number | null;
+  stopTriggerAddress: number | null;
+  startTriggerAddress: number | null;
+  cameraPowerAddress: number | null;
+  cameraLightAddress: number | null;
+  errorPulseAddress: number | null;
+  okResultAddress: number | null;
+  waitingCheckingAddress: number | null;
+  errorPulseDurationMs: number;
+  okPulseDurationMs: number;
+  inactivityTimeoutEnabled: boolean;
+  sleepTimeSeconds: number;
+  customKeys: PlcCustomKey[];
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type PlcConfigurationPayload = Omit<
+  PlcConfiguration,
+  | "id"
+  | "createdAt"
+  | "updatedAt"
+  | "customKeys"
+  | "inactivityTimeoutEnabled"
+  | "sleepTimeSeconds"
+> & {
+  customKeys: Array<Omit<PlcCustomKey, "id">>;
+};
+
+export type PlcRuntimeEvent = {
+  type: "status" | "signal" | "output" | "error";
+  at: string;
+  key?: string;
+  address?: number;
+  toolAddress?: number;
+  value?: boolean;
+  source?: "fixed" | "custom";
+  message?: string;
+  state?: PlcRuntimeStatus["state"];
+};
+
+export type PlcRuntimeStatus = {
+  state:
+    | "not_configured"
+    | "disconnected"
+    | "connecting"
+    | "connected"
+    | "reconnecting"
+    | "error";
+  connected: boolean;
+  host: string | null;
+  protocol: "modbus_tcp" | "slmp" | null;
+  cameraPowerCommand: boolean | null;
+  cameraLightCommand: boolean | null;
+  waitingCheckingCommand: boolean | null;
+  lastError: string | null;
+  recentEvents: PlcRuntimeEvent[];
+};
+
+export type ProductImportResult = {
+  totalCount: number;
+  createdCount: number;
+  updatedCount: number;
+};
+
+export type LineReportGroupBy = "day" | "month" | "year";
+
+export type LineOperationReportSummary = {
+  from: string;
+  to: string;
+  groupBy: LineReportGroupBy;
+  totals: {
+    sessions: number;
+    results: number;
+    ok: number;
+    ng: number;
+    unknown: number;
+    rois: number;
+  };
+  groups: Array<{
+    period: string;
+    sessions: number;
+    results: number;
+    ok: number;
+    ng: number;
+    unknown: number;
+  }>;
+};
+
+export type MachineRuntimeStep = {
+  id: string;
+  status: "pending" | "running" | "done" | "failed";
+  message: string;
+  at: string;
+};
+
+export type MachineRuntimeStatus = {
+  state:
+    | "inactive"
+    | "running"
+    | "stopping"
+    | "idle_machine_stop"
+    | "idle_capture_timeout"
+    | "resuming"
+    | "waiting_camera"
+    | "restart_required"
+    | "error";
+  idleReason: "machine_stop" | "capture_timeout" | null;
+  steps: MachineRuntimeStep[];
+  message: string | null;
+  countdownSeconds: number | null;
+  lastActivityAt: string | null;
+  inactivityTimeoutEnabled: boolean;
+  sleepTimeSeconds: number;
+  plcOffline: boolean;
+  plcErrorMessage: string | null;
+  updatedAt: string;
+  canManualResume: boolean;
+  restartRequired: boolean;
+  lastPlcInspection: CurrentInspectionState | null;
+  lastPlcInspectionSequence: number;
+  captureTriggerSequence: number;
+  lastCaptureTriggerAt: string | null;
+  latestLiveInspection: CurrentInspectionState | null;
+  liveInspectionSequence: number;
+  liveInspectionError: string | null;
+  operationMode: "manual" | "auto";
+  liveCameraEnabled: boolean;
+  realtimeAiEnabled: boolean;
+  cameraFrameSequence: number;
+  testModeActive: boolean;
+  testOutputEnabled: boolean;
+};
+
+export type MachineRuntimeFrame = {
+  jobId: string;
+  productId: string;
+  imageBase64: string;
+  width: number;
+  height: number;
+  capturedAt: string;
+};
+
+export type MachineInactivitySettings = {
+  enabled: boolean;
+  timeoutSeconds: number;
+  configured: boolean;
+};
+
+export type MachineRuntimeAction = MachineRuntimeStatus & {
+  action: "ignored" | "captured" | "latched" | "unknown";
+  inspection: CurrentInspectionState | null;
 };
 
 const API_BASE_URL =
@@ -464,6 +676,16 @@ async function parseError(response: Response) {
   return response.statusText;
 }
 
+async function fetchAuthenticatedBlob(url: string, accessToken: string) {
+  const response = await fetch(url, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  if (!response.ok) {
+    throw new ApiError(await parseError(response), response.status);
+  }
+  return response.blob();
+}
+
 export async function login(username: string, password: string) {
   const response = await fetch(`${API_BASE_URL}/auth/login`, {
     method: "POST",
@@ -485,6 +707,24 @@ export async function getCurrentSession(
   options: { signal?: AbortSignal } = {},
 ) {
   const response = await fetch(`${API_BASE_URL}/auth/me`, {
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+    },
+    signal: options.signal,
+  });
+
+  if (!response.ok) {
+    throw new ApiError(await parseError(response), response.status);
+  }
+
+  return (await response.json()) as MeResponse;
+}
+
+export async function restoreRememberedSession(
+  accessToken: string,
+  options: { signal?: AbortSignal } = {},
+) {
+  const response = await fetch(`${API_BASE_URL}/auth/restore`, {
     headers: {
       Authorization: `Bearer ${accessToken}`,
     },
@@ -578,12 +818,18 @@ export async function startInspection(
   return (await response.json()) as { data: CurrentInspectionState };
 }
 
-export async function stopInspection(accessToken: string, jobId: string) {
-  const response = await fetch(`${API_BASE_URL}/inspections/${jobId}/stop`, {
+export async function beginInspectionSession(
+  accessToken: string,
+  productId: string,
+  operatorNote?: string,
+) {
+  const response = await fetch(`${API_BASE_URL}/inspections/begin`, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json",
     },
+    body: JSON.stringify({ productId, operatorNote }),
   });
 
   if (!response.ok) {
@@ -591,6 +837,67 @@ export async function stopInspection(accessToken: string, jobId: string) {
   }
 
   return (await response.json()) as { data: CurrentInspectionState };
+}
+
+export async function stopInspection(
+  accessToken: string,
+  jobId: string,
+  endReason: LineSessionEndReason = "line_stop",
+) {
+  const response = await fetch(`${API_BASE_URL}/inspections/${jobId}/stop`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ endReason }),
+  });
+
+  if (!response.ok) {
+    throw new ApiError(await parseError(response), response.status);
+  }
+
+  return (await response.json()) as { data: CurrentInspectionState };
+}
+
+export async function getLineResultSettings(accessToken: string) {
+  const response = await fetch(
+    `${API_BASE_URL}/inspections/line-result-settings`,
+    {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+      },
+    },
+  );
+
+  if (!response.ok) {
+    throw new ApiError(await parseError(response), response.status);
+  }
+
+  return (await response.json()) as { data: LineResultSettings };
+}
+
+export async function updateLineResultSettings(
+  accessToken: string,
+  payload: LineResultSettingsPayload,
+) {
+  const response = await fetch(
+    `${API_BASE_URL}/inspections/line-result-settings`,
+    {
+      method: "PATCH",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(payload),
+    },
+  );
+
+  if (!response.ok) {
+    throw new ApiError(await parseError(response), response.status);
+  }
+
+  return (await response.json()) as { data: LineResultSettings };
 }
 
 export async function testInspectionImage(
@@ -654,6 +961,36 @@ export async function listTestSessionReports(
   }
 
   return (await response.json()) as PaginatedTestSessionReportsResponse;
+}
+
+export async function getLineOperationReport(
+  accessToken: string,
+  from: string,
+  to: string,
+  groupBy: LineReportGroupBy,
+) {
+  const params = new URLSearchParams({ from, to, groupBy });
+  const response = await fetch(
+    `${API_BASE_URL}/inspections/line-reports/summary?${params}`,
+    { headers: { Authorization: `Bearer ${accessToken}` } },
+  );
+  if (!response.ok) {
+    throw new ApiError(await parseError(response), response.status);
+  }
+  return (await response.json()) as { data: LineOperationReportSummary };
+}
+
+export async function downloadLineOperationReport(
+  accessToken: string,
+  from: string,
+  to: string,
+  groupBy: LineReportGroupBy,
+) {
+  const params = new URLSearchParams({ from, to, groupBy });
+  return fetchAuthenticatedBlob(
+    `${API_BASE_URL}/inspections/line-reports/export?${params}`,
+    accessToken,
+  );
 }
 
 export async function getSystemLicense(accessToken: string) {
@@ -742,20 +1079,50 @@ export async function updateCameraIdentity(
   identityId: string,
   payload: Partial<Pick<CameraIdentity, "active" | "displayName">>,
 ) {
-  const response = await fetch(`${API_BASE_URL}/camera/identities/${identityId}`, {
-    method: "PATCH",
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-      "Content-Type": "application/json",
+  const response = await fetch(
+    `${API_BASE_URL}/camera/identities/${identityId}`,
+    {
+      method: "PATCH",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(payload),
     },
-    body: JSON.stringify(payload),
-  });
+  );
 
   if (!response.ok) {
     throw new ApiError(await parseError(response), response.status);
   }
 
   return (await response.json()) as { data: CameraIdentity };
+}
+
+export async function testCameraIdentityConnection(
+  accessToken: string,
+  identityId: string,
+) {
+  const response = await fetch(
+    `${API_BASE_URL}/camera/identities/${identityId}/test-connection`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+      },
+    },
+  );
+
+  if (!response.ok) {
+    throw new ApiError(await parseError(response), response.status);
+  }
+
+  return (await response.json()) as {
+    data: {
+      connected: true;
+      identity: CameraIdentity;
+      runtime: CameraRuntimeStatus["data"];
+    };
+  };
 }
 
 export async function getCameraFrameRate(accessToken: string) {
@@ -956,14 +1323,17 @@ export async function updateRolePermissions(
   roleCode: RoleCode,
   permissions: string[],
 ) {
-  const response = await fetch(`${API_BASE_URL}/roles/${roleCode}/permissions`, {
-    method: "PUT",
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-      "Content-Type": "application/json",
+  const response = await fetch(
+    `${API_BASE_URL}/roles/${roleCode}/permissions`,
+    {
+      method: "PUT",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ permissions }),
     },
-    body: JSON.stringify({ permissions }),
-  });
+  );
 
   if (!response.ok) {
     throw new ApiError(await parseError(response), response.status);
@@ -1085,6 +1455,33 @@ export async function listProductProfiles(accessToken: string) {
   return (await response.json()) as { data: ProductProfile[] };
 }
 
+export async function downloadProductImportTemplate(
+  accessToken: string,
+  language: "en" | "vi",
+) {
+  return fetchAuthenticatedBlob(
+    `${API_BASE_URL}/products/import/template?language=${language}`,
+    accessToken,
+  );
+}
+
+export async function importProductProfiles(
+  accessToken: string,
+  file: File,
+) {
+  const formData = new FormData();
+  formData.append("file", file);
+  const response = await fetch(`${API_BASE_URL}/products/import`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${accessToken}` },
+    body: formData,
+  });
+  if (!response.ok) {
+    throw new ApiError(await parseError(response), response.status);
+  }
+  return (await response.json()) as { data: ProductImportResult };
+}
+
 export async function createProductProfile(
   accessToken: string,
   payload: ProductProfilePayload,
@@ -1126,19 +1523,67 @@ export async function updateProductProfile(
   return (await response.json()) as { data: ProductProfile };
 }
 
-export async function updateProductBatchSize(
+export async function updateProductRoiRegions(
   accessToken: string,
   productId: string,
-  batchSize: number,
+  roiRegions: RoiRegion[],
 ) {
-  const response = await fetch(`${API_BASE_URL}/products/${productId}/batch-size`, {
+  const response = await fetch(
+    `${API_BASE_URL}/products/${productId}/roi-regions`,
+    {
+      method: "PATCH",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ roiRegions }),
+    },
+  );
+
+  if (!response.ok) {
+    throw new ApiError(await parseError(response), response.status);
+  }
+
+  return (await response.json()) as { data: ProductProfile };
+}
+
+export async function updateProductProfileStatus(
+  accessToken: string,
+  productId: string,
+  active: boolean,
+) {
+  const response = await fetch(`${API_BASE_URL}/products/${productId}`, {
     method: "PATCH",
     headers: {
       Authorization: `Bearer ${accessToken}`,
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({ batchSize }),
+    body: JSON.stringify({ active }),
   });
+
+  if (!response.ok) {
+    throw new ApiError(await parseError(response), response.status);
+  }
+
+  return (await response.json()) as { data: ProductProfile };
+}
+
+export async function updateProductBatchSize(
+  accessToken: string,
+  productId: string,
+  batchSize: number,
+) {
+  const response = await fetch(
+    `${API_BASE_URL}/products/${productId}/batch-size`,
+    {
+      method: "PATCH",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ batchSize }),
+    },
+  );
 
   if (!response.ok) {
     throw new ApiError(await parseError(response), response.status);
@@ -1175,14 +1620,17 @@ export async function bulkUpdateProductOcrTestSettings(
   accessToken: string,
   payload: BulkProductOcrTestSettingsPayload,
 ) {
-  const response = await fetch(`${API_BASE_URL}/products/ocr-test-settings/apply`, {
-    method: "PATCH",
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-      "Content-Type": "application/json",
+  const response = await fetch(
+    `${API_BASE_URL}/products/ocr-test-settings/apply`,
+    {
+      method: "PATCH",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(payload),
     },
-    body: JSON.stringify(payload),
-  });
+  );
 
   if (!response.ok) {
     throw new ApiError(await parseError(response), response.status);
@@ -1209,6 +1657,30 @@ export async function bulkUpdateProductAiSettings(
   }
 
   return (await response.json()) as { data: { updatedCount: number } };
+}
+
+export async function updateProductAiSettings(
+  accessToken: string,
+  productId: string,
+  payload: ProductAiSettingsPayload,
+) {
+  const response = await fetch(
+    `${API_BASE_URL}/products/${productId}/ai-settings`,
+    {
+      method: "PATCH",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(payload),
+    },
+  );
+
+  if (!response.ok) {
+    throw new ApiError(await parseError(response), response.status);
+  }
+
+  return (await response.json()) as { data: ProductProfile };
 }
 
 export async function deleteProductProfile(
@@ -1247,4 +1719,258 @@ export async function applyProductProfile(
   }
 
   return (await response.json()) as { data: { updatedCount: number } };
+}
+
+export async function getPlcConfiguration(accessToken: string) {
+  return plcRequest<{ data: PlcConfiguration | null }>(
+    accessToken,
+    "/plc/config",
+  );
+}
+
+export async function savePlcConfiguration(
+  accessToken: string,
+  payload: PlcConfigurationPayload,
+) {
+  return plcRequest<{ data: PlcConfiguration }>(accessToken, "/plc/config", {
+    method: "PUT",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function getPlcStatus(accessToken: string) {
+  return plcRequest<{ data: PlcRuntimeStatus }>(accessToken, "/plc/status");
+}
+
+export async function connectPlc(accessToken: string) {
+  return plcRequest<{ data: PlcRuntimeStatus }>(accessToken, "/plc/connect", {
+    method: "POST",
+  });
+}
+
+export async function disconnectPlc(accessToken: string) {
+  return plcRequest<{ data: PlcRuntimeStatus }>(
+    accessToken,
+    "/plc/disconnect",
+    {
+      method: "POST",
+    },
+  );
+}
+
+export async function setPlcCameraPower(accessToken: string, enabled: boolean) {
+  return plcRequest<{ data: PlcRuntimeStatus }>(
+    accessToken,
+    "/plc/outputs/camera-power",
+    { method: "PUT", body: JSON.stringify({ enabled }) },
+  );
+}
+
+export async function setPlcCameraLight(accessToken: string, enabled: boolean) {
+  return plcRequest<{ data: PlcRuntimeStatus }>(
+    accessToken,
+    "/plc/outputs/camera-light",
+    { method: "PUT", body: JSON.stringify({ enabled }) },
+  );
+}
+
+export async function pulsePlcOkResult(accessToken: string) {
+  return plcRequest<{ data: PlcRuntimeStatus }>(
+    accessToken,
+    "/plc/outputs/ok-pulse",
+    { method: "POST" },
+  );
+}
+
+export async function setPlcWaitingChecking(
+  accessToken: string,
+  enabled: boolean,
+) {
+  return plcRequest<{ data: PlcRuntimeStatus }>(
+    accessToken,
+    "/plc/outputs/waiting-checking",
+    { method: "PUT", body: JSON.stringify({ enabled }) },
+  );
+}
+
+export async function pulsePlcError(accessToken: string) {
+  return plcRequest<{ data: PlcRuntimeStatus }>(
+    accessToken,
+    "/plc/outputs/error-pulse",
+    { method: "POST" },
+  );
+}
+
+export async function executePlcCustomKey(
+  accessToken: string,
+  id: string,
+  value: boolean,
+) {
+  return plcRequest<{ data: PlcRuntimeStatus }>(
+    accessToken,
+    `/plc/custom-keys/${encodeURIComponent(id)}/execute`,
+    { method: "POST", body: JSON.stringify({ value }) },
+  );
+}
+
+export async function getMachineRuntimeStatus(accessToken: string) {
+  return plcRequest<{ data: MachineRuntimeStatus }>(
+    accessToken,
+    "/plc/machine/status",
+  );
+}
+
+export async function getMachineInactivitySettings(accessToken: string) {
+  return plcRequest<{ data: MachineInactivitySettings }>(
+    accessToken,
+    "/plc/machine/inactivity-settings",
+  );
+}
+
+export async function updateMachineInactivitySettings(
+  accessToken: string,
+  settings: Pick<MachineInactivitySettings, "enabled" | "timeoutSeconds">,
+) {
+  return plcRequest<{ data: MachineInactivitySettings }>(
+    accessToken,
+    "/plc/machine/inactivity-settings",
+    { method: "PUT", body: JSON.stringify(settings) },
+  );
+}
+
+export async function notifyMachineUserActivity(accessToken: string) {
+  return plcRequest<{ data: MachineRuntimeStatus }>(
+    accessToken,
+    "/plc/machine/activity",
+    { method: "POST" },
+  );
+}
+
+export async function getMachineRuntimeFrame(accessToken: string) {
+  return plcRequest<{
+    data: { sequence: number; frame: MachineRuntimeFrame } | null;
+  }>(accessToken, "/plc/machine/frame");
+}
+
+export async function updateMachineRuntimeControls(
+  accessToken: string,
+  controls: Partial<{
+    mode: "manual" | "auto";
+    liveCameraEnabled: boolean;
+    realtimeAiEnabled: boolean;
+  }>,
+) {
+  return plcRequest<{ data: MachineRuntimeStatus }>(
+    accessToken,
+    "/plc/machine/controls",
+    { method: "PATCH", body: JSON.stringify(controls) },
+  );
+}
+
+export async function updateMachineTestMode(
+  accessToken: string,
+  clientId: string,
+  active: boolean,
+) {
+  return plcRequest<{ data: MachineRuntimeStatus }>(
+    accessToken,
+    "/plc/machine/test-mode",
+    {
+      method: "PATCH",
+      body: JSON.stringify({ clientId, active }),
+    },
+  );
+}
+
+export async function updateMachineTestOutput(
+  accessToken: string,
+  clientId: string,
+  enabled: boolean,
+) {
+  return plcRequest<{ data: MachineRuntimeStatus }>(
+    accessToken,
+    "/plc/machine/test-output",
+    {
+      method: "PATCH",
+      body: JSON.stringify({ clientId, enabled }),
+    },
+  );
+}
+
+export async function pulseMachineTestResult(
+  accessToken: string,
+  clientId: string,
+  result: "OK" | "NG",
+) {
+  return plcRequest<{ data: { pulsed: true; result: "OK" | "NG" } }>(
+    accessToken,
+    "/plc/machine/test-result-pulse",
+    {
+      method: "POST",
+      body: JSON.stringify({ clientId, result }),
+    },
+  );
+}
+
+export async function startMachineOperation(accessToken: string) {
+  return plcRequest<{ data: MachineRuntimeStatus }>(
+    accessToken,
+    "/plc/machine/start",
+    { method: "POST" },
+  );
+}
+
+export async function stopMachineOperation(accessToken: string) {
+  return plcRequest<{ data: MachineRuntimeStatus }>(
+    accessToken,
+    "/plc/machine/stop",
+    { method: "POST" },
+  );
+}
+
+export async function notifyManualPlcLatch(accessToken: string) {
+  return plcRequest<{ data: MachineRuntimeStatus }>(
+    accessToken,
+    "/plc/machine/manual-latch",
+    { method: "POST" },
+  );
+}
+
+export async function grabMachineFrame(accessToken: string) {
+  return plcRequest<{ data: MachineRuntimeAction }>(
+    accessToken,
+    "/plc/machine/grab",
+    { method: "POST" },
+  );
+}
+
+export async function resumeMachineOperation(accessToken: string) {
+  return plcRequest<{ data: MachineRuntimeStatus }>(
+    accessToken,
+    "/plc/machine/resume",
+    { method: "POST" },
+  );
+}
+
+export async function reconnectMachinePlc(accessToken: string) {
+  return plcRequest<{ data: MachineRuntimeStatus }>(
+    accessToken,
+    "/plc/machine/reconnect-plc",
+    { method: "POST" },
+  );
+}
+
+async function plcRequest<T>(
+  accessToken: string,
+  path: string,
+  init: RequestInit = {},
+) {
+  const headers = new Headers(init.headers);
+  headers.set("Authorization", `Bearer ${accessToken}`);
+  if (init.body) headers.set("Content-Type", "application/json");
+  const response = await fetch(`${API_BASE_URL}${path}`, { ...init, headers });
+  if (!response.ok) {
+    throw new ApiError(await parseError(response), response.status);
+  }
+  return (await response.json()) as T;
 }

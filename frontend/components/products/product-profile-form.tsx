@@ -1,7 +1,6 @@
 "use client";
 
 import {
-  ChangeEvent,
   ComponentProps,
   FormEvent,
   KeyboardEvent,
@@ -29,6 +28,8 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
+import { ProductStatusControl } from "@/components/products/product-status-control";
+import { ModelPathField } from "@/components/products/model-path-field";
 import {
   ApiError,
   listCameraDevices,
@@ -42,15 +43,16 @@ import {
   clientPointToCameraPoint,
 } from "@/components/camera/camera-preview-image";
 import { useConnectedCameraPreview } from "@/components/camera/use-connected-camera-preview";
-import { getDesktopBridge } from "@/lib/desktop";
 import { useI18n } from "@/lib/i18n";
 import { getAccessToken } from "@/lib/session";
 
 type ProductProfileFormProps = {
+  hideCameraAndRoi?: boolean;
   product?: ProductProfile | null;
   products: ProductProfile[];
   saving: boolean;
   onCancel: () => void;
+  onDirtyChange?: (dirty: boolean) => void;
   onSubmit: (payload: ProductProfilePayload) => Promise<void>;
 };
 
@@ -91,7 +93,7 @@ const defaultDraft: ProductProfilePayload = {
   thresholdMns: 0.5,
   rowThreshold: 20,
   modelPath: "",
-  rotateTestImageClockwise: false,
+  rotateTestImageClockwise: true,
   active: true,
   camera: {
     sourceType: "usb",
@@ -105,7 +107,7 @@ const defaultDraft: ProductProfilePayload = {
     zoomFactor: 1,
     previewPanX: 0,
     previewPanY: 0,
-    previewRotation: 90,
+    previewRotation: 0,
   },
   roiRegions: [],
 };
@@ -491,10 +493,12 @@ function safeSetPointerCapture(element: Element, pointerId: number) {
 }
 
 export function ProductProfileForm({
+  hideCameraAndRoi = false,
   product,
   products,
   saving,
   onCancel,
+  onDirtyChange,
   onSubmit,
 }: ProductProfileFormProps) {
   const { t } = useI18n();
@@ -540,11 +544,19 @@ export function ProductProfileForm({
     current: { x: number; y: number };
   } | null>(null);
   const [roiAssist, setRoiAssist] = useState<RoiAssist | null>(null);
+  const dirty = JSON.stringify(draft) !== JSON.stringify(toDraft(product));
+
+  useEffect(() => {
+    onDirtyChange?.(dirty);
+  }, [dirty, onDirtyChange]);
+
+  useEffect(() => {
+    return () => onDirtyChange?.(false);
+  }, [onDirtyChange]);
   const {
     imageSrc: livePreviewImageSrc,
   } = useConnectedCameraPreview(draft.camera.deviceName);
   const previewRef = useRef<HTMLDivElement | null>(null);
-  const modelFileInputRef = useRef<HTMLInputElement | null>(null);
   const lastPreviewPointRef = useRef<Point | null>(null);
   const rotatingSessionRef = useRef<{
     indexes: number[];
@@ -851,61 +863,6 @@ export function ProductProfileForm({
 
   function updateNumber(field: keyof ProductProfilePayload, value: string) {
     setDraft((current) => ({ ...current, [field]: Number(value) }));
-  }
-
-  async function handleBrowseModelFile() {
-    const desktop = getDesktopBridge();
-
-    if (desktop) {
-      let result: Awaited<ReturnType<typeof desktop.selectModelFile>>;
-
-      try {
-        result = await desktop.selectModelFile();
-      } catch (error) {
-        toast.error(
-          error instanceof Error ? error.message : t("error.globalDescription"),
-        );
-        return;
-      }
-
-      if (result.canceled || !result.filePath) {
-        return;
-      }
-
-      setDraft((current) => ({ ...current, modelPath: result.filePath ?? "" }));
-      toast.success(t("products.modelFileSelected"));
-      return;
-    }
-
-    modelFileInputRef.current?.click();
-  }
-
-  function handleModelFileChange(event: ChangeEvent<HTMLInputElement>) {
-    const file = event.target.files?.[0];
-
-    if (!file) {
-      return;
-    }
-
-    const nativePath = (file as File & { path?: string }).path?.trim();
-    const inputValue = event.target.value.trim();
-    const browserValue =
-      inputValue && !/fakepath/i.test(inputValue) ? inputValue : file.name;
-    const resolvedPath = nativePath || browserValue;
-
-    setDraft((current) => ({ ...current, modelPath: resolvedPath }));
-    toast.success(t("products.modelFileSelected"));
-
-    if (!nativePath) {
-      toast.warning(t("products.modelPathBrowserFallback"));
-    }
-
-    event.target.value = "";
-  }
-
-  function handleClearModelPath() {
-    setDraft((current) => ({ ...current, modelPath: "" }));
-    toast.success(t("products.modelFileCleared"));
   }
 
   function updateCameraNumber(
@@ -1616,7 +1573,11 @@ export function ProductProfileForm({
                 : t("products.createProfile")}
             </h2>
             <p className="mt-1 text-sm text-slate-500">
-              {t("products.profileHint")}
+              {t(
+                hideCameraAndRoi
+                  ? "products.basicProfileHint"
+                  : "products.profileHint",
+              )}
             </p>
           </div>
           <div className="flex shrink-0 flex-col gap-2 sm:flex-row">
@@ -1656,11 +1617,29 @@ export function ProductProfileForm({
           </div>
         ) : null}
 
+        <ProductStatusControl
+          active={draft.active}
+          disabled={saving}
+          onChange={(active) =>
+            setDraft((current) => ({
+              ...current,
+              active,
+            }))
+          }
+        />
+
         <section className="border border-slate-200 p-4">
           <div className="mb-3 text-sm font-semibold text-slate-950">
             {t("products.groupBasic")}
           </div>
-          <div className="grid gap-4 min-[900px]:grid-cols-4">
+          <div
+            className={[
+              "grid gap-4",
+              hideCameraAndRoi
+                ? "min-[900px]:grid-cols-3"
+                : "min-[900px]:grid-cols-4",
+            ].join(" ")}
+          >
             <TextField
               label={`${t("products.code")} *`}
               value={draft.code}
@@ -1676,52 +1655,16 @@ export function ProductProfileForm({
                 setDraft((current) => ({ ...current, name: value }))
               }
             />
-            <div className="block text-sm font-medium text-slate-700 min-[900px]:col-span-2">
-              {t("products.modelPath")}
-              <div className="mt-2 flex flex-col gap-2 min-[900px]:flex-row">
-                <Input
+            {!hideCameraAndRoi ? (
+              <div className="min-[900px]:col-span-2">
+                <ModelPathField
                   value={draft.modelPath ?? ""}
-                  inputMode="text"
-                  autoComplete="off"
-                  onChange={(event) =>
-                    setDraft((current) => ({
-                      ...current,
-                      modelPath: event.target.value,
-                    }))
+                  onChange={(modelPath) =>
+                    setDraft((current) => ({ ...current, modelPath }))
                   }
-                  className="h-12 flex-1 text-base"
                 />
-                <input
-                  ref={modelFileInputRef}
-                  type="file"
-                  accept=".onnx,.pt,.pth,.engine,.xml,.bin,.trt,.tflite,.pb"
-                  className="hidden"
-                  onChange={handleModelFileChange}
-                />
-                <Button
-                  type="button"
-                  variant="outline"
-                  className="h-12 px-4 text-base"
-                  onClick={handleBrowseModelFile}
-                >
-                  {t("products.browseModel")}
-                </Button>
-                {draft.modelPath ? (
-                  <Button
-                    type="button"
-                    variant="outline"
-                    className="h-12 px-4 text-base"
-                    onClick={handleClearModelPath}
-                  >
-                    <X className="h-4 w-4" aria-hidden="true" />
-                    {t("products.clearModelPath")}
-                  </Button>
-                ) : null}
               </div>
-              <p className="mt-2 text-xs text-slate-500">
-                {t("products.modelPathHint")}
-              </p>
-            </div>
+            ) : null}
             <NumberField
               label={t("products.batchSize")}
               value={draft.batchSize}
@@ -1734,55 +1677,59 @@ export function ProductProfileForm({
           </p>
         </section>
 
-        <section className="border border-slate-200 p-4">
-          <div className="grid gap-3 min-[900px]:grid-cols-[minmax(220px,320px)_auto_1fr] min-[900px]:items-end">
-            <label className="block text-sm font-medium text-slate-700">
-              {t("products.templateProfile")}
-              <Select
-                value={copySourceId}
-                onChange={(event) => setCopySourceId(event.target.value)}
-                className="mt-2 flex h-12 w-full border border-slate-300 bg-white px-4 py-2 text-base text-slate-950 outline-none transition focus:border-cyan-600 focus:ring-2 focus:ring-cyan-100"
+        {!hideCameraAndRoi ? (
+          <section className="border border-slate-200 p-4">
+            <div className="grid gap-3 min-[900px]:grid-cols-[minmax(220px,320px)_auto_1fr] min-[900px]:items-end">
+              <label className="block text-sm font-medium text-slate-700">
+                {t("products.templateProfile")}
+                <Select
+                  value={copySourceId}
+                  onChange={(event) => setCopySourceId(event.target.value)}
+                  className="mt-2 flex h-12 w-full border border-slate-300 bg-white px-4 py-2 text-base text-slate-950 outline-none transition focus:border-cyan-600 focus:ring-2 focus:ring-cyan-100"
+                >
+                  <option value="">{t("products.selectTemplate")}</option>
+                  {products
+                    .filter((item) => item.id !== product?.id)
+                    .map((item) => (
+                      <option key={item.id} value={item.id}>
+                        {item.code}
+                      </option>
+                    ))}
+                </Select>
+              </label>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={handleCopyProfile}
+                disabled={products.length === 0}
+                className="h-12 px-5 text-base"
               >
-                <option value="">{t("products.selectTemplate")}</option>
-                {products
-                  .filter((item) => item.id !== product?.id)
-                  .map((item) => (
-                    <option key={item.id} value={item.id}>
-                      {item.code}
-                    </option>
-                  ))}
-              </Select>
-            </label>
-            <Button
-              type="button"
-              variant="outline"
-              onClick={handleCopyProfile}
-              disabled={products.length === 0}
-              className="h-12 px-5 text-base"
-            >
-              <Copy className="h-4 w-4" aria-hidden="true" />
-              {t("products.copyTemplate")}
-            </Button>
-            <p className="text-sm text-slate-500">
-              {t("products.copyTemplateHint")}
-            </p>
-          </div>
-        </section>
+                <Copy className="h-4 w-4" aria-hidden="true" />
+                {t("products.copyTemplate")}
+              </Button>
+              <p className="text-sm text-slate-500">
+                {t("products.copyTemplateHint")}
+              </p>
+            </div>
+          </section>
+        ) : null}
 
-        <Button
-          type="button"
-          variant="outline"
-          onClick={() => setAdvancedOpen((current) => !current)}
-          className="h-12 w-full justify-between px-5 text-base"
-        >
-          {t("products.advancedProfile")}
-          <ChevronDown
-            className={advancedOpen ? "h-4 w-4 rotate-180" : "h-4 w-4"}
-            aria-hidden="true"
-          />
-        </Button>
+        {!hideCameraAndRoi ? (
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => setAdvancedOpen((current) => !current)}
+            className="h-12 w-full justify-between px-5 text-base"
+          >
+            {t("products.advancedProfile")}
+            <ChevronDown
+              className={advancedOpen ? "h-4 w-4 rotate-180" : "h-4 w-4"}
+              aria-hidden="true"
+            />
+          </Button>
+        ) : null}
 
-        {advancedOpen ? (
+        {!hideCameraAndRoi && advancedOpen ? (
           <div className="space-y-4">
             <section className="border border-slate-200 p-4">
               <div className="mb-3 font-semibold">
@@ -1816,6 +1763,8 @@ export function ProductProfileForm({
               </div>
             </section>
 
+            {!hideCameraAndRoi ? (
+            <>
             <section className="border border-slate-200 p-4">
               <div className="mb-3 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                 <div>
@@ -2291,12 +2240,13 @@ export function ProductProfileForm({
                 </CameraPreviewTransformLayer>
               </div>
 
-              <div className="mt-3 grid gap-2">
-                {roiRegions.map((region) => (
-                  <div
-                    key={region.index}
-                    className="grid grid-cols-[52px_repeat(5,minmax(0,1fr))_86px_48px_48px] gap-2"
-                  >
+              <div className="mt-3 overflow-x-auto pb-1">
+                <div className="grid min-w-[760px] gap-2">
+                  {roiRegions.map((region) => (
+                    <div
+                      key={region.index}
+                      className="grid grid-cols-[52px_repeat(5,minmax(0,1fr))_86px_48px_48px] gap-2"
+                    >
                     <div className="flex h-12 items-center border border-slate-200 px-3 text-base font-semibold">
                       {region.index}
                     </div>
@@ -2364,33 +2314,16 @@ export function ProductProfileForm({
                     >
                       <Trash2 className="h-4 w-4" aria-hidden="true" />
                     </Button>
-                  </div>
-                ))}
+                    </div>
+                  ))}
+                </div>
               </div>
             </section>
 
-            <section className="border border-slate-200 p-4">
-              <div className="mb-3 font-semibold">
-                {t("products.groupStatus")}
-              </div>
-              <label className="block max-w-xs text-sm font-medium text-slate-700">
-                {t("products.status")}
-                <Select
-                  value={draft.active ? "active" : "inactive"}
-                  onChange={(event) =>
-                    setDraft((current) => ({
-                      ...current,
-                      active: event.target.value === "active",
-                    }))
-                  }
-                  className="mt-2 flex h-12 w-full border border-slate-300 bg-white px-4 py-2 text-base text-slate-950 outline-none transition focus:border-cyan-600 focus:ring-2 focus:ring-cyan-100"
-                >
-                  <option value="active">{t("products.active")}</option>
-                  <option value="inactive">{t("products.inactive")}</option>
-                </Select>
-              </label>
-            </section>
-          </div>
+            </>
+            ) : null}
+
+            </div>
         ) : null}
       </form>
     </Card>

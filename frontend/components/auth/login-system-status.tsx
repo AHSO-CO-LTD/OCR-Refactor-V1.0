@@ -9,8 +9,14 @@ import {
   type HealthResponse,
   type SystemLicenseState,
 } from "@/lib/api";
+import {
+  getDesktopBridge,
+  type DesktopStartupSnapshot,
+  type DesktopStartupStageStatus,
+} from "@/lib/desktop";
 import { useI18n } from "@/lib/i18n";
 import { LICENSE_WATCHDOG_INTERVAL_MS } from "@/lib/use-license-watchdog";
+import { cn } from "@/lib/utils";
 
 export type LoginGateStatus = {
   checking: boolean;
@@ -19,59 +25,74 @@ export type LoginGateStatus = {
 };
 
 type Props = {
+  className?: string;
   onChange: (status: LoginGateStatus) => void;
 };
 
 type StatusSnapshot = {
   apiHealth: HealthResponse["data"] | null;
   license: SystemLicenseState | null;
+  desktopStartup: DesktopStartupSnapshot | null;
 };
 
 const initialSnapshot: StatusSnapshot = {
   apiHealth: null,
   license: null,
+  desktopStartup: null,
 };
 
-export function LoginSystemStatus({ onChange }: Props) {
+type SummaryStatus = DesktopStartupStageStatus | "unknown";
+
+export function LoginSystemStatus({ className, onChange }: Props) {
   const { apiError, t } = useI18n();
   const [snapshot, setSnapshot] = useState<StatusSnapshot>(initialSnapshot);
   const [checking, setChecking] = useState(true);
   const [error, setError] = useState("");
 
   const loadStatus = useCallback(async () => {
-    try {
-      const [healthResponse, licenseResponse] = await Promise.all([
+    const desktopBridge = getDesktopBridge();
+    const [healthResult, licenseResult, startupResult] =
+      await Promise.allSettled([
         getApiHealth(),
         getPublicSystemLicense(),
+        desktopBridge?.getStartupSnapshot() ?? Promise.resolve(null),
       ]);
 
-      setSnapshot({
-        apiHealth: healthResponse.data,
-        license: licenseResponse.data,
-      });
-      onChange({
-        checking: false,
-        apiConnected: healthResponse.data.status === "ok",
-        licenseReady:
-          licenseResponse.data.licensed === true &&
-          licenseResponse.data.donglePresent === true,
-      });
-    } catch (cause) {
+    const apiHealth =
+      healthResult.status === "fulfilled" ? healthResult.value.data : null;
+    const license =
+      licenseResult.status === "fulfilled" ? licenseResult.value.data : null;
+    const desktopStartup =
+      startupResult.status === "fulfilled" ? startupResult.value : null;
+    const apiConnected = apiHealth?.status === "ok";
+    const licenseReady =
+      license?.licensed === true && license?.donglePresent === true;
+
+    setSnapshot({ apiHealth, license, desktopStartup });
+    onChange({
+      checking: false,
+      apiConnected,
+      licenseReady,
+    });
+
+    if (healthResult.status === "rejected" || licenseResult.status === "rejected") {
+      const cause =
+        healthResult.status === "rejected"
+          ? healthResult.reason
+          : licenseResult.status === "rejected"
+            ? licenseResult.reason
+            : null;
       const message =
         cause instanceof ApiError
           ? apiError(cause.message, "auth.connectionError")
           : t("auth.connectionError");
 
-      setSnapshot(initialSnapshot);
       setError(message);
-      onChange({
-        checking: false,
-        apiConnected: false,
-        licenseReady: false,
-      });
-    } finally {
-      setChecking(false);
+    } else {
+      setError("");
     }
+
+    setChecking(false);
   }, [apiError, onChange, t]);
 
   useEffect(() => {
@@ -89,15 +110,45 @@ export function LoginSystemStatus({ onChange }: Props) {
     };
   }, [loadStatus]);
 
+  useEffect(() => {
+    const desktopBridge = getDesktopBridge();
+    if (!desktopBridge) return;
+
+    return desktopBridge.onStartupSnapshot((desktopStartup) => {
+      setSnapshot((current) => ({ ...current, desktopStartup }));
+    });
+  }, []);
+
   const apiConnected = snapshot.apiHealth?.status === "ok";
   const licenseReady =
     snapshot.license?.licensed === true &&
     snapshot.license?.donglePresent === true;
+  const softwareStatus = resolveSoftwareStatus(
+    snapshot.desktopStartup,
+    apiConnected,
+    checking,
+  );
+  const licenseStatus = resolveLicenseStatus(
+    snapshot.license,
+    snapshot.desktopStartup,
+    checking,
+  );
+  const plcStatus = resolveStartupGroupStatus(
+    snapshot.desktopStartup,
+    ["plc"],
+    checking,
+  );
+  const cameraStatus = resolveStartupGroupStatus(
+    snapshot.desktopStartup,
+    ["cameraPower", "cameraLight", "camera"],
+    checking,
+    "camera",
+  );
 
   return (
-    <div className="mt-5 border border-slate-200 bg-slate-50 p-3">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div>
+    <div className={cn("border border-slate-200 bg-slate-50 p-3", className)}>
+      <div className="login-status-header flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="min-w-0">
           <div className="text-sm font-semibold text-slate-950">
             {t("login.statusTitle")}
           </div>
@@ -124,53 +175,34 @@ export function LoginSystemStatus({ onChange }: Props) {
         </Button>
       </div>
 
-      <div className="mt-3 grid gap-2 sm:grid-cols-3">
+      <div className="login-status-grid mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
         <StatusCell
-          label={t("login.apiConnection")}
-          value={
-            apiConnected ? t("dashboard.connected") : t("dashboard.pending")
-          }
-          tone={apiConnected ? "ok" : "idle"}
+          label={t("login.softwareCheck")}
+          value={t(`login.startupStatus.${softwareStatus}`)}
+          status={softwareStatus}
         />
         <StatusCell
-          label={t("login.securityCheck")}
-          value={
-            snapshot.license?.licensed === true
-              ? t("dashboard.licensed")
-              : snapshot.license?.licensed === false
-                ? t("dashboard.unlicensed")
-                : t("dashboard.pending")
-          }
-          tone={
-            snapshot.license?.licensed === true
-              ? "ok"
-              : snapshot.license?.licensed === false
-                ? "error"
-                : "idle"
-          }
+          label={t("login.licenseCheck")}
+          value={t(`login.startupStatus.${licenseStatus}`)}
+          status={licenseStatus}
         />
         <StatusCell
-          label={t("login.dongleGate")}
-          value={
-            snapshot.license?.donglePresent === true
-              ? t("dashboard.donglePresent")
-              : snapshot.license?.donglePresent === false
-                ? t("dashboard.dongleMissing")
-                : t("dashboard.pending")
-          }
-          tone={
-            snapshot.license?.donglePresent === true
-              ? "ok"
-              : snapshot.license?.donglePresent === false
-                ? "error"
-                : "idle"
-          }
+          label={t("login.plcCheck")}
+          value={t(`login.startupStatus.${plcStatus}`)}
+          status={plcStatus}
+        />
+        <StatusCell
+          label={t("login.cameraCheck")}
+          value={t(`login.startupStatus.${cameraStatus}`)}
+          status={cameraStatus}
         />
       </div>
 
-      <div className="mt-3 text-xs text-slate-500">
+      <div className="login-status-checked mt-3 break-words text-xs text-slate-500">
         {t("dashboard.lastChecked")}:{" "}
-        {snapshot.license?.lastCheckedAt ?? t("dashboard.noData")}
+        {snapshot.license?.lastCheckedAt ??
+          snapshot.apiHealth?.timestamp ??
+          t("dashboard.noData")}
       </div>
 
       {error ? (
@@ -185,35 +217,105 @@ export function LoginSystemStatus({ onChange }: Props) {
 function StatusCell({
   label,
   value,
-  tone,
+  status,
 }: {
   label: string;
   value: string;
-  tone: "ok" | "error" | "idle";
+  status: SummaryStatus;
 }) {
   return (
-    <div className="border border-slate-200 bg-white px-3 py-2">
+    <div className="login-status-cell min-w-0 border border-slate-200 bg-white px-3 py-2">
       <div className="flex items-center justify-between gap-2">
         <span className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
           {label}
         </span>
-        <span className={statusPillClass(tone)} />
+        <span className={statusPillClass(status)} />
       </div>
-      <div className="mt-2 text-sm font-semibold text-slate-950">{value}</div>
+      <div className="login-status-value mt-2 break-words text-sm font-semibold text-slate-950">{value}</div>
     </div>
   );
 }
 
-function statusPillClass(tone: "ok" | "error" | "idle") {
+function statusPillClass(status: SummaryStatus) {
   const base = "inline-flex h-2.5 w-2.5 shrink-0 rounded-full";
 
-  if (tone === "ok") {
+  if (status === "done") {
     return `${base} bg-emerald-500`;
   }
 
-  if (tone === "error") {
+  if (status === "failed") {
     return `${base} bg-red-500`;
   }
 
+  if (status === "warning") {
+    return `${base} bg-amber-500`;
+  }
+
+  if (status === "running") {
+    return `${base} animate-pulse bg-cyan-600`;
+  }
+
   return `${base} bg-slate-300`;
+}
+
+function resolveSoftwareStatus(
+  startup: DesktopStartupSnapshot | null,
+  apiConnected: boolean,
+  checking: boolean,
+): SummaryStatus {
+  if (!startup) {
+    if (checking) return "running";
+    return apiConnected ? "done" : "failed";
+  }
+
+  return resolveStartupGroupStatus(
+    startup,
+    ["deviceTool", "backend", "frontend", "database"],
+    checking,
+  );
+}
+
+function resolveLicenseStatus(
+  license: SystemLicenseState | null,
+  startup: DesktopStartupSnapshot | null,
+  checking: boolean,
+): SummaryStatus {
+  if (license?.licensed === true && license.donglePresent === true) {
+    return "done";
+  }
+
+  if (license?.licensed === false || license?.donglePresent === false) {
+    return "failed";
+  }
+
+  return resolveStartupGroupStatus(startup, ["license"], checking);
+}
+
+function resolveStartupGroupStatus(
+  startup: DesktopStartupSnapshot | null,
+  stageIds: string[],
+  checking: boolean,
+  primaryStageId?: string,
+): SummaryStatus {
+  if (!startup) return checking ? "running" : "unknown";
+
+  const stages = stageIds
+    .map((id) => startup.stages.find((stage) => stage.id === id))
+    .filter((stage) => stage !== undefined);
+
+  if (stages.length === 0) return "unknown";
+
+  const primaryStage = primaryStageId
+    ? stages.find((stage) => stage.id === primaryStageId)
+    : null;
+
+  if (primaryStage?.status === "skipped") return "skipped";
+  if (stages.some((stage) => stage.status === "failed")) return "failed";
+  if (stages.some((stage) => stage.status === "running")) return "running";
+  if (stages.some((stage) => stage.status === "warning")) return "warning";
+  if (stages.some((stage) => stage.status === "pending")) return "pending";
+  if (stages.some((stage) => stage.status === "done")) return "done";
+  if (stages.every((stage) => stage.status === "skipped")) return "skipped";
+
+  return "unknown";
 }

@@ -42,6 +42,7 @@ type CameraImageViewerProps = {
   onTransformChange?: (transform: CameraViewTransform) => void;
   footerAction?: ReactNode;
   liveStats?: CameraLiveStats | null;
+  overlay?: ReactNode;
   title: string;
 };
 
@@ -73,6 +74,7 @@ export function CameraImageViewer({
   onTransformChange,
   footerAction,
   liveStats,
+  overlay,
   title,
 }: CameraImageViewerProps) {
   const { t } = useI18n();
@@ -211,7 +213,7 @@ export function CameraImageViewer({
   return (
     <div
       ref={containerRef}
-      className="relative flex aspect-[3/1] min-h-[280px] touch-none items-center justify-center overflow-hidden bg-slate-950"
+      className="relative flex aspect-[3/1] min-h-[180px] w-full min-w-0 touch-none items-center justify-center overflow-hidden bg-slate-950 sm:min-h-[220px] xl:min-h-[280px]"
       onPointerDown={handlePointerDown}
       onPointerMove={handlePointerMove}
       onPointerUp={handlePointerUp}
@@ -243,6 +245,7 @@ export function CameraImageViewer({
               })
             }
           />
+          {overlay}
         </CameraPreviewTransformLayer>
       ) : (
         <div className="flex flex-col items-center gap-3 text-slate-400">

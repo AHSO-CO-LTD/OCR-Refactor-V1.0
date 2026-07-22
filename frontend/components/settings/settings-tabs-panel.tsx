@@ -1,58 +1,78 @@
 "use client";
 
+import { ArrowLeft } from "lucide-react";
+import Link from "next/link";
 import { useState } from "react";
-import { AiSettingsPanel } from "@/components/settings/ai-settings-panel";
+import { AppUpdatePanel } from "@/components/settings/app-update-panel";
 import { DesktopSettingsPanel } from "@/components/settings/desktop-settings-panel";
 import { LanguageSettingsPanel } from "@/components/settings/language-settings-panel";
+import { LineResultSettingsPanel } from "@/components/settings/line-result-settings-panel";
+import { MachineInactivitySettingsPanel } from "@/components/settings/machine-inactivity-settings-panel";
 import { OcrTestSettingsPanel } from "@/components/settings/ocr-test-settings-panel";
 import { RuntimeTestSettingsPanel } from "@/components/settings/runtime-test-settings-panel";
-import { VolumeSettingsPanel } from "@/components/settings/volume-settings-panel";
+import { TerminalSettingsPanel } from "@/components/settings/terminal-settings-panel";
+import { Button } from "@/components/ui/button";
 import { useI18n } from "@/lib/i18n";
 import { getStoredUser } from "@/lib/session";
 
 type SettingsTab =
   | "desktop"
   | "language"
-  | "volume"
-  | "ai"
+  | "inactivity"
+  | "line-result"
   | "ocr-test"
-  | "runtime-test";
+  | "runtime-test"
+  | "terminal"
+  | "update";
 
 export function SettingsTabsPanel() {
   const { t } = useI18n();
   const currentRole =
     typeof window === "undefined" ? null : getStoredUser()?.role ?? null;
-  const canManageAiSettings =
+  const canManageProductSettings =
     currentRole === "dev" ||
     currentRole === "admin" ||
     currentRole === "engineer";
+  const canManageLineResultSettings = canManageProductSettings;
   const canManageOcrTestSettings = currentRole === "dev";
   const canManageRuntimeTestSettings = currentRole === "dev";
+  const canManageTerminalSettings = currentRole === "dev";
+  const canManageUpdates = currentRole === "dev" || currentRole === "admin";
+  const canManageInactivity = currentRole === "dev" || currentRole === "admin";
   const [activeTab, setActiveTab] = useState<SettingsTab>("desktop");
 
   return (
     <div className="space-y-5">
+      <Button asChild variant="outline" className="h-11">
+        <Link href="/dashboard/line">
+          <ArrowLeft className="h-4 w-4" aria-hidden="true" />
+          {t("settings.backToOperation")}
+        </Link>
+      </Button>
+
       <div className="flex flex-wrap gap-2 border-b border-slate-200 pb-3">
         <TabButton
           active={activeTab === "desktop"}
           label={t("settings.tabDesktop")}
           onClick={() => setActiveTab("desktop")}
         />
+        {canManageInactivity ? (
+          <TabButton
+            active={activeTab === "inactivity"}
+            label={t("settings.tabInactivity")}
+            onClick={() => setActiveTab("inactivity")}
+          />
+        ) : null}
         <TabButton
           active={activeTab === "language"}
           label={t("settings.tabLanguage")}
           onClick={() => setActiveTab("language")}
         />
-        <TabButton
-          active={activeTab === "volume"}
-          label={t("settings.tabVolume")}
-          onClick={() => setActiveTab("volume")}
-        />
-        {canManageAiSettings ? (
+        {canManageLineResultSettings ? (
           <TabButton
-            active={activeTab === "ai"}
-            label={t("settings.tabAi")}
-            onClick={() => setActiveTab("ai")}
+            active={activeTab === "line-result"}
+            label={t("settings.tabLineResult")}
+            onClick={() => setActiveTab("line-result")}
           />
         ) : null}
         {canManageOcrTestSettings ? (
@@ -69,18 +89,40 @@ export function SettingsTabsPanel() {
             onClick={() => setActiveTab("runtime-test")}
           />
         ) : null}
+        {canManageTerminalSettings ? (
+          <TabButton
+            active={activeTab === "terminal"}
+            label={t("settings.tabTerminal")}
+            onClick={() => setActiveTab("terminal")}
+          />
+        ) : null}
+        {canManageUpdates ? (
+          <TabButton
+            active={activeTab === "update"}
+            label={t("settings.tabUpdate")}
+            onClick={() => setActiveTab("update")}
+          />
+        ) : null}
       </div>
 
       {activeTab === "desktop" ? <DesktopSettingsPanel /> : null}
       {activeTab === "language" ? <LanguageSettingsPanel /> : null}
-      {activeTab === "volume" ? <VolumeSettingsPanel /> : null}
-      {canManageAiSettings && activeTab === "ai" ? <AiSettingsPanel /> : null}
+      {canManageInactivity && activeTab === "inactivity" ? (
+        <MachineInactivitySettingsPanel />
+      ) : null}
+      {canManageLineResultSettings && activeTab === "line-result" ? (
+        <LineResultSettingsPanel />
+      ) : null}
       {canManageOcrTestSettings && activeTab === "ocr-test" ? (
         <OcrTestSettingsPanel />
       ) : null}
       {canManageRuntimeTestSettings && activeTab === "runtime-test" ? (
         <RuntimeTestSettingsPanel />
       ) : null}
+      {canManageTerminalSettings && activeTab === "terminal" ? (
+        <TerminalSettingsPanel />
+      ) : null}
+      {canManageUpdates && activeTab === "update" ? <AppUpdatePanel /> : null}
     </div>
   );
 }

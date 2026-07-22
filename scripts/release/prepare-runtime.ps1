@@ -1,3 +1,11 @@
+param(
+  [string]$ToolBundlePath = $env:DEVICE_TOOL_BUNDLE_PATH,
+  [string]$ToolReleaseRepository = $env:DEVICE_TOOL_RELEASE_REPOSITORY,
+  [string]$ToolReleaseTag = $env:DEVICE_TOOL_RELEASE_TAG,
+  [string]$ToolReleaseAsset = $env:DEVICE_TOOL_RELEASE_ASSET,
+  [string]$ToolReleaseSha256 = $env:DEVICE_TOOL_RELEASE_SHA256
+)
+
 $ErrorActionPreference = "Stop"
 
 $repoRoot = Resolve-Path (Join-Path $PSScriptRoot "..\..")
@@ -44,9 +52,9 @@ Copy-Item -LiteralPath (Join-Path $repoRoot "backend\dist") -Destination $backen
 Copy-Item -LiteralPath (Join-Path $repoRoot "backend\prisma") -Destination $backendRuntime -Recurse
 Copy-Item -LiteralPath (Join-Path $repoRoot "backend\package.json") -Destination $backendRuntime
 Copy-Item -LiteralPath (Join-Path $repoRoot "backend\native") -Destination $backendRuntime -Recurse
-Copy-Item -LiteralPath (Join-Path $repoRoot "backend\scripts") -Destination $backendRuntime -Recurse
 
-$dongleHelperRuntime = Join-Path $backendRuntime "scripts\check-dongle.py"
+$dongleHelperRuntime = Join-Path $backendRuntime "native\dongle-checker.exe"
+& (Join-Path $repoRoot "scripts\release\build-dongle-helper.ps1") -OutputPath $dongleHelperRuntime
 if (-not (Test-Path $dongleHelperRuntime)) {
   throw "Dongle helper was not staged at $dongleHelperRuntime"
 }
@@ -73,7 +81,25 @@ if (Test-Path $frontendPublic) {
 }
 
 $toolRuntime = Join-Path $runtimeRoot "tool"
-Copy-Item -LiteralPath (Join-Path $repoRoot "tool") -Destination $toolRuntime -Recurse
+$toolStageParameters = @{
+  Destination = $toolRuntime
+}
+if (-not [string]::IsNullOrWhiteSpace($ToolBundlePath)) {
+  $toolStageParameters.ToolBundlePath = $ToolBundlePath
+}
+if (-not [string]::IsNullOrWhiteSpace($ToolReleaseRepository)) {
+  $toolStageParameters.ToolReleaseRepository = $ToolReleaseRepository
+}
+if (-not [string]::IsNullOrWhiteSpace($ToolReleaseTag)) {
+  $toolStageParameters.ToolReleaseTag = $ToolReleaseTag
+}
+if (-not [string]::IsNullOrWhiteSpace($ToolReleaseAsset)) {
+  $toolStageParameters.ToolReleaseAsset = $ToolReleaseAsset
+}
+if (-not [string]::IsNullOrWhiteSpace($ToolReleaseSha256)) {
+  $toolStageParameters.ToolReleaseSha256 = $ToolReleaseSha256
+}
+& (Join-Path $PSScriptRoot "stage-private-tool.ps1") @toolStageParameters
 
 $vendorRoot = Join-Path $runtimeRoot "vendor"
 New-Item -ItemType Directory -Force -Path $vendorRoot | Out-Null
@@ -85,7 +111,7 @@ Place offline production installers here before building the final setup:
 - postgresql-windows-x64.exe
 - node-windows-x64.msi, if Node.js/npm is not installed
 - vc_redist.x64.exe, if the OCR runtime needs it on the target machine
-- python-windows-x64.exe, if Python 3.11 is not installed
+- Python 3.11 is embedded in the encrypted Tool release and does not need a separate installer
 
 The NSIS bootstrap script checks this folder after installation.
 "@
@@ -109,6 +135,8 @@ $manifest = [ordered]@{
   backend = "backend/dist/main.js"
   frontend = "frontend-standalone"
   tool = "tool/main.py"
+  toolPython = "tool/python-embed/python.exe"
+  toolRelease = (Get-Content -LiteralPath (Join-Path $toolRuntime ".tool-release.json") -Raw | ConvertFrom-Json)
   envPath = "C:\ProgramData\AHSO OCR\.env"
 }
 

@@ -168,7 +168,7 @@ export class CreateProductProfileDto {
   @IsString()
   modelPath?: string;
 
-  @ApiProperty({ example: false })
+  @ApiProperty({ example: true, default: true })
   @IsOptional()
   @IsBoolean()
   rotateTestImageClockwise?: boolean;

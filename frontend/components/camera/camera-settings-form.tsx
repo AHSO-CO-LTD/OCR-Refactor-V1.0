@@ -1,29 +1,27 @@
 "use client";
 
 import { Save } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { toast } from "sonner";
-import { formatCameraApiError } from "@/components/camera/camera-error";
 import { Button } from "@/components/ui/button";
+import { ConfirmModal } from "@/components/ui/confirm-modal";
 import { Select } from "@/components/ui/select";
 import {
-  updateProductProfile,
   type CameraDevice,
   type CameraHardwareRange,
   type CameraHardwareRanges,
   type CameraProfile,
   type ProductProfile,
-  type ProductProfilePayload,
 } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
-import { getAccessToken } from "@/lib/session";
 
 type CameraSettingsFormProps = {
   product: ProductProfile | null;
   devices: CameraDevice[];
   hardwareRanges: CameraHardwareRanges | null;
   disabled?: boolean;
-  onSaved: (product: ProductProfile) => void;
+  onDirtyChange?: (dirty: boolean) => void;
+  onApply: (camera: CameraProfile) => Promise<ProductProfile>;
 };
 
 export function CameraSettingsForm({
@@ -31,13 +29,28 @@ export function CameraSettingsForm({
   devices,
   hardwareRanges,
   disabled = false,
-  onSaved,
+  onDirtyChange,
+  onApply,
 }: CameraSettingsFormProps) {
-  const { apiError, t } = useI18n();
+  const { t } = useI18n();
   const [draft, setDraft] = useState<CameraProfile | null>(() =>
     product ? normalizeCamera(product.camera) : null,
   );
   const [saving, setSaving] = useState(false);
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const dirty = Boolean(
+    product &&
+      draft &&
+      JSON.stringify(draft) !== JSON.stringify(normalizeCamera(product.camera)),
+  );
+
+  useEffect(() => {
+    onDirtyChange?.(dirty);
+  }, [dirty, onDirtyChange]);
+
+  useEffect(() => {
+    return () => onDirtyChange?.(false);
+  }, [onDirtyChange]);
 
   if (!product || !draft) {
     return (
@@ -47,35 +60,27 @@ export function CameraSettingsForm({
     );
   }
 
-  async function handleSave() {
+  function requestSave() {
+    if (!product || !draft) {
+      toast.warning(t("camera.selectProductFirst"));
+      return;
+    }
+    setConfirmOpen(true);
+  }
+
+  async function handleApply() {
     if (!product || !draft) {
       toast.warning(t("camera.selectProductFirst"));
       return;
     }
 
-    const accessToken = getAccessToken();
-
-    if (!accessToken) {
-      toast.error(t("users.missingSession"));
-      return;
-    }
-
     setSaving(true);
-    const toastId = toast.loading(t("camera.savingSettings"));
-
     try {
-      const response = await updateProductProfile(
-        accessToken,
-        product.id,
-        buildProductPayload(product, draft),
-      );
-      setDraft(normalizeCamera(response.data.camera));
-      onSaved(response.data);
-      toast.success(t("camera.settingsSaved"), { id: toastId });
-    } catch (cause) {
-      toast.error(formatCameraApiError(cause, apiError, t, "camera.settingsSaveError"), {
-        id: toastId,
-      });
+      const savedProduct = await onApply(draft);
+      setDraft(normalizeCamera(savedProduct.camera));
+      setConfirmOpen(false);
+    } catch {
+      // The parent operation reports the concrete save/restart error via Sonner.
     } finally {
       setSaving(false);
     }
@@ -113,6 +118,7 @@ export function CameraSettingsForm({
   const formDisabled = disabled || saving;
 
   return (
+    <>
     <div className="border border-slate-200 bg-white text-sm">
       <div className="flex flex-col gap-3 border-b border-slate-200 px-5 py-4 sm:flex-row sm:items-start sm:justify-between">
         <div className="min-w-0">
@@ -122,7 +128,7 @@ export function CameraSettingsForm({
         <div className="flex shrink-0 flex-wrap gap-2">
           <Button
             type="button"
-            onClick={() => void handleSave()}
+            onClick={requestSave}
             disabled={formDisabled}
             className="h-10 px-4"
           >
@@ -253,12 +259,18 @@ export function CameraSettingsForm({
         </section>
       </div>
 
-      {disabled ? (
-        <div className="mx-5 mb-5 border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-          {t("camera.stopLiveBeforeEdit")}
-        </div>
-      ) : null}
     </div>
+    <ConfirmModal
+      open={confirmOpen}
+      title={t("camera.confirmRestartTitle")}
+      description={t("camera.confirmRestartDescription")}
+      confirmLabel={t("camera.restartAndApply")}
+      cancelLabel={t("common.cancel")}
+      loading={saving}
+      onConfirm={() => void handleApply()}
+      onCancel={() => setConfirmOpen(false)}
+    />
+    </>
   );
 }
 
@@ -383,31 +395,6 @@ function normalizeCamera(camera: CameraProfile): CameraProfile {
     previewPanX: camera.previewPanX ?? 0,
     previewPanY: camera.previewPanY ?? 0,
     previewRotation: camera.previewRotation ?? 0,
-  };
-}
-
-function buildProductPayload(
-  product: ProductProfile,
-  camera: CameraProfile,
-): ProductProfilePayload {
-  return {
-    code: product.code,
-    name: product.name,
-    defaultNumber: product.defaultNumber,
-    batchSize: product.batchSize,
-    exposure: product.exposure,
-    thresholdAccept: product.thresholdAccept,
-    thresholdMns: product.thresholdMns,
-    rowThreshold: product.rowThreshold,
-    modelPath: product.modelPath ?? undefined,
-    active: product.active,
-    camera: {
-      ...camera,
-      deviceName: camera.deviceName?.trim() || undefined,
-      cameraIdentityId: camera.cameraIdentityId,
-      rtspUrl: camera.rtspUrl?.trim() || undefined,
-    },
-    roiRegions: product.roiRegions,
   };
 }
 

@@ -1,5 +1,6 @@
 import {
   Body,
+  BadRequestException,
   Controller,
   Delete,
   ForbiddenException,
@@ -7,8 +8,13 @@ import {
   Param,
   Patch,
   Post,
+  Query,
+  StreamableFile,
+  UploadedFile,
+  UseInterceptors,
   UseGuards,
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import {
@@ -24,27 +30,61 @@ import { BulkUpdateProductAiSettingsDto } from './dto/bulk-update-product-ai-set
 import { BulkUpdateProductOcrTestSettingsDto } from './dto/bulk-update-product-ocr-test-settings.dto';
 import { CreateProductProfileDto } from './dto/product-profile.dto';
 import { UpdateProductBatchSizeDto } from './dto/update-product-batch-size.dto';
+import { UpdateProductAiSettingsDto } from './dto/update-product-ai-settings.dto';
 import { UpdateProductOcrTestSettingsDto } from './dto/update-product-ocr-test-settings.dto';
 import { UpdateProductProfileDto } from './dto/update-product-profile.dto';
+import { UpdateProductRoiRegionsDto } from './dto/update-product-roi-regions.dto';
 import { ProductsService } from './products.service';
+import { ProductImportService } from './product-import.service';
 
 @ApiTags('products')
 @ApiBearerAuth()
 @Controller('products')
 @UseGuards(JwtAuthGuard, PermissionsGuard)
 export class ProductsController {
-  constructor(private readonly productsService: ProductsService) {}
+  constructor(
+    private readonly productsService: ProductsService,
+    private readonly productImportService: ProductImportService,
+  ) {}
 
   @ApiOperation({ summary: 'List product profiles' })
   @Get()
   @RequireAnyPermission(
+    PERMISSIONS.DASHBOARD_VIEW,
     PERMISSIONS.PRODUCT_MANAGE,
+    PERMISSIONS.ROI_EDIT,
     PERMISSIONS.INSPECTION_START,
     PERMISSIONS.INSPECTION_TEST,
     PERMISSIONS.REPORT_VIEW,
   )
   listProducts() {
     return this.productsService.listProducts();
+  }
+
+  @ApiOperation({ summary: 'Download the two-column XLSX product template' })
+  @Get('import/template')
+  @RequirePermissions(PERMISSIONS.PRODUCT_MANAGE)
+  async downloadImportTemplate(@Query('language') language?: string) {
+    const buffer = await this.productImportService.createTemplate(
+      language === 'en' ? 'en' : 'vi',
+    );
+    return new StreamableFile(buffer, {
+      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      disposition: 'attachment; filename="product-import-template.xlsx"',
+    });
+  }
+
+  @ApiOperation({ summary: 'Create or update products from an XLSX file' })
+  @Post('import')
+  @RequirePermissions(PERMISSIONS.PRODUCT_MANAGE)
+  @UseInterceptors(
+    FileInterceptor('file', { limits: { fileSize: 5 * 1024 * 1024 } }),
+  )
+  importProducts(@UploadedFile() file?: Express.Multer.File) {
+    if (!file || !file.originalname.toLocaleLowerCase().endsWith('.xlsx')) {
+      throw new BadRequestException('Select a valid XLSX product import file');
+    }
+    return this.productImportService.importWorkbook(file.buffer);
   }
 
   @ApiOperation({ summary: 'Create a product profile' })
@@ -59,6 +99,16 @@ export class ProductsController {
   @RequirePermissions(PERMISSIONS.PRODUCT_MANAGE)
   updateProduct(@Param('id') id: string, @Body() dto: UpdateProductProfileDto) {
     return this.productsService.updateProduct(id, dto);
+  }
+
+  @ApiOperation({ summary: 'Update ROI regions for a product profile' })
+  @Patch(':id/roi-regions')
+  @RequirePermissions(PERMISSIONS.ROI_EDIT)
+  updateProductRoiRegions(
+    @Param('id') id: string,
+    @Body() dto: UpdateProductRoiRegionsDto,
+  ) {
+    return this.productsService.updateProductRoiRegions(id, dto.roiRegions);
   }
 
   @ApiOperation({ summary: 'Update product batch size for runtime' })
@@ -76,7 +126,7 @@ export class ProductsController {
   }
 
   @ApiOperation({
-    summary: 'Bulk update OCR test settings for product profiles',
+    summary: 'Bulk update line OCR crop rotation settings for product profiles',
   })
   @Patch('ocr-test-settings/apply')
   @RequirePermissions(PERMISSIONS.SYSTEM_DEBUG)
@@ -85,7 +135,9 @@ export class ProductsController {
     @CurrentUser() user: AuthenticatedRequest['user'],
   ) {
     if (user.role !== 'dev') {
-      throw new ForbiddenException('Only dev can update OCR test settings');
+      throw new ForbiddenException(
+        'Only dev can update line OCR rotation settings',
+      );
     }
 
     return this.productsService.bulkUpdateProductOcrTestSettings(dto);
@@ -96,11 +148,35 @@ export class ProductsController {
   })
   @Patch('ai-settings/apply')
   @RequirePermissions(PERMISSIONS.PRODUCT_MANAGE)
-  bulkUpdateProductAiSettings(@Body() dto: BulkUpdateProductAiSettingsDto) {
+  bulkUpdateProductAiSettings(
+    @Body() dto: BulkUpdateProductAiSettingsDto,
+    @CurrentUser() user: AuthenticatedRequest['user'],
+  ) {
+    if (user.role !== 'dev' && dto.rowThreshold !== undefined) {
+      throw new ForbiddenException('Only dev can update row threshold');
+    }
+
     return this.productsService.bulkUpdateProductAiSettings(dto);
   }
 
-  @ApiOperation({ summary: 'Update OCR test settings for a product profile' })
+  @ApiOperation({ summary: 'Update AI settings for one product profile' })
+  @Patch(':id/ai-settings')
+  @RequirePermissions(PERMISSIONS.PRODUCT_MANAGE)
+  updateProductAiSettings(
+    @Param('id') id: string,
+    @Body() dto: UpdateProductAiSettingsDto,
+    @CurrentUser() user: AuthenticatedRequest['user'],
+  ) {
+    if (user.role !== 'dev' && dto.rowThreshold !== undefined) {
+      throw new ForbiddenException('Only dev can update row threshold');
+    }
+
+    return this.productsService.updateProductAiSettings(id, dto);
+  }
+
+  @ApiOperation({
+    summary: 'Update line OCR crop rotation settings for a product profile',
+  })
   @Patch(':id/ocr-test-settings')
   @RequirePermissions(PERMISSIONS.SYSTEM_DEBUG)
   updateProductOcrTestSettings(
@@ -109,7 +185,9 @@ export class ProductsController {
     @CurrentUser() user: AuthenticatedRequest['user'],
   ) {
     if (user.role !== 'dev') {
-      throw new ForbiddenException('Only dev can update OCR test settings');
+      throw new ForbiddenException(
+        'Only dev can update line OCR rotation settings',
+      );
     }
 
     return this.productsService.updateProductOcrTestSettings(

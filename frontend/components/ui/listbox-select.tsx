@@ -92,7 +92,7 @@ export function ListboxSelect({
       </button>
 
       {open ? (
-        <div className="mt-2 border border-slate-200 bg-white shadow-[0_12px_30px_rgba(15,23,42,0.12)]">
+        <div className="absolute inset-x-0 top-full z-50 mt-2 border border-slate-200 bg-white shadow-[0_12px_30px_rgba(15,23,42,0.12)]">
           <div className="max-h-64 overflow-y-auto py-1" role="listbox">
             {options.length === 0 ? (
               <div className="px-3 py-2 text-sm text-slate-500">

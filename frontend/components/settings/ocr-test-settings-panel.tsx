@@ -1,6 +1,6 @@
 "use client";
 
-import { FolderOpen, Save } from "lucide-react";
+import { CheckCircle2, FolderOpen, Save } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -22,6 +22,8 @@ import { getAccessToken } from "@/lib/session";
 
 type ApplyScope = "all" | "selected";
 
+const defaultLineOcrCropRotation = true;
+
 export function OcrTestSettingsPanel() {
   const { t, apiError } = useI18n();
   const bridge = getDesktopBridge();
@@ -31,7 +33,7 @@ export function OcrTestSettingsPanel() {
   const [saving, setSaving] = useState(false);
   const [savingStorage, setSavingStorage] = useState(false);
   const [applyScope, setApplyScope] = useState<ApplyScope>("all");
-  const [rotateEnabled, setRotateEnabled] = useState(false);
+  const [rotateEnabled, setRotateEnabled] = useState(defaultLineOcrCropRotation);
   const [selectedProductIds, setSelectedProductIds] = useState<string[]>([]);
   const [storageSettings, setStorageSettings] = useState<DesktopTestStorageSettings>(
     defaultDesktopTestStorageSettings,
@@ -98,6 +100,7 @@ export function OcrTestSettingsPanel() {
   const totalWithRotate = products.filter(
     (product) => product.rotateTestImageClockwise,
   ).length;
+  const totalWithoutDefault = products.length - totalWithRotate;
 
   function toggleSelectedProduct(productId: string, checked: boolean) {
     setSelectedProductIds((current) =>
@@ -205,6 +208,50 @@ export function OcrTestSettingsPanel() {
             <p className="text-sm text-slate-600">
               {t("settings.ocrTestDescription")}
             </p>
+
+            <div className="grid gap-3 md:grid-cols-3">
+              <ProcessStep
+                step="1"
+                title={t("settings.ocrTestStepCrop")}
+                description={t("settings.ocrTestStepCropHint")}
+              />
+              <ProcessStep
+                step="2"
+                title={t("settings.ocrTestStepRotate")}
+                description={t("settings.ocrTestStepRotateHint")}
+              />
+              <ProcessStep
+                step="3"
+                title={t("settings.ocrTestStepOcr")}
+                description={t("settings.ocrTestStepOcrHint")}
+              />
+            </div>
+
+            <div className="border border-emerald-200 bg-emerald-50 p-4">
+              <div className="flex flex-col gap-3 min-[900px]:flex-row min-[900px]:items-start min-[900px]:justify-between">
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2 font-semibold text-emerald-950">
+                    <CheckCircle2 className="h-4 w-4" aria-hidden="true" />
+                    {t("settings.ocrTestDefaultTitle")}
+                  </div>
+                  <div className="mt-2 text-sm leading-6 text-emerald-800">
+                    {t("settings.ocrTestDefaultDescription")}
+                  </div>
+                </div>
+                <div className="inline-flex h-8 shrink-0 items-center border border-emerald-300 bg-white px-3 text-sm font-semibold text-emerald-800">
+                  {t("settings.ocrTestDefaultOn")}
+                </div>
+              </div>
+            </div>
+
+            <div className="border-t border-slate-200 pt-5">
+              <div className="text-base font-semibold text-slate-950">
+                {t("settings.ocrTestExistingTitle")}
+              </div>
+              <p className="mt-1 text-sm leading-6 text-slate-600">
+                {t("settings.ocrTestExistingDescription")}
+              </p>
+            </div>
 
             <div className="grid gap-3 md:grid-cols-2">
               <ScopeTile
@@ -397,7 +444,15 @@ export function OcrTestSettingsPanel() {
               }
             />
             <StateRow
-              label={t("settings.ocrTestRotateState")}
+              label={t("settings.ocrTestDefaultState")}
+              value={
+                defaultLineOcrCropRotation
+                  ? t("settings.ocrTestStateOn")
+                  : t("settings.ocrTestStateOff")
+              }
+            />
+            <StateRow
+              label={t("settings.ocrTestDraftState")}
               value={
                 rotateEnabled
                   ? t("settings.ocrTestStateOn")
@@ -417,6 +472,10 @@ export function OcrTestSettingsPanel() {
               value={`${totalWithRotate}/${products.length}`}
             />
             <StateRow
+              label={t("settings.ocrTestNeedsDefault")}
+              value={String(totalWithoutDefault)}
+            />
+            <StateRow
               label={t("settings.ocrTestStorageState")}
               value={
                 storageSettings.testImageSaveFolderPath ??
@@ -426,6 +485,28 @@ export function OcrTestSettingsPanel() {
           </CardContent>
         </Card>
       </div>
+    </div>
+  );
+}
+
+function ProcessStep({
+  description,
+  step,
+  title,
+}: {
+  description: string;
+  step: string;
+  title: string;
+}) {
+  return (
+    <div className="border border-slate-200 bg-white p-4">
+      <div className="flex items-center gap-3">
+        <span className="flex h-8 w-8 shrink-0 items-center justify-center border border-cyan-200 bg-cyan-50 text-sm font-semibold text-cyan-900">
+          {step}
+        </span>
+        <div className="font-semibold text-slate-950">{title}</div>
+      </div>
+      <p className="mt-3 text-sm leading-6 text-slate-500">{description}</p>
     </div>
   );
 }

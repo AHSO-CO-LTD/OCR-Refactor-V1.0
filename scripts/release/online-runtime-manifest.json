@@ -1,0 +1,31 @@
+{
+  "connectivityChecks": [
+    "https://www.microsoft.com/",
+    "http://www.msftconnecttest.com/connecttest.txt",
+    "https://www.google.com/generate_204",
+    "https://nodejs.org/"
+  ],
+  "node": {
+    "minimumMajor": 22,
+    "url": "https://nodejs.org/dist/v22.17.1/node-v22.17.1-x64.msi",
+    "fileName": "node-v22.17.1-x64.msi",
+    "sha256": ""
+  },
+  "python": {
+    "required": false,
+    "bundled": true,
+    "requiredMajor": 3,
+    "requiredMinor": 11,
+    "url": "https://www.python.org/ftp/python/3.11.9/python-3.11.9-amd64.exe",
+    "fileName": "python-3.11.9-amd64.exe",
+    "sha256": ""
+  },
+  "postgresql": {
+    "minimumMajor": 14,
+    "defaultPort": 5432,
+    "serviceName": "postgresql-x64-ahso",
+    "url": "https://get.enterprisedb.com/postgresql/postgresql-16.9-1-windows-x64.exe",
+    "fileName": "postgresql-16.9-1-windows-x64.exe",
+    "sha256": ""
+  }
+}

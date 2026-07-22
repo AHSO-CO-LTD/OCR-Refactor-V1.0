@@ -1,167 +1,130 @@
 "use client";
 
-import { Save } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { ChevronDown, ChevronUp, Save } from "lucide-react";
+import { useEffect, useState } from "react";
 import { toast } from "sonner";
+import { ModelPathField } from "@/components/products/model-path-field";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import {
   ApiError,
-  bulkUpdateProductAiSettings,
-  listProductProfiles,
+  updateProductAiSettings,
   type ProductProfile,
 } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
-import { getAccessToken } from "@/lib/session";
+import { getAccessToken, getStoredUser } from "@/lib/session";
 
-type ApplyScope = "all" | "selected";
+type AiSettingsPanelProps = {
+  onDirtyChange?: (dirty: boolean) => void;
+  product: ProductProfile | null;
+  onSaved: (product: ProductProfile) => void;
+};
 
 type AiSettingsDraft = {
+  modelPath: string;
   thresholdAccept: number;
   thresholdMns: number;
   rowThreshold: number;
 };
 
-const defaultDraft: AiSettingsDraft = {
-  thresholdAccept: 0.5,
-  thresholdMns: 0.5,
-  rowThreshold: 20,
-};
+function toDraft(product: ProductProfile | null): AiSettingsDraft {
+  return {
+    modelPath: product?.modelPath ?? "",
+    thresholdAccept: product?.thresholdAccept ?? 0.5,
+    thresholdMns: product?.thresholdMns ?? 0.5,
+    rowThreshold: product?.rowThreshold ?? 20,
+  };
+}
 
-export function AiSettingsPanel() {
+export function AiSettingsPanel({
+  onDirtyChange,
+  product,
+  onSaved,
+}: AiSettingsPanelProps) {
   const { t, apiError } = useI18n();
-  const [products, setProducts] = useState<ProductProfile[]>([]);
-  const [loading, setLoading] = useState(true);
+  const canManageRowThreshold = getStoredUser()?.role === "dev";
+  const [draft, setDraft] = useState<AiSettingsDraft>(() => toDraft(product));
   const [saving, setSaving] = useState(false);
-  const [applyScope, setApplyScope] = useState<ApplyScope>("all");
-  const [selectedProductIds, setSelectedProductIds] = useState<string[]>([]);
-  const [draft, setDraft] = useState<AiSettingsDraft>(defaultDraft);
+  const [developerOptionsOpen, setDeveloperOptionsOpen] = useState(false);
+  const dirty = Boolean(
+    product &&
+      (draft.modelPath.trim() !== (product.modelPath ?? "").trim() ||
+        draft.thresholdAccept !== product.thresholdAccept ||
+        draft.thresholdMns !== product.thresholdMns ||
+        (canManageRowThreshold &&
+          draft.rowThreshold !== product.rowThreshold)),
+  );
 
   useEffect(() => {
-    let cancelled = false;
+    onDirtyChange?.(dirty);
+  }, [dirty, onDirtyChange]);
 
-    async function loadProducts() {
-      setLoading(true);
-      const accessToken = getAccessToken();
+  useEffect(() => {
+    return () => onDirtyChange?.(false);
+  }, [onDirtyChange]);
 
-      if (!accessToken) {
-        setLoading(false);
-        return;
-      }
-
-      try {
-        const response = await listProductProfiles(accessToken);
-
-        if (cancelled) {
-          return;
-        }
-
-        setProducts(response.data);
-
-        const firstProduct = response.data[0];
-        if (firstProduct) {
-          setDraft({
-            thresholdAccept: firstProduct.thresholdAccept,
-            thresholdMns: firstProduct.thresholdMns,
-            rowThreshold: firstProduct.rowThreshold,
-          });
-        }
-      } catch (cause) {
-        if (!cancelled) {
-          const message =
-            cause instanceof ApiError
-              ? apiError(cause.message, "settings.aiLoadError")
-              : t("settings.aiLoadError");
-          toast.error(message);
-        }
-      } finally {
-        if (!cancelled) {
-          setLoading(false);
-        }
-      }
-    }
-
-    void loadProducts();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [apiError, t]);
-
-  const selectedProducts = useMemo(
-    () => products.filter((product) => selectedProductIds.includes(product.id)),
-    [products, selectedProductIds],
-  );
-  const selectedCount = selectedProducts.length;
-  const matchingCount = products.filter(
-    (product) =>
-      product.thresholdAccept === draft.thresholdAccept &&
-      product.thresholdMns === draft.thresholdMns &&
-      product.rowThreshold === draft.rowThreshold,
-  ).length;
-
-  function updateDraft<K extends keyof AiSettingsDraft>(key: K, value: string) {
+  function updateNumberDraft(
+    key: "thresholdAccept" | "thresholdMns" | "rowThreshold",
+    value: string,
+  ) {
     const nextValue = Number(value);
+    if (!Number.isFinite(nextValue)) return;
 
     setDraft((current) => ({
       ...current,
-      [key]: Number.isFinite(nextValue) ? nextValue : current[key],
+      [key]: nextValue,
     }));
   }
 
-  function toggleSelectedProduct(productId: string, checked: boolean) {
-    setSelectedProductIds((current) =>
-      checked
-        ? [...current, productId]
-        : current.filter((item) => item !== productId),
-    );
-  }
-
   async function handleSave() {
-    const accessToken = getAccessToken();
+    if (!product) {
+      toast.warning(t("camera.selectProductFirst"));
+      return;
+    }
 
+    if (
+      draft.thresholdAccept < 0 ||
+      draft.thresholdAccept > 1 ||
+      draft.thresholdMns < 0 ||
+      draft.thresholdMns > 1
+    ) {
+      toast.warning(t("settings.aiThresholdValidation"));
+      return;
+    }
+
+    if (
+      canManageRowThreshold &&
+      (!Number.isInteger(draft.rowThreshold) ||
+        draft.rowThreshold < 0 ||
+        draft.rowThreshold > 500)
+    ) {
+      toast.warning(t("settings.aiRowThresholdValidation"));
+      return;
+    }
+
+    const accessToken = getAccessToken();
     if (!accessToken) {
       toast.error(t("users.missingSession"));
       return;
     }
 
-    if (applyScope === "selected" && selectedProductIds.length === 0) {
-      toast.warning(t("settings.aiSelectProducts"));
-      return;
-    }
-
     setSaving(true);
-    const toastId = toast.loading(t("settings.aiSaving"));
+    const toastId = toast.loading(t("settings.aiProfileSaving"));
 
     try {
-      const response = await bulkUpdateProductAiSettings(accessToken, {
+      const response = await updateProductAiSettings(accessToken, product.id, {
+        modelPath: draft.modelPath.trim() || null,
         thresholdAccept: draft.thresholdAccept,
         thresholdMns: draft.thresholdMns,
-        rowThreshold: draft.rowThreshold,
-        applyToAll: applyScope === "all",
-        productIds: applyScope === "selected" ? selectedProductIds : undefined,
+        ...(canManageRowThreshold
+          ? { rowThreshold: draft.rowThreshold }
+          : {}),
       });
 
-      const targetIds = new Set(selectedProductIds);
-      setProducts((current) =>
-        current.map((product) =>
-          applyScope === "all" || targetIds.has(product.id)
-            ? {
-                ...product,
-                thresholdAccept: draft.thresholdAccept,
-                thresholdMns: draft.thresholdMns,
-                rowThreshold: draft.rowThreshold,
-              }
-            : product,
-        ),
-      );
-      toast.success(
-        formatMessage(t("settings.aiSaved"), {
-          count: response.data.updatedCount,
-        }),
-        { id: toastId },
-      );
+      setDraft(toDraft(response.data));
+      onSaved(response.data);
+      toast.success(t("settings.aiProfileSaved"), { id: toastId });
     } catch (cause) {
       const message =
         cause instanceof ApiError
@@ -173,245 +136,101 @@ export function AiSettingsPanel() {
     }
   }
 
+  if (!product) {
+    return (
+      <div className="border border-dashed border-slate-300 bg-white p-5 text-sm text-slate-500">
+        {t("camera.selectProductFirst")}
+      </div>
+    );
+  }
+
   return (
-    <div className="space-y-5">
-      <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_320px]">
-        <Card>
-          <CardHeader className="border-b border-slate-200">
-            <CardTitle className="text-lg">{t("settings.aiTitle")}</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-5 pt-5">
-            <p className="text-sm text-slate-600">
-              {t("settings.aiDescription")}
-            </p>
+    <Card>
+      <CardHeader className="flex-row items-start justify-between gap-4 border-b border-slate-200">
+        <div className="min-w-0">
+          <CardTitle className="text-lg">{t("nav.aiSettings")}</CardTitle>
+          <p className="mt-1 text-sm text-slate-600">
+            {t("settings.aiCompactDescription")}
+          </p>
+        </div>
+        <div className="shrink-0 border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-semibold text-slate-950">
+          {product.code}
+        </div>
+      </CardHeader>
 
-            <div className="grid gap-3 md:grid-cols-2">
-              <ScopeTile
-                active={applyScope === "all"}
-                label={t("settings.aiApplyAll")}
-                description={t("settings.aiApplyAllHint")}
-                onClick={() => setApplyScope("all")}
-              />
-              <ScopeTile
-                active={applyScope === "selected"}
-                label={t("settings.aiApplySelected")}
-                description={t("settings.aiApplySelectedHint")}
-                onClick={() => setApplyScope("selected")}
-              />
-            </div>
+      <CardContent className="space-y-5 pt-5">
+        <ModelPathField
+          value={draft.modelPath}
+          disabled={saving}
+          showHint={false}
+          onChange={(modelPath) =>
+            setDraft((current) => ({ ...current, modelPath }))
+          }
+        />
 
-            <div className="grid gap-4 md:grid-cols-3">
-              <NumberField
-                label={t("settings.aiThresholdAccept")}
-                value={draft.thresholdAccept}
-                min={0}
-                max={1}
-                step={0.01}
-                onChange={(value) => updateDraft("thresholdAccept", value)}
-              />
-              <NumberField
-                label={t("settings.aiThresholdMns")}
-                value={draft.thresholdMns}
-                min={0}
-                max={1}
-                step={0.01}
-                onChange={(value) => updateDraft("thresholdMns", value)}
-              />
-              <NumberField
-                label={t("settings.aiRowThreshold")}
-                value={draft.rowThreshold}
-                min={0}
-                max={500}
-                step={1}
-                onChange={(value) => updateDraft("rowThreshold", value)}
-              />
-            </div>
+        <div className="grid gap-4 md:grid-cols-2">
+          <NumberField
+            label={t("settings.aiThresholdAccept")}
+            value={draft.thresholdAccept}
+            min={0}
+            max={1}
+            step={0.01}
+            disabled={saving}
+            onChange={(value) => updateNumberDraft("thresholdAccept", value)}
+          />
+          <NumberField
+            label={t("settings.aiThresholdMns")}
+            value={draft.thresholdMns}
+            min={0}
+            max={1}
+            step={0.01}
+            disabled={saving}
+            onChange={(value) => updateNumberDraft("thresholdMns", value)}
+          />
+        </div>
 
-            <div className="grid gap-3 md:grid-cols-3">
-              <HintTile
-                label={t("settings.aiThresholdAccept")}
-                value={t("settings.aiThresholdAcceptHint")}
-              />
-              <HintTile
-                label={t("settings.aiThresholdMns")}
-                value={t("settings.aiThresholdMnsHint")}
-              />
-              <HintTile
-                label={t("settings.aiRowThreshold")}
-                value={t("settings.aiRowThresholdHint")}
-              />
-            </div>
-
-            {applyScope === "selected" ? (
-              <div className="space-y-3">
-                <div className="flex flex-wrap items-center justify-between gap-3">
-                  <div className="text-sm font-semibold text-slate-950">
-                    {t("settings.aiProducts")}
-                  </div>
-                  <div className="flex flex-wrap gap-2">
-                    <Button
-                      type="button"
-                      variant="outline"
-                      className="border-slate-300 bg-white"
-                      onClick={() =>
-                        setSelectedProductIds(products.map((product) => product.id))
-                      }
-                    >
-                      {t("settings.aiSelectAll")}
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      className="border-slate-300 bg-white"
-                      onClick={() => setSelectedProductIds([])}
-                    >
-                      {t("settings.aiClearSelection")}
-                    </Button>
-                  </div>
-                </div>
-
-                {products.length > 0 ? (
-                  <div className="grid max-h-[360px] gap-2 overflow-y-auto pr-1 sm:grid-cols-2">
-                    {products.map((product) => {
-                      const checked = selectedProductIds.includes(product.id);
-
-                      return (
-                        <label
-                          key={product.id}
-                          className="flex min-h-14 items-center gap-3 border border-slate-200 bg-white px-3 py-2"
-                        >
-                          <input
-                            type="checkbox"
-                            className="h-5 w-5 accent-cyan-700"
-                            checked={checked}
-                            onChange={(event) =>
-                              toggleSelectedProduct(product.id, event.target.checked)
-                            }
-                          />
-                          <div className="min-w-0">
-                            <div className="truncate font-semibold text-slate-950">
-                              {product.code}
-                            </div>
-                            <div className="truncate text-xs text-slate-500">
-                              {product.name}
-                            </div>
-                          </div>
-                        </label>
-                      );
-                    })}
-                  </div>
-                ) : (
-                  <div className="border border-dashed border-slate-300 p-4 text-sm text-slate-500">
-                    {loading ? t("settings.aiLoading") : t("settings.aiNoProducts")}
-                  </div>
-                )}
-              </div>
-            ) : null}
-
+        {canManageRowThreshold ? (
+          <div className="border-t border-slate-200 pt-4">
             <Button
               type="button"
-              onClick={() => void handleSave()}
-              disabled={loading || saving || products.length === 0}
+              variant="outline"
+              className="border-slate-300 bg-white"
+              aria-expanded={developerOptionsOpen}
+              onClick={() => setDeveloperOptionsOpen((current) => !current)}
             >
-              <Save className="h-4 w-4" />
-              {saving ? t("settings.aiSaving") : t("settings.aiSave")}
+              {developerOptionsOpen ? (
+                <ChevronUp className="h-4 w-4" aria-hidden="true" />
+              ) : (
+                <ChevronDown className="h-4 w-4" aria-hidden="true" />
+              )}
+              {t("settings.aiDeveloperOptions")}
             </Button>
-          </CardContent>
-        </Card>
 
-        <Card>
-          <CardHeader className="border-b border-slate-200">
-            <CardTitle className="text-lg">{t("settings.currentState")}</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3 pt-5 text-sm">
-            <StateRow
-              label={t("settings.aiApplyMode")}
-              value={
-                applyScope === "all"
-                  ? t("settings.aiApplyAll")
-                  : t("settings.aiApplySelected")
-              }
-            />
-            <StateRow
-              label={t("settings.aiThresholdAccept")}
-              value={draft.thresholdAccept.toFixed(2)}
-            />
-            <StateRow
-              label={t("settings.aiThresholdMns")}
-              value={draft.thresholdMns.toFixed(2)}
-            />
-            <StateRow
-              label={t("settings.aiRowThreshold")}
-              value={String(Math.round(draft.rowThreshold))}
-            />
-            <StateRow
-              label={t("settings.aiSelectedCount")}
-              value={String(selectedCount)}
-            />
-            <StateRow
-              label={t("settings.aiMatchingCount")}
-              value={`${matchingCount}/${products.length}`}
-            />
-          </CardContent>
-        </Card>
-      </div>
-    </div>
-  );
-}
+            {developerOptionsOpen ? (
+              <div className="mt-4 max-w-md">
+                <NumberField
+                  label={t("settings.aiRowThreshold")}
+                  value={draft.rowThreshold}
+                  min={0}
+                  max={500}
+                  step={1}
+                  disabled={saving}
+                  onChange={(value) => updateNumberDraft("rowThreshold", value)}
+                />
+                <p className="mt-2 text-xs text-slate-500">
+                  {t("settings.aiRowThresholdHint")}
+                </p>
+              </div>
+            ) : null}
+          </div>
+        ) : null}
 
-function formatMessage(
-  template: string,
-  values: Record<string, string | number>,
-) {
-  return Object.entries(values).reduce(
-    (message, [key, value]) => message.replace(`{${key}}`, String(value)),
-    template,
-  );
-}
-
-function ScopeTile({
-  active,
-  label,
-  description,
-  onClick,
-}: {
-  active: boolean;
-  label: string;
-  description: string;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={[
-        "flex min-h-28 flex-col justify-between border p-4 text-left transition",
-        active
-          ? "border-cyan-300 bg-cyan-50 text-cyan-950"
-          : "border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-100",
-      ].join(" ")}
-    >
-      <div className="font-semibold">{label}</div>
-      <div className="text-sm text-slate-500">{description}</div>
-    </button>
-  );
-}
-
-function HintTile({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="border border-slate-200 bg-slate-50 p-4">
-      <div className="text-sm font-semibold text-slate-950">{label}</div>
-      <div className="mt-2 text-sm text-slate-600">{value}</div>
-    </div>
-  );
-}
-
-function StateRow({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="flex items-start justify-between gap-3 border-b border-slate-100 pb-3 last:border-0 last:pb-0">
-      <span className="text-slate-500">{label}</span>
-      <span className="text-right font-semibold text-slate-950">{value}</span>
-    </div>
+        <Button type="button" disabled={saving} onClick={() => void handleSave()}>
+          <Save className="h-4 w-4" aria-hidden="true" />
+          {saving ? t("settings.aiProfileSaving") : t("settings.aiProfileSave")}
+        </Button>
+      </CardContent>
+    </Card>
   );
 }
 
@@ -421,6 +240,7 @@ function NumberField({
   min,
   max,
   step,
+  disabled,
   onChange,
 }: {
   label: string;
@@ -428,6 +248,7 @@ function NumberField({
   min: number;
   max: number;
   step: number;
+  disabled: boolean;
   onChange: (value: string) => void;
 }) {
   return (
@@ -440,8 +261,9 @@ function NumberField({
         step={step}
         inputMode="decimal"
         value={value}
+        disabled={disabled}
         onChange={(event) => onChange(event.target.value)}
-        className="mt-2 h-12 text-base"
+        className="mt-2 h-12 text-base tabular-nums"
       />
     </label>
   );

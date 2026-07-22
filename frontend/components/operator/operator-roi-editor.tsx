@@ -204,8 +204,12 @@ export type OperatorRoiEditorProps = {
   roiTextAnimationMs?: number;
   interactive?: boolean;
   previewImageSrc?: string;
+  cameraDisplayName?: string;
   showClock?: boolean;
-  topRightControls?: ReactNode;
+  connectionOverlay?: ReactNode;
+  clockLeadingContent?: ReactNode;
+  clockTrailingContent?: ReactNode;
+  footerTrailingContent?: ReactNode;
 };
 
 export function OperatorRoiEditor({
@@ -220,8 +224,12 @@ export function OperatorRoiEditor({
   roiTextAnimationMs,
   interactive = true,
   previewImageSrc = "",
+  cameraDisplayName,
   showClock = false,
-  topRightControls,
+  connectionOverlay,
+  clockLeadingContent,
+  clockTrailingContent,
+  footerTrailingContent,
 }: OperatorRoiEditorProps) {
   const { t } = useI18n();
   const roiTextAnimationDurationMs = Math.max(
@@ -844,34 +852,32 @@ export function OperatorRoiEditor({
         })}
       </CameraPreviewTransformLayer>
       
-      <div className="absolute left-3 right-3 top-3 z-20 flex flex-wrap items-start justify-between gap-2 pointer-events-none">
-        <div className="flex flex-wrap items-start gap-2">
-          <div className="border border-white/15 bg-black/75 px-2 py-1 font-mono text-xs font-semibold text-white">
-            {cameraWidth} x {cameraHeight}
-          </div>
-          {showClock ? (
-            <div className="border border-cyan-300/30 bg-black/75 px-3 py-1.5 font-mono text-sm font-semibold text-cyan-100">
-              {t("operator.time")}: {clockLabel}
-            </div>
-          ) : null}
+      <div className="operator-preview-top-meta absolute left-3 right-3 top-3 z-20 flex flex-wrap items-start justify-between gap-2 pointer-events-none">
+        <div className="operator-preview-dimensions border border-white/15 bg-black/75 px-2 py-1 font-mono text-xs font-semibold text-white">
+          {cameraWidth} x {cameraHeight}
         </div>
-        <div className="border border-white/15 bg-black px-3 py-2 text-right text-xs text-white">
-          <div className="font-semibold">{t("operator.livePreview")}</div>
-          <div className="text-white/70">{product.camera.deviceName}</div>
+        <div className="operator-preview-source border border-white/15 bg-black px-3 py-2 text-right text-xs font-semibold text-white">
+          {cameraDisplayName || product.camera.deviceName}
         </div>
       </div>
-      {topRightControls ? (
-        <div className="absolute right-3 top-16 z-20 pointer-events-auto flex flex-wrap justify-end gap-2">
-          {topRightControls}
+      {showClock ? (
+        <div className="operator-preview-clock-cluster pointer-events-none absolute left-1/2 top-3 z-20 grid w-[calc(100%_-_12rem)] max-w-[720px] -translate-x-1/2 grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-start gap-2 max-[640px]:top-14 max-[640px]:w-[calc(100%_-_1.5rem)]">
+          <div className="justify-self-end">{clockLeadingContent}</div>
+          <div className="operator-preview-clock shrink-0 border border-cyan-300/30 bg-black/75 px-3 py-1.5 font-mono text-sm font-semibold leading-5 text-cyan-100">
+            {t("operator.time")}: {clockLabel}
+          </div>
+          <div className="justify-self-start">{clockTrailingContent}</div>
         </div>
       ) : null}
-      <div className="absolute bottom-3 left-3 right-3 flex flex-wrap items-center justify-between gap-2 pointer-events-none z-20">
+      <div className="operator-preview-footer-meta absolute bottom-3 left-3 right-3 flex flex-wrap items-center justify-between gap-2 pointer-events-none z-20">
         <div className="inline-flex items-center rounded-full border border-white/20 bg-black/70 px-2.5 py-0.5 text-xs font-semibold transition-colors text-white">
           {t("operator.currentProduct")}: {product.code}
         </div>
-        <div className="inline-flex items-center rounded-full border border-white/20 bg-black/70 px-2.5 py-0.5 text-xs font-semibold transition-colors text-white">
-          OK {okCount} / NG {ngCount}
-        </div>
+        {footerTrailingContent ?? (
+          <div className="inline-flex items-center rounded-full border border-white/20 bg-black/70 px-2.5 py-0.5 text-xs font-semibold transition-colors text-white">
+            OK {okCount} / NG {ngCount}
+          </div>
+        )}
       </div>
 
       <div className="absolute right-3 top-16 z-20 grid max-w-[min(360px,calc(100%-96px))] gap-2 text-xs pointer-events-none">
@@ -892,6 +898,9 @@ export function OperatorRoiEditor({
             {overlayResult}
           </div>
         </div>
+      ) : null}
+      {connectionOverlay ? (
+        <div className="absolute inset-0 z-50">{connectionOverlay}</div>
       ) : null}
     </div>
   );

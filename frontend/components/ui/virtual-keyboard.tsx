@@ -15,6 +15,7 @@ import { Keyboard, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { NumericKeypad } from "@/components/ui/numeric-keypad";
 import { TextVirtualKeyboard } from "@/components/ui/text-virtual-keyboard";
+import { useKeyboardAvoidance } from "@/components/ui/use-keyboard-avoidance";
 import { cn } from "@/lib/utils";
 import {
   applyVirtualKeyboardKey,
@@ -100,6 +101,12 @@ export function VirtualKeyboardProvider({
   const [currentValue, setCurrentValue] = useState("");
   const panelRef = useRef<HTMLDivElement | null>(null);
 
+  useKeyboardAvoidance({
+    activeTarget,
+    enabled: isOpen,
+    panelRef,
+  });
+
   useEffect(() => {
     function handleFocusIn(event: FocusEvent) {
       if (isVirtualKeyboardTarget(event.target)) {
@@ -114,6 +121,13 @@ export function VirtualKeyboardProvider({
         return;
       }
 
+      if (
+        event.target instanceof Element &&
+        event.target.closest("[data-virtual-keyboard-control]")
+      ) {
+        return;
+      }
+
       setIsOpen(false);
     }
 
@@ -124,6 +138,13 @@ export function VirtualKeyboardProvider({
   useEffect(() => {
     function handlePointerDown(event: PointerEvent) {
       if (panelRef.current?.contains(event.target as Node)) {
+        return;
+      }
+
+      if (
+        event.target instanceof Element &&
+        event.target.closest("[data-virtual-keyboard-control]")
+      ) {
         return;
       }
 
@@ -288,12 +309,19 @@ function VirtualKeyboardPanel({
     t("vk.target");
   const allowDecimal = supportsDecimalInput(activeTarget);
   const allowNegative = supportsNegativeInput(activeTarget);
+  const allowEnglishLayout =
+    inferKeyboardLayoutFromTarget(activeTarget) === "english";
+  const visibleValue =
+    activeTarget instanceof HTMLInputElement && activeTarget.type === "password"
+      ? "•".repeat(currentValue.length)
+      : currentValue;
 
   return (
     <div className="pointer-events-none fixed inset-0 z-[70]">
       <div
         ref={panelRef}
-        className="pointer-events-auto fixed border border-slate-200 bg-white shadow-[0_12px_30px_rgba(15,23,42,0.18)]"
+        data-virtual-keyboard-panel
+        className="pointer-events-auto fixed max-h-[calc(100dvh-16px)] overflow-y-auto border border-slate-300 bg-white shadow-[0_10px_24px_rgba(15,23,42,0.16)]"
         style={{
           left: 8,
           right: 8,
@@ -302,69 +330,65 @@ function VirtualKeyboardPanel({
           maxWidth: "calc(100vw - 16px)",
         }}
       >
-        <div className="border-b border-slate-200 px-4 py-3">
-          <div
-            className={
-              isNumericLayout
-                ? "flex items-center justify-between gap-3"
-                : "flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"
-            }
-          >
-            {isNumericLayout ? (
-              <div className="min-w-0">
-                <div className="text-xs font-medium uppercase tracking-[0.04em] text-slate-500">
-                  {targetLabel}
-                </div>
+        <div className="border-b border-slate-300 bg-slate-50 px-4 py-3">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="min-w-0">
+              <div className="flex items-center gap-2 font-semibold text-slate-950">
+                <Keyboard aria-hidden="true" className="h-4 w-4" />
+                {t("vk.title")}
               </div>
-            ) : (
-              <div className="min-w-0">
-                <div className="flex items-center gap-2 font-semibold text-slate-950">
-                  <Keyboard className="h-4 w-4" />
-                  {t("vk.title")}
-                </div>
-                <div className="mt-1 truncate text-xs text-slate-500">
-                  {t("vk.target")}: {targetLabel}
-                </div>
+              <div className="mt-1 truncate text-xs text-slate-500">
+                {t("vk.target")}: {targetLabel}
               </div>
-            )}
+            </div>
             <div className="flex flex-wrap items-center gap-2">
-              {isNumericLayout ? null : (
-                <>
-                  <LayoutTab
-                    active={false}
-                    label={t("vk.numeric")}
-                    onClick={() => onLayoutChange("numeric")}
-                  />
-                  <LayoutTab
-                    active={layout === "english"}
-                    label={t("vk.english")}
-                    onClick={() => onLayoutChange("english")}
-                  />
-                </>
-              )}
-              <Button type="button" variant="outline" size="sm" onClick={onClose}>
-                <X className="h-4 w-4" />
+              <LayoutTab
+                active={layout === "numeric"}
+                label={t("vk.numeric")}
+                onClick={() => onLayoutChange("numeric")}
+              />
+              {allowEnglishLayout ? (
+                <LayoutTab
+                  active={layout === "english"}
+                  label={t("vk.english")}
+                  onClick={() => onLayoutChange("english")}
+                />
+              ) : null}
+              {layout !== "numeric" ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="h-11 min-w-24 border-slate-300 px-4"
+                  onMouseDown={(event) => event.preventDefault()}
+                  onClick={() => onKeyPress("__clear")}
+                >
+                  {t("vk.clear")}
+                </Button>
+              ) : null}
+              <Button
+                type="button"
+                variant="outline"
+                className="h-11 min-w-24 border-slate-300 px-4"
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={onClose}
+              >
+                <X aria-hidden="true" className="h-4 w-4" />
                 {t("vk.close")}
               </Button>
             </div>
           </div>
         </div>
 
-        <div className="space-y-3 p-4">
-          <div className="border border-cyan-200 bg-cyan-50 px-3 py-2">
-            {isNumericLayout ? null : (
-              <div className="text-[11px] font-medium uppercase tracking-[0.04em] text-cyan-700">
-                {targetLabel}
-              </div>
-            )}
+        <div className="space-y-3 bg-slate-100 p-3 sm:p-4">
+          <div className="border border-cyan-300 bg-cyan-50 px-3 py-2">
             <div
               className={
                 isNumericLayout
                   ? "min-h-7 break-all text-base text-slate-950"
-                  : "mt-1 min-h-7 break-all text-sm text-slate-950"
+                  : "min-h-7 break-all text-sm text-slate-950"
               }
             >
-              {currentValue || <span className="text-slate-400">{t("vk.empty")}</span>}
+              {visibleValue || <span className="text-slate-400">{t("vk.empty")}</span>}
             </div>
           </div>
 
@@ -386,18 +410,6 @@ function VirtualKeyboardPanel({
             />
           )}
 
-          {layout !== "numeric" ? (
-            <div className="border-t border-slate-200 pt-3">
-              <Button
-                type="button"
-                variant="outline"
-                className="h-11 min-w-28 border-slate-300 px-4"
-                onClick={() => onKeyPress("__clear")}
-              >
-                {t("common.clear")}
-              </Button>
-            </div>
-          ) : null}
         </div>
       </div>
     </div>
@@ -419,7 +431,7 @@ function LayoutTab({
     <button
       type="button"
       className={cn(
-        "border px-3 py-1.5 text-sm font-medium transition",
+        "min-h-11 min-w-14 border px-4 py-2 text-sm font-medium transition",
         compact ? "px-2 py-1 text-xs" : "",
         active
           ? "border-cyan-600 bg-cyan-600 text-white"

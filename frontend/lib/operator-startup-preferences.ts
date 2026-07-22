@@ -5,6 +5,7 @@ import type { ProductProfile, SessionUser } from "@/lib/api";
 const OPERATOR_STARTUP_KEY = "ocr_operator_startup_preferences";
 
 export const OPERATOR_STARTUP_ROUTE = "/dashboard/line";
+export const DASHBOARD_OVERVIEW_VISIBLE = false;
 
 export type OperatorStartupPreferences = {
   productId: string;
@@ -18,8 +19,8 @@ export function shouldUseOperatorStartup(user?: SessionUser | null) {
   return user?.role === "operator";
 }
 
-export function getPostLoginRoute(user?: SessionUser | null) {
-  return shouldUseOperatorStartup(user) ? OPERATOR_STARTUP_ROUTE : "/dashboard";
+export function getPostLoginRoute() {
+  return OPERATOR_STARTUP_ROUTE;
 }
 
 export function getOperatorStartupPreferences() {

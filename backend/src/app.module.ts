@@ -7,6 +7,7 @@ import { CameraModule } from './camera/camera.module';
 import { DatabaseModule } from './database/database.module';
 import { InspectionsModule } from './inspections/inspections.module';
 import { PermissionsModule } from './permissions/permissions.module';
+import { PlcModule } from './plc/plc.module';
 import { ProductsModule } from './products/products.module';
 import { RolesModule } from './roles/roles.module';
 import { SetupModule } from './setup/setup.module';
@@ -25,6 +26,7 @@ import { UsersModule } from './users/users.module';
     CameraModule,
     RolesModule,
     PermissionsModule,
+    PlcModule,
     ProductsModule,
     InspectionsModule,
     SystemModule,
