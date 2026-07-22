@@ -69,8 +69,13 @@ jobs:
             throw "Expected exactly one Windows Setup .exe, found $($installers.Count)."
           }
 
-          gh release view $env:RELEASE_TAG --repo $env:GITHUB_REPOSITORY *> $null
-          if ($LASTEXITCODE -eq 0) {
+          $previousErrorActionPreference = $ErrorActionPreference
+          $ErrorActionPreference = "SilentlyContinue"
+          & gh release view $env:RELEASE_TAG --repo $env:GITHUB_REPOSITORY *> $null
+          $releaseExists = $LASTEXITCODE -eq 0
+          $ErrorActionPreference = $previousErrorActionPreference
+
+          if ($releaseExists) {
             & gh release upload $env:RELEASE_TAG --repo $env:GITHUB_REPOSITORY --clobber @assets
           } else {
             $releaseTitle = $env:RELEASE_TAG.TrimStart('v')
