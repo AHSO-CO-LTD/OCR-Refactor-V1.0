@@ -1,6 +1,6 @@
 "use client";
 
-import { FolderOpen, Save } from "lucide-react";
+import { Eye, EyeOff, FolderOpen, Save } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -17,6 +17,7 @@ import {
 import { getDesktopBridge } from "@/lib/desktop";
 import { useI18n } from "@/lib/i18n";
 import { getAccessToken } from "@/lib/session";
+import { notifyLineDisplaySettingsUpdated } from "@/lib/use-line-display-settings";
 
 const defaultSettings: LineResultSettings = {
   id: "default",
@@ -25,11 +26,16 @@ const defaultSettings: LineResultSettings = {
   saveBySession: true,
   newSessionOnLineStop: true,
   newSessionOnProductChange: true,
+  showNgRecognizedText: true,
   createdAt: "",
   updatedAt: "",
 };
 
-export function LineResultSettingsPanel() {
+export function LineResultSettingsPanel({
+  canManageNgDisplay = false,
+}: {
+  canManageNgDisplay?: boolean;
+}) {
   const { t, apiError } = useI18n();
   const bridge = getDesktopBridge();
   const [settings, setSettings] = useState<LineResultSettings>(defaultSettings);
@@ -125,9 +131,13 @@ export function LineResultSettingsPanel() {
         saveBySession: true,
         newSessionOnLineStop: true,
         newSessionOnProductChange: true,
+        ...(canManageNgDisplay
+          ? { showNgRecognizedText: settings.showNgRecognizedText }
+          : {}),
       });
 
       setSettings(response.data);
+      notifyLineDisplaySettingsUpdated(response.data.showNgRecognizedText);
       toast.success(t("settings.lineResultSaved"), { id: toastId });
     } catch (cause) {
       const message =
@@ -150,6 +160,52 @@ export function LineResultSettingsPanel() {
           <p className="text-sm text-slate-600">
             {t("settings.lineResultDescription")}
           </p>
+
+          {canManageNgDisplay ? (
+            <div className="grid gap-3 border border-slate-200 bg-slate-50 p-4 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">
+              <div className="grid gap-1">
+                <div className="text-sm font-semibold text-slate-900">
+                  {t("settings.ngTextVisibility")}
+                </div>
+                <p className="text-sm text-slate-600">
+                  {t(
+                    settings.showNgRecognizedText
+                      ? "settings.ngTextVisibleHint"
+                      : "settings.ngTextHiddenHint",
+                  )}
+                </p>
+              </div>
+              <Button
+                type="button"
+                variant="outline"
+                aria-pressed={settings.showNgRecognizedText}
+                disabled={loading || saving}
+                className={[
+                  "h-11 min-w-40",
+                  settings.showNgRecognizedText
+                    ? "border-emerald-700 bg-emerald-700 text-white hover:bg-emerald-800"
+                    : "border-slate-300 bg-white text-slate-800 hover:bg-slate-100",
+                ].join(" ")}
+                onClick={() =>
+                  updateField(
+                    "showNgRecognizedText",
+                    !settings.showNgRecognizedText,
+                  )
+                }
+              >
+                {settings.showNgRecognizedText ? (
+                  <Eye className="h-4 w-4" aria-hidden="true" />
+                ) : (
+                  <EyeOff className="h-4 w-4" aria-hidden="true" />
+                )}
+                {t(
+                  settings.showNgRecognizedText
+                    ? "settings.ngTextVisible"
+                    : "settings.ngTextHidden",
+                )}
+              </Button>
+            </div>
+          ) : null}
 
           <div className="grid gap-2">
             <label className="text-sm font-semibold text-slate-700">
@@ -269,6 +325,16 @@ export function LineResultSettingsPanel() {
                 : t("settings.disabled")
             }
           />
+          {canManageNgDisplay ? (
+            <StatusRow
+              label={t("settings.ngTextVisibility")}
+              value={t(
+                settings.showNgRecognizedText
+                  ? "settings.ngTextVisible"
+                  : "settings.ngTextHidden",
+              )}
+            />
+          ) : null}
         </CardContent>
       </Card>
     </div>

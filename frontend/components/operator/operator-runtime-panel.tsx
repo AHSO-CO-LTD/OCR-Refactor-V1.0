@@ -21,6 +21,7 @@ import {
   OperatorAiStatus,
   OperatorLiveCameraStatus,
   OperatorModeStatus,
+  OperatorPlcStatus,
 } from "@/components/operator/operator-live-runtime-status";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardTitle } from "@/components/ui/card";
@@ -58,6 +59,7 @@ import {
   subscribeRuntimeTestSettings,
 } from "@/lib/runtime-test-settings";
 import { getAccessToken, getStoredUser } from "@/lib/session";
+import { useLineDisplaySettings } from "@/lib/use-line-display-settings";
 
 type DataSource = "api" | "demo";
 type AnimationState = "UNKNOWN" | "CHECKING" | "WAITING_PLC" | "OK" | "NG";
@@ -191,6 +193,7 @@ export function OperatorRuntimePanel() {
   const [autoRunning, setAutoRunning] = useState(false);
   const [machineRuntimeState, setMachineRuntimeState] =
     useState<MachineRuntimeStatus["state"]>("inactive");
+  const [plcConnected, setPlcConnected] = useState(false);
   const [operationMode, setOperationMode] = useState<"manual" | "auto">(
     "auto",
   );
@@ -210,6 +213,7 @@ export function OperatorRuntimePanel() {
   const [runtimeSettings, setRuntimeSettings] = useState(() =>
     getRuntimeTestSettings(),
   );
+  const { showNgRecognizedText } = useLineDisplaySettings();
 
   const runtimeControlsActive = ![
     "stopping",
@@ -710,10 +714,11 @@ export function OperatorRuntimePanel() {
           region.index,
           slot
             ? getInspectionSlotDisplayText(
-                slot,
-                selectedProduct.code,
-                finalStatuses[region.index],
-              )
+              slot,
+              selectedProduct.code,
+              finalStatuses[region.index],
+              { showNgRecognizedText },
+            )
             : selectedProduct.code,
         ];
       }),
@@ -1069,6 +1074,7 @@ export function OperatorRuntimePanel() {
         slot,
         selectedProduct.code,
         slot.result,
+        { showNgRecognizedText },
       );
       return true;
     });
@@ -1100,6 +1106,7 @@ export function OperatorRuntimePanel() {
             slot,
             selectedProduct.code,
             slot.result,
+            { showNgRecognizedText },
           );
         } else {
           delete finalStatuses[region.index];
@@ -1137,6 +1144,7 @@ export function OperatorRuntimePanel() {
         if (!active) return;
         runtimeDefaultsAppliedRef.current = true;
         const status = response.data;
+        setPlcConnected(!status.plcOffline);
         const machineIsRunning = status.state === "running";
         autoRunRef.current = machineIsRunning;
         setAutoRunning(machineIsRunning);
@@ -1159,6 +1167,7 @@ export function OperatorRuntimePanel() {
         liveInspectionHandlerRef.current(status);
         await plcInspectionHandlerRef.current(status);
       } catch {
+        if (active) setPlcConnected(false);
         // The shared shell watchdog surfaces backend connectivity errors.
       } finally {
         requestRunning = false;
@@ -1370,6 +1379,9 @@ export function OperatorRuntimePanel() {
                 <OperatorAiStatus
                   realtimeAiEnabled={effectiveRealtimeAiEnabled}
                 />
+              }
+              footerLeadingContent={
+                <OperatorPlcStatus connected={plcConnected} />
               }
               footerTrailingContent={
                 <OperatorLiveCameraStatus

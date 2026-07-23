@@ -33,6 +33,7 @@ type CameraRoiOverlayProps = {
   selectedIndexes: number[];
   testResult?: TestInspectionImageResult | null;
   testRunning?: boolean;
+  showNgRecognizedText?: boolean;
   zoomFactor?: number;
 };
 
@@ -71,6 +72,7 @@ export function CameraRoiOverlay({
   selectedIndexes,
   testResult = null,
   testRunning = false,
+  showNgRecognizedText = true,
   zoomFactor = 1,
 }: CameraRoiOverlayProps) {
   const { t } = useI18n();
@@ -305,6 +307,8 @@ export function CameraRoiOverlay({
           : getInspectionSlotDisplayText(
               testSlot,
               testResult?.productCode ?? "",
+              "",
+              { showNgRecognizedText },
             );
         return (
           <div

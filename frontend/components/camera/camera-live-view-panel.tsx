@@ -70,6 +70,7 @@ import {
 } from "@/lib/api";
 import { useI18n, type TranslationKey } from "@/lib/i18n";
 import { getAccessToken, getStoredUser } from "@/lib/session";
+import { useLineDisplaySettings } from "@/lib/use-line-display-settings";
 
 type ConfigurationTab =
   | "products"
@@ -93,6 +94,7 @@ type ConfigurationTabDefinition = {
 
 export function CameraLiveViewPanel({ configurationMode = false }: CameraLiveViewPanelProps) {
   const { apiError, t } = useI18n();
+  const { showNgRecognizedText } = useLineDisplaySettings();
   const [products, setProducts] = useState<ProductProfile[]>([]);
   const [devices, setDevices] = useState<CameraDevice[]>([]);
   const [selectedProductId, setSelectedProductId] = useState("");
@@ -1073,6 +1075,7 @@ export function CameraLiveViewPanel({ configurationMode = false }: CameraLiveVie
                       : configurationTestResult
                   }
                   testRunning={configurationTestRunning}
+                  showNgRecognizedText={showNgRecognizedText}
                   zoomFactor={viewerTransform.zoomFactor}
                 />
               ) : null

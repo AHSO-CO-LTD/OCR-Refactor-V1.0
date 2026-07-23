@@ -986,6 +986,8 @@ export class InspectionsService {
         newSessionOnProductChange:
           dto.newSessionOnProductChange ??
           currentSettings.newSessionOnProductChange,
+        showNgRecognizedText:
+          dto.showNgRecognizedText ?? currentSettings.showNgRecognizedText,
       },
     });
 
@@ -1162,6 +1164,7 @@ export class InspectionsService {
         saveBySession: true,
         newSessionOnLineStop: true,
         newSessionOnProductChange: true,
+        showNgRecognizedText: true,
       },
       update: {},
     });
@@ -1174,6 +1177,7 @@ export class InspectionsService {
     saveBySession: boolean;
     newSessionOnLineStop: boolean;
     newSessionOnProductChange: boolean;
+    showNgRecognizedText: boolean;
     createdAt: Date;
     updatedAt: Date;
   }) {
@@ -1184,6 +1188,7 @@ export class InspectionsService {
       saveBySession: settings.saveBySession,
       newSessionOnLineStop: settings.newSessionOnLineStop,
       newSessionOnProductChange: settings.newSessionOnProductChange,
+      showNgRecognizedText: settings.showNgRecognizedText,
       createdAt: settings.createdAt.toISOString(),
       updatedAt: settings.updatedAt.toISOString(),
     };

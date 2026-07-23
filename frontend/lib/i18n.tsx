@@ -79,6 +79,8 @@ const translations = {
       "Only dev can update line OCR rotation settings.",
     "apiError.Only admin or dev can manage machine inactivity settings":
       "Only admin or developer accounts can change inactivity settings.",
+    "apiError.Only admin or dev can manage NG text visibility":
+      "Only admin or developer accounts can change NG text visibility.",
     "apiError.Line result save folder is required":
       "Line result save folder is required.",
     "apiError.Line result save folder is required unless saving is disabled":
@@ -736,6 +738,9 @@ const translations = {
     "operator.lastResult": "Last result",
     "operator.time": "Time",
     "operator.currentProduct": "Product",
+    "operator.plc": "PLC",
+    "operator.connected": "Connected",
+    "operator.disconnected": "Disconnected",
     "operator.referenceImage": "Reference image",
     "operator.previewNoCamera":
       "No live camera is connected. The preview is showing a black screen.",
@@ -1359,6 +1364,8 @@ const translations = {
       "Chỉ dev mới có thể cập nhật setting xoay crop OCR cho line.",
     "apiError.Only admin or dev can manage machine inactivity settings":
       "Chỉ tài khoản admin hoặc dev được thay đổi thiết lập tạm nghỉ.",
+    "apiError.Only admin or dev can manage NG text visibility":
+      "Chỉ tài khoản admin hoặc dev được thay đổi cách hiển thị text NG.",
     "apiError.Line result save folder is required":
       "Bắt buộc chọn thư mục lưu kết quả chạy line.",
     "apiError.Line result save folder is required unless saving is disabled":
@@ -1926,6 +1933,9 @@ const translations = {
     "operator.lastResult": "Kết quả gần nhất",
     "operator.time": "Thời gian",
     "operator.currentProduct": "Sản phẩm",
+    "operator.plc": "PLC",
+    "operator.connected": "Đã kết nối",
+    "operator.disconnected": "Mất kết nối",
     "operator.referenceImage": "Ảnh tham chiếu",
     "operator.previewNoCamera":
       "Chưa có camera live được kết nối. Khung preview đang hiển thị màn hình đen.",
@@ -2494,6 +2504,15 @@ const translationOverrides: Record<Language, Record<string, string>> = {
     "settings.lineResultSession": "Save by session",
     "settings.lineResultStopSession": "New session on line stop",
     "settings.lineResultProductSession": "New session on product change",
+    "settings.ngTextVisibility": "NG recognized text",
+    "settings.ngTextVisible": "Show NG text",
+    "settings.ngTextHidden": "Hide NG text",
+    "settings.ngTextVisibleHint":
+      "NG ROIs show the recognized OCR text during checking and in the final result.",
+    "settings.ngTextHiddenHint":
+      "NG ROIs only show the NG state and color. The recognized OCR text stays hidden.",
+    "settings.ngTextLoadFallback":
+      "Cannot load NG display settings. Current display behavior is being used.",
     "operator.productChangedSessionRestarted":
       "Product changed. Old session saved and new session started.",
     "settings.terminalTitle": "Service terminal",
@@ -2736,6 +2755,16 @@ const translationOverrides: Record<Language, Record<string, string>> = {
     "lineTest.folderSelected": "Folder: {folder} ({count} image(s))",
     "lineTest.clearFolder": "Clear selected folder",
     "lineTest.folderCleared": "Selected folder cleared.",
+    "lineTest.folderPlcTriggerEnabled": "Wait for PLC",
+    "lineTest.folderPlcTriggerDisabled": "Run without PLC",
+    "lineTest.folderPlcTriggerHintEnabled":
+      "Each folder image waits for a PLC capture trigger before committing its result.",
+    "lineTest.folderPlcTriggerHintDisabled":
+      "Folder images are processed continuously without waiting for a PLC trigger.",
+    "lineTest.folderPlcTriggerEnabledNotice":
+      "Folder test will wait for a PLC trigger for each image.",
+    "lineTest.folderPlcTriggerDisabledNotice":
+      "Folder test will run continuously without PLC triggers.",
     "lineTest.noFolderSelected": "No folder selected.",
     "lineTest.batchFolderUnknown": "Selected folder",
     "lineTest.selectFolderFirst": "Choose a folder that contains image files.",
@@ -2929,6 +2958,15 @@ const translationOverrides: Record<Language, Record<string, string>> = {
     "settings.lineResultSession": "Lưu theo session",
     "settings.lineResultStopSession": "Session mới khi dừng line",
     "settings.lineResultProductSession": "Session mới khi đổi mã",
+    "settings.ngTextVisibility": "Hiển thị text nhận diện NG",
+    "settings.ngTextVisible": "Hiển thị text NG",
+    "settings.ngTextHidden": "Ẩn text NG",
+    "settings.ngTextVisibleHint":
+      "ROI NG vẫn hiển thị chuỗi OCR nhận diện trong lúc kiểm tra và khi có kết quả.",
+    "settings.ngTextHiddenHint":
+      "ROI NG chỉ hiển thị trạng thái và màu NG, không hiển thị chuỗi OCR đã nhận diện.",
+    "settings.ngTextLoadFallback":
+      "Không thể tải cài đặt hiển thị NG. Ứng dụng đang dùng cách hiển thị hiện tại.",
     "operator.productChangedSessionRestarted":
       "Đã đổi mã hàng. Session cũ đã được lưu và session mới đã bắt đầu.",
     "settings.terminalTitle": "Terminal dịch vụ",
@@ -3170,6 +3208,16 @@ const translationOverrides: Record<Language, Record<string, string>> = {
     "lineTest.folderSelected": "Folder: {folder} ({count} ảnh)",
     "lineTest.clearFolder": "Bỏ folder đã chọn",
     "lineTest.folderCleared": "Đã bỏ folder đã chọn.",
+    "lineTest.folderPlcTriggerEnabled": "Chờ tín hiệu PLC",
+    "lineTest.folderPlcTriggerDisabled": "Chạy không cần PLC",
+    "lineTest.folderPlcTriggerHintEnabled":
+      "Mỗi ảnh trong folder sẽ chờ tín hiệu chốt PLC trước khi ghi nhận kết quả.",
+    "lineTest.folderPlcTriggerHintDisabled":
+      "Ảnh trong folder được xử lý liên tục, không chờ tín hiệu chốt PLC.",
+    "lineTest.folderPlcTriggerEnabledNotice":
+      "Test folder sẽ chờ tín hiệu PLC cho từng ảnh.",
+    "lineTest.folderPlcTriggerDisabledNotice":
+      "Test folder sẽ chạy liên tục không cần tín hiệu PLC.",
     "lineTest.noFolderSelected": "Chưa chọn folder.",
     "lineTest.batchFolderUnknown": "Folder đã chọn",
     "lineTest.selectFolderFirst": "Vui lòng chọn folder có chứa ảnh mẫu.",

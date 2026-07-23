@@ -34,6 +34,7 @@ export function SettingsTabsPanel() {
     currentRole === "admin" ||
     currentRole === "engineer";
   const canManageLineResultSettings = canManageProductSettings;
+  const canManageNgDisplay = currentRole === "dev" || currentRole === "admin";
   const canManageOcrTestSettings = currentRole === "dev";
   const canManageRuntimeTestSettings = currentRole === "dev";
   const canManageTerminalSettings = currentRole === "dev";
@@ -111,7 +112,7 @@ export function SettingsTabsPanel() {
         <MachineInactivitySettingsPanel />
       ) : null}
       {canManageLineResultSettings && activeTab === "line-result" ? (
-        <LineResultSettingsPanel />
+        <LineResultSettingsPanel canManageNgDisplay={canManageNgDisplay} />
       ) : null}
       {canManageOcrTestSettings && activeTab === "ocr-test" ? (
         <OcrTestSettingsPanel />

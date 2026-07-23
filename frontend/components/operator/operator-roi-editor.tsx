@@ -209,6 +209,7 @@ export type OperatorRoiEditorProps = {
   connectionOverlay?: ReactNode;
   clockLeadingContent?: ReactNode;
   clockTrailingContent?: ReactNode;
+  footerLeadingContent?: ReactNode;
   footerTrailingContent?: ReactNode;
 };
 
@@ -229,6 +230,7 @@ export function OperatorRoiEditor({
   connectionOverlay,
   clockLeadingContent,
   clockTrailingContent,
+  footerLeadingContent,
   footerTrailingContent,
 }: OperatorRoiEditorProps) {
   const { t } = useI18n();
@@ -870,9 +872,11 @@ export function OperatorRoiEditor({
         </div>
       ) : null}
       <div className="operator-preview-footer-meta absolute bottom-3 left-3 right-3 flex flex-wrap items-center justify-between gap-2 pointer-events-none z-20">
-        <div className="inline-flex items-center rounded-full border border-white/20 bg-black/70 px-2.5 py-0.5 text-xs font-semibold transition-colors text-white">
-          {t("operator.currentProduct")}: {product.code}
-        </div>
+        {footerLeadingContent ?? (
+          <div className="inline-flex items-center rounded-full border border-white/20 bg-black/70 px-2.5 py-0.5 text-xs font-semibold transition-colors text-white">
+            {t("operator.currentProduct")}: {product.code}
+          </div>
+        )}
         {footerTrailingContent ?? (
           <div className="inline-flex items-center rounded-full border border-white/20 bg-black/70 px-2.5 py-0.5 text-xs font-semibold transition-colors text-white">
             OK {okCount} / NG {ngCount}

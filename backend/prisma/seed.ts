@@ -49,10 +49,8 @@ const rolePermissionMap: Record<RoleCode, string[]> = {
     'report.view',
   ],
   operator: [
-    'dashboard.view',
     'inspection.start',
     'inspection.stop',
-    'plc.manage',
     'plc.operate',
   ],
 };

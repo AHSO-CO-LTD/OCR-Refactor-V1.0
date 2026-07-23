@@ -288,6 +288,7 @@ export type LineResultSettings = {
   saveBySession: boolean;
   newSessionOnLineStop: boolean;
   newSessionOnProductChange: boolean;
+  showNgRecognizedText: boolean;
   createdAt: string;
   updatedAt: string;
 };
@@ -298,6 +299,7 @@ export type LineResultSettingsPayload = {
   saveBySession?: boolean;
   newSessionOnLineStop?: boolean;
   newSessionOnProductChange?: boolean;
+  showNgRecognizedText?: boolean;
 };
 
 export type TestSessionReportPayload = {

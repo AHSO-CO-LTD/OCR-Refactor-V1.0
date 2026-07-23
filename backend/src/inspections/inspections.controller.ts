@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  ForbiddenException,
   Get,
   Param,
   Patch,
@@ -18,6 +19,7 @@ import {
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { PermissionsGuard } from '../auth/permissions.guard';
 import { PERMISSIONS } from '../common/constants/permissions';
+import type { AuthenticatedRequest } from '../common/types/authenticated-request';
 import { CreateTestSessionReportDto } from './dto/create-test-session-report.dto';
 import { UpdateLineResultSettingsDto } from './dto/line-result-settings.dto';
 import { StartInspectionDto } from './dto/start-inspection.dto';
@@ -146,6 +148,7 @@ export class InspectionsController {
   @Get('line-result-settings')
   @RequireAnyPermission(
     PERMISSIONS.PRODUCT_MANAGE,
+    PERMISSIONS.INSPECTION_START,
     PERMISSIONS.INSPECTION_TEST,
     PERMISSIONS.SYSTEM_DEBUG,
   )
@@ -160,7 +163,20 @@ export class InspectionsController {
     PERMISSIONS.INSPECTION_TEST,
     PERMISSIONS.SYSTEM_DEBUG,
   )
-  updateLineResultSettings(@Body() dto: UpdateLineResultSettingsDto) {
+  updateLineResultSettings(
+    @Body() dto: UpdateLineResultSettingsDto,
+    @CurrentUser() user: AuthenticatedRequest['user'],
+  ) {
+    if (
+      dto.showNgRecognizedText !== undefined &&
+      user.role !== 'admin' &&
+      user.role !== 'dev'
+    ) {
+      throw new ForbiddenException(
+        'Only admin or dev can manage NG text visibility',
+      );
+    }
+
     return this.inspectionsService.updateLineResultSettings(dto);
   }
 

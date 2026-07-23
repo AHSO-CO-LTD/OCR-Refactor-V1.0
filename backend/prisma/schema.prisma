@@ -257,6 +257,7 @@ model LineResultSettings {
   saveBySession               Boolean              @default(true)
   newSessionOnLineStop        Boolean              @default(true)
   newSessionOnProductChange   Boolean              @default(true)
+  showNgRecognizedText        Boolean              @default(true)
   createdAt                   DateTime             @default(now())
   updatedAt                   DateTime             @updatedAt
 }

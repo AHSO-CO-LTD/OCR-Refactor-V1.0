@@ -40,4 +40,9 @@ export class UpdateLineResultSettingsDto {
   @IsOptional()
   @IsBoolean()
   newSessionOnProductChange?: boolean;
+
+  @ApiPropertyOptional({ example: true })
+  @IsOptional()
+  @IsBoolean()
+  showNgRecognizedText?: boolean;
 }

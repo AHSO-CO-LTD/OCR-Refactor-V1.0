@@ -92,6 +92,7 @@ export class SetupService {
           saveBySession: true,
           newSessionOnLineStop: true,
           newSessionOnProductChange: true,
+          showNgRecognizedText: true,
         },
         update: {
           saveFolderPath: lineResultSaveFolderPath,
@@ -99,6 +100,7 @@ export class SetupService {
           saveBySession: true,
           newSessionOnLineStop: true,
           newSessionOnProductChange: true,
+          showNgRecognizedText: true,
         },
       });
 

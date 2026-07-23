@@ -15,12 +15,14 @@ import { toast } from "sonner";
 import { CameraConnectionOverlay } from "@/components/camera/camera-connection-overlay";
 import { useConnectedCameraPreview } from "@/components/camera/use-connected-camera-preview";
 import { usePlcCaptureTrigger } from "@/components/plc/use-plc-capture-trigger";
+import { PlcFolderTriggerToggle } from "@/components/plc/plc-folder-trigger-toggle";
 import { PlcTestOutputToggle } from "@/components/plc/plc-test-output-toggle";
 import { usePlcTestOutputSession } from "@/components/plc/use-plc-test-output-session";
 import {
   OperatorAiStatus,
   OperatorLiveCameraStatus,
   OperatorModeStatus,
+  OperatorPlcStatus,
 } from "@/components/operator/operator-live-runtime-status";
 import { OperatorRuntimeActions } from "@/components/operator/operator-runtime-actions";
 import {
@@ -63,6 +65,7 @@ import {
   subscribeRuntimeTestSettings,
 } from "@/lib/runtime-test-settings";
 import { getAccessToken, getStoredUser } from "@/lib/session";
+import { useLineDisplaySettings } from "@/lib/use-line-display-settings";
 
 type AnimationState = "UNKNOWN" | "CHECKING" | "WAITING_PLC" | "OK" | "NG";
 type DataSource = "api" | "sample";
@@ -273,6 +276,7 @@ export function LineAnimationTestPanel({
   const batchLatchResolverRef = useRef<
     ((latched: boolean) => void) | null
   >(null);
+  const folderWaitForPlcRef = useRef(true);
   const totalCountRef = useRef(0);
   const batchCountRef = useRef(0);
   const batchQuantityRef = useRef(0);
@@ -300,6 +304,7 @@ export function LineAnimationTestPanel({
   const [testingRealImage, setTestingRealImage] = useState(false);
   const [batchTesting, setBatchTesting] = useState(false);
   const [batchPaused, setBatchPaused] = useState(false);
+  const [folderWaitForPlc, setFolderWaitForPlc] = useState(true);
   const [savingBatchReport, setSavingBatchReport] = useState(false);
   const [selectedImageUrl, setSelectedImageUrl] = useState("");
   const [selectedImageBase64, setSelectedImageBase64] = useState("");
@@ -320,6 +325,7 @@ export function LineAnimationTestPanel({
   const [testRealtimeAiEnabled, setTestRealtimeAiEnabled] = useState(true);
   const [testMachineRuntimeState, setTestMachineRuntimeState] =
     useState<MachineRuntimeStatus["state"]>("running");
+  const [plcConnected, setPlcConnected] = useState(false);
   const [testControlUpdating, setTestControlUpdating] = useState(false);
   const [runtimeCapturedImageSrc, setRuntimeCapturedImageSrc] = useState("");
   const [batchProgress, setBatchProgress] = useState<{
@@ -330,6 +336,7 @@ export function LineAnimationTestPanel({
   const [runtimeSettings, setRuntimeSettings] = useState(() =>
     getRuntimeTestSettings(),
   );
+  const { showNgRecognizedText } = useLineDisplaySettings();
   const {
     emitResultPulse: emitPlcTestResultPulse,
     outputEnabled: plcTestOutputEnabled,
@@ -505,9 +512,11 @@ export function LineAnimationTestPanel({
       try {
         const response = await getMachineRuntimeStatus(accessToken);
         if (!active) return;
+        setPlcConnected(!response.data.plcOffline);
         setTestMachineRuntimeState(response.data.state);
         applyTestRuntimeControls(response.data);
       } catch {
+        if (active) setPlcConnected(false);
         // The shared application watchdog surfaces backend connectivity errors.
       } finally {
         requestRunning = false;
@@ -919,6 +928,7 @@ export function LineAnimationTestPanel({
           slot,
           inspection.productCode,
           finalStatuses[region.index],
+          { showNgRecognizedText },
         );
         return [region.index, detectedText || finalStatuses[region.index]];
       }),
@@ -1022,6 +1032,7 @@ export function LineAnimationTestPanel({
         slot,
         inspection.productCode,
         slot.result,
+        { showNgRecognizedText },
       );
       return true;
     });
@@ -1054,6 +1065,7 @@ export function LineAnimationTestPanel({
             slot,
             inspection.productCode,
             slot.result,
+            { showNgRecognizedText },
           );
         } else {
           delete finalStatuses[region.index];
@@ -1072,10 +1084,15 @@ export function LineAnimationTestPanel({
     return true;
   }
 
-  async function commitPendingDetection(pending: PendingTestDetection) {
+  async function commitPendingDetection(
+    pending: PendingTestDetection,
+    options: { plcLatched?: boolean } = {},
+  ) {
     clearTimers();
-    setAnimationState("WAITING_PLC");
-    await wait(plcDoneHoldMs);
+    if (options.plcLatched !== false) {
+      setAnimationState("WAITING_PLC");
+      await wait(plcDoneHoldMs);
+    }
 
     if (!pending.inspection) {
       setAnimationState("NG");
@@ -1354,6 +1371,10 @@ export function LineAnimationTestPanel({
     }
 
     if (batchTestingRef.current) {
+      if (!folderWaitForPlcRef.current) {
+        return;
+      }
+
       if (
         batchPausedRef.current ||
         !pendingDetectionRef.current ||
@@ -1462,6 +1483,18 @@ export function LineAnimationTestPanel({
     toast.info(t("lineAnimationTest.batchCancelled"));
   }
 
+  function updateFolderPlcTrigger(enabled: boolean) {
+    folderWaitForPlcRef.current = enabled;
+    setFolderWaitForPlc(enabled);
+    toast.success(
+      t(
+        enabled
+          ? "lineTest.folderPlcTriggerEnabledNotice"
+          : "lineTest.folderPlcTriggerDisabledNotice",
+      ),
+    );
+  }
+
   async function runBatchFolderTest() {
     const validated = validateRealTestInputs();
 
@@ -1534,12 +1567,16 @@ export function LineAnimationTestPanel({
           break;
         }
 
-        const latched = await waitForBatchLatch();
-        if (!latched || cancelBatchTestRef.current) {
-          break;
+        if (folderWaitForPlcRef.current) {
+          const latched = await waitForBatchLatch();
+          if (!latched || cancelBatchTestRef.current) {
+            break;
+          }
         }
 
-        await commitPendingDetection(pending);
+        await commitPendingDetection(pending, {
+          plcLatched: folderWaitForPlcRef.current,
+        });
         if (pending.inspection) {
           rows.push({
             fileName: file.name,
@@ -1955,6 +1992,9 @@ export function LineAnimationTestPanel({
                       />
                     </div>
                   }
+                  footerLeadingContent={
+                    <OperatorPlcStatus connected={plcConnected} />
+                  }
                   footerTrailingContent={
                     <OperatorLiveCameraStatus
                       liveCameraEnabled={
@@ -1998,19 +2038,35 @@ export function LineAnimationTestPanel({
             onUseCamera={useLiveCameraSource}
           />
 
-          <div className="flex flex-wrap items-center gap-3 border border-[#9db7d8] bg-[#d9e6f5] p-2">
-            <PlcTestOutputToggle
-              disabled={!plcTestSessionReady || plcTestOutputUpdating || isBusy}
-              enabled={plcTestOutputEnabled}
-              onChange={setPlcTestOutputEnabled}
-            />
-            <span className="text-xs font-medium text-[#274d7d]">
-              {t(
-                plcTestOutputEnabled
-                  ? "plcTestOutput.hintEnabled"
-                  : "plcTestOutput.hintDisabled",
-              )}
-            </span>
+          <div className="grid gap-2 border border-[#9db7d8] bg-[#d9e6f5] p-2 min-[980px]:grid-cols-2">
+            <div className="flex min-w-0 flex-wrap items-center gap-3">
+              <PlcTestOutputToggle
+                disabled={!plcTestSessionReady || plcTestOutputUpdating || isBusy}
+                enabled={plcTestOutputEnabled}
+                onChange={setPlcTestOutputEnabled}
+              />
+              <span className="min-w-0 flex-1 text-xs font-medium text-[#274d7d]">
+                {t(
+                  plcTestOutputEnabled
+                    ? "plcTestOutput.hintEnabled"
+                    : "plcTestOutput.hintDisabled",
+                )}
+              </span>
+            </div>
+            <div className="flex min-w-0 flex-wrap items-center gap-3">
+              <PlcFolderTriggerToggle
+                disabled={isBusy}
+                enabled={folderWaitForPlc}
+                onChange={updateFolderPlcTrigger}
+              />
+              <span className="min-w-0 flex-1 text-xs font-medium text-[#274d7d]">
+                {t(
+                  folderWaitForPlc
+                    ? "lineTest.folderPlcTriggerHintEnabled"
+                    : "lineTest.folderPlcTriggerHintDisabled",
+                )}
+              </span>
+            </div>
           </div>
 
           <div className="operator-test-action-row grid shrink-0 gap-2">

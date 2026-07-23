@@ -15,6 +15,10 @@ type OperatorLiveCameraStatusProps = {
   liveCameraEnabled: boolean;
 };
 
+type OperatorPlcStatusProps = {
+  connected: boolean;
+};
+
 const statusBoxClassName =
   "operator-preview-runtime-status shrink-0 whitespace-nowrap border px-3 py-1.5 text-left text-sm leading-5 text-white";
 
@@ -98,6 +102,25 @@ export function OperatorLiveCameraStatus({
       aria-live="polite"
     >
       {t("operator.liveCamera")}: {t(liveCameraEnabled ? "operator.on" : "operator.off")}
+    </div>
+  );
+}
+
+export function OperatorPlcStatus({ connected }: OperatorPlcStatusProps) {
+  const { t } = useI18n();
+
+  return (
+    <div
+      className={[
+        "inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold transition-colors text-white",
+        connected
+          ? "border-emerald-500 bg-emerald-700/95"
+          : "border-red-400 bg-red-700/95",
+      ].join(" ")}
+      role="status"
+      aria-live="polite"
+    >
+      {t("operator.plc")}: {t(connected ? "operator.connected" : "operator.disconnected")}
     </div>
   );
 }
