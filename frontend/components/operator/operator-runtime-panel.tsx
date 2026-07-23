@@ -518,7 +518,7 @@ export function OperatorRuntimePanel() {
     setAutoRunning(false);
     scanRunningRef.current = false;
     setScanRunning(false);
-    await stopCurrentInspection(false);
+    await stopCurrentInspection({ showToast: false });
     setOkCount(0);
     setNgCount(0);
     setBatchCount(0);
@@ -547,7 +547,11 @@ export function OperatorRuntimePanel() {
 
     try {
       if (currentJobIdRef.current) {
-        await stopCurrentInspection(false, "product_change");
+        await stopCurrentInspection({
+          endReason: "product_change",
+          showToast: false,
+          stopMachine: !wasAutoRunning,
+        });
       }
 
       if (wasAutoRunning) {
@@ -953,10 +957,15 @@ export function OperatorRuntimePanel() {
     }
   }
 
-  async function stopCurrentInspection(
+  async function stopCurrentInspection({
+    endReason = "line_stop",
     showToast = true,
-    endReason: LineSessionEndReason = "line_stop",
-  ) {
+    stopMachine = true,
+  }: {
+    endReason?: LineSessionEndReason;
+    showToast?: boolean;
+    stopMachine?: boolean;
+  } = {}) {
     const accessToken = getAccessToken();
     const jobId = currentJobIdRef.current;
 
@@ -964,7 +973,7 @@ export function OperatorRuntimePanel() {
     setAutoRunning(false);
 
     if (!accessToken || !jobId) {
-      if (accessToken) {
+      if (accessToken && stopMachine) {
         await stopMachineOperation(accessToken).catch(() => undefined);
       }
       if (showToast) {
@@ -975,7 +984,9 @@ export function OperatorRuntimePanel() {
 
     try {
       const response = await stopInspection(accessToken, jobId, endReason);
-      await stopMachineOperation(accessToken).catch(() => undefined);
+      if (stopMachine) {
+        await stopMachineOperation(accessToken).catch(() => undefined);
+      }
       currentJobIdRef.current = "";
 
       if (showToast) {
@@ -1221,6 +1232,7 @@ export function OperatorRuntimePanel() {
                 <Select
                   aria-label={t("products.code")}
                   value={selectedProduct.id}
+                  portalled
                   disabled={loadingProducts || scanRunning || changingProduct}
                   className="operator-line-form-control h-11 border-[#9db7d8] bg-white text-base"
                   onChange={(event) =>

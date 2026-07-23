@@ -9,6 +9,7 @@ type SelectProps = Omit<
 > & {
   children: React.ReactNode;
   onChange?: (event: { target: { value: string } }) => void;
+  portalled?: boolean;
 };
 
 export function Select({
@@ -17,6 +18,7 @@ export function Select({
   disabled,
   id,
   onChange,
+  portalled = false,
   title,
   value,
   ...props
@@ -55,6 +57,7 @@ export function Select({
       }
       ariaInvalid={Boolean(props["aria-invalid"])}
       triggerClassName={className}
+      portalled={portalled}
       options={options}
       onChange={(nextValue) => onChange?.({ target: { value: nextValue } })}
       emptyLabel={options[0]?.label}

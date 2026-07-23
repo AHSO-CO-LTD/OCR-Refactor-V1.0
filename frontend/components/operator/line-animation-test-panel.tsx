@@ -1842,6 +1842,7 @@ export function LineAnimationTestPanel({
                     <Select
                       aria-label={t("products.code")}
                       value={selectedProductId}
+                      portalled
                       disabled={loadingProducts || isBusy}
                       className="operator-line-form-control h-11 border-[#9db7d8] bg-white text-base"
                       onChange={(event) =>
@@ -2098,6 +2099,7 @@ export function LineAnimationTestPanel({
                 <Select
                   aria-label={t("lineAnimationTest.sampleProduct")}
                   value={selectedProductId}
+                  portalled
                   disabled={loadingProducts}
                   className="h-11 border-slate-300 bg-white text-base"
                   onChange={(event) => handleProductChange(event.target.value)}
