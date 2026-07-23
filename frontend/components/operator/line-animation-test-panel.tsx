@@ -149,6 +149,8 @@ function resolvePendingRoiAnimationState(
 const plcDoneHoldMs = 750;
 const resultHoldMs = 1200;
 const runtimeFrameIntervalMs = 2800;
+const folderImagePresentationHoldMs = 120;
+const folderAnimationSettleMs = 120;
 
 const sampleProducts: ProductProfile[] = [
   createSampleProduct({
@@ -1248,6 +1250,40 @@ export function LineAnimationTestPanel({
     }
   }
 
+  async function waitForFolderCyclePhase(
+    generation: number,
+    durationMs: number,
+  ) {
+    const deadline = Date.now() + durationMs;
+
+    while (Date.now() < deadline) {
+      if (
+        cancelBatchTestRef.current ||
+        generation !== testSessionGenerationRef.current
+      ) {
+        return false;
+      }
+
+      await wait(Math.min(50, Math.max(1, deadline - Date.now())));
+    }
+
+    return (
+      !cancelBatchTestRef.current &&
+      generation === testSessionGenerationRef.current
+    );
+  }
+
+  function resetFolderImagePresentation() {
+    clearTimers();
+    pendingDetectionRef.current = null;
+    testRoiStatusesRef.current = {};
+    testRoiLabelsRef.current = {};
+    setAnimationState("UNKNOWN");
+    setActiveRoiIndexes([]);
+    setRoiStatuses({});
+    setRoiDetectedTextLabels({});
+  }
+
   function runLineContinuously() {
     const validated = validateRealTestInputs();
 
@@ -1533,6 +1569,7 @@ export function LineAnimationTestPanel({
           break;
         }
 
+        resetFolderImagePresentation();
         setBatchProgress({
           current: index + 1,
           total: batchFiles.length,
@@ -1544,6 +1581,14 @@ export function LineAnimationTestPanel({
         setSelectedImageName(file.name);
         const currentImageBase64 = await readImageFileAsDataUrl(file);
         setSelectedImageBase64(currentImageBase64);
+        if (
+          !(await waitForFolderCyclePhase(
+            generation,
+            folderImagePresentationHoldMs,
+          ))
+        ) {
+          break;
+        }
         const relativePath = file.webkitRelativePath || file.name;
         const pending = await detectTestImage({
           accessToken: validated.accessToken,
@@ -1572,6 +1617,13 @@ export function LineAnimationTestPanel({
           if (!latched || cancelBatchTestRef.current) {
             break;
           }
+        } else if (
+          !(await waitForFolderCyclePhase(
+            generation,
+            inspectionResultDelayMs + folderAnimationSettleMs,
+          ))
+        ) {
+          break;
         }
 
         await commitPendingDetection(pending, {
