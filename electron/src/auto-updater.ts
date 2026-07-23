@@ -117,7 +117,10 @@ export function registerAutoUpdater(options: RegisterAutoUpdaterOptions) {
       publish(options, "preparing", "Creating recovery checkpoint...", infoDetails(latestInfo));
       await options.prepareInstall(latestInfo.version);
       publish(options, "installing", "Installing update and restarting...", infoDetails(latestInfo));
-      setImmediate(() => autoUpdater.quitAndInstall(false, true));
+      // In-app updates already create a database/configuration checkpoint above.
+      // Run the NSIS installer silently so it preserves that runtime state instead
+      // of reopening the first-install database bootstrap UI.
+      setImmediate(() => autoUpdater.quitAndInstall(true, true));
       return { success: true, state };
     } catch (error) {
       publish(options, "error", errorMessage(error), infoDetails(latestInfo));
