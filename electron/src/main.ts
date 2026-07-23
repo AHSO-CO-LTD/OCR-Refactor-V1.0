@@ -129,6 +129,7 @@ async function startDesktopApp() {
   resetStartupState();
   registerDesktopIpc();
   registerAutoUpdater({
+    armInstallFallback: armUpdateInstallerFallback,
     authorize: authorizeUpdateAccess,
     getWindow: () => mainWindow,
     onLog: showTerminalLog,
@@ -137,6 +138,7 @@ async function startDesktopApp() {
 
   createMainWindow();
   showStartupPage();
+  await updateRecoveryManager.markStartupValidationStarted();
   serviceManager.onLog((message) => {
     showTerminalLog(message);
   });
@@ -1025,6 +1027,14 @@ async function prepareUpdateInstall(targetVersion: string) {
     isQuitting = false;
     throw error;
   }
+}
+
+async function armUpdateInstallerFallback() {
+  if (!updateRecoveryManager) {
+    throw new Error("Desktop update recovery is not ready.");
+  }
+
+  await updateRecoveryManager.armInstallerFailureRollback();
 }
 
 function requestRendererCloseConfirmation(window: BrowserWindow) {

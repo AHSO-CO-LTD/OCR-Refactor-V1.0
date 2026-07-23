@@ -31,6 +31,7 @@ export type UpdateStatusPayload = {
 };
 
 type RegisterAutoUpdaterOptions = {
+  armInstallFallback: () => Promise<void>;
   authorize: (accessToken: string) => Promise<void>;
   getWindow: () => BrowserWindow | null;
   onLog: (message: string) => void;
@@ -116,6 +117,7 @@ export function registerAutoUpdater(options: RegisterAutoUpdaterOptions) {
       await options.authorize(String(accessToken ?? ""));
       publish(options, "preparing", "Creating recovery checkpoint...", infoDetails(latestInfo));
       await options.prepareInstall(latestInfo.version);
+      await options.armInstallFallback();
       publish(options, "installing", "Installing update and restarting...", infoDetails(latestInfo));
       // In-app updates already create a database/configuration checkpoint above.
       // Run the NSIS installer silently so it preserves that runtime state instead
