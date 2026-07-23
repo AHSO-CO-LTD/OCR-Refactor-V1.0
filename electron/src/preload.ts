@@ -4,8 +4,8 @@ contextBridge.exposeInMainWorld("ocrDesktop", {
   applyWindowSettings(settings: Record<string, unknown>) {
     return ipcRenderer.invoke("desktop:apply-window-settings", settings);
   },
-  exitApp() {
-    return ipcRenderer.invoke("desktop:exit-app");
+  exitApp(mode: "app-and-hardware" | "app-only" = "app-only") {
+    return ipcRenderer.invoke("desktop:exit-app", mode);
   },
   checkForUpdates(accessToken: string) {
     return ipcRenderer.invoke("desktop:check-for-updates", accessToken);
@@ -81,6 +81,15 @@ contextBridge.exposeInMainWorld("ocrDesktop", {
 
     return () => {
       ipcRenderer.removeListener("desktop-shutdown-status", listener);
+    };
+  },
+  onShutdownStage(callback: (stage: Record<string, unknown>) => void) {
+    const listener = (_event: unknown, stage: Record<string, unknown>) =>
+      callback(stage);
+    ipcRenderer.on("desktop-shutdown-stage", listener);
+
+    return () => {
+      ipcRenderer.removeListener("desktop-shutdown-stage", listener);
     };
   },
   onCloseRequested(callback: () => void) {

@@ -184,13 +184,15 @@ const translations = {
     "startup.stage.plc": "Connect PLC",
     "startup.stage.plcDescription": "Configured PLC runtime connection",
     "startup.stage.cameraPower": "Enable camera power",
-    "startup.stage.cameraPowerDescription": "Configured PLC camera power output",
+    "startup.stage.cameraPowerDescription":
+      "Configured PLC camera power output",
     "startup.stage.cameraLight": "Enable inspection light",
     "startup.stage.cameraLightDescription": "Configured PLC light output",
     "startup.stage.camera": "Verify camera",
     "startup.stage.cameraDescription": "Connect and receive a valid frame",
     "startup.stage.plcSignals": "Test PLC signals",
-    "startup.stage.plcSignalsDescription": "Configured result outputs and input monitors",
+    "startup.stage.plcSignalsDescription":
+      "Configured result outputs and input monitors",
     "startup.status.pending": "Pending",
     "startup.status.running": "Checking",
     "startup.status.done": "Ready",
@@ -204,7 +206,8 @@ const translations = {
     "startup.signal.stopTrigger": "Stop trigger monitor",
     "startup.signal.startTrigger": "Start trigger monitor",
     "startup.signal.custom": "Custom signal",
-    "startup.signal.customSafety": "Configured only, not actuated automatically",
+    "startup.signal.customSafety":
+      "Configured only, not actuated automatically",
     "nav.dashboard": "Dashboard",
     "cameraPreview.connecting": "Connecting to camera",
     "cameraPreview.connectingDescription":
@@ -521,23 +524,32 @@ const translations = {
     "update.updateNow": "Update now",
     "update.releaseNotes": "Release notes",
     "update.noReleaseNotes": "No release notes are available yet.",
-    "update.desktopOnly": "Updates are only available in the Electron desktop app.",
-    "update.packagedOnly": "Update checks require an installed production build.",
+    "update.desktopOnly":
+      "Updates are only available in the Electron desktop app.",
+    "update.packagedOnly":
+      "Update checks require an installed production build.",
     "update.downloadError": "Cannot download the update.",
     "update.installError": "Cannot prepare or install the update.",
     "update.downloadProgress": "Download progress",
-    "update.backupExplanation": "The app is backing up PostgreSQL data and runtime configuration, caching the previous installer, then safely stopping Line, AI, camera, PLC, and local services.",
-    "update.restartExplanation": "The update is ready. Save any unfinished work, then install and restart the app.",
+    "update.backupExplanation":
+      "The app is backing up PostgreSQL data and runtime configuration, caching the previous installer, then safely stopping Line, AI, camera, PLC, and local services.",
+    "update.restartExplanation":
+      "The update is ready. Save any unfinished work, then install and restart the app.",
     "update.installAndRestart": "Install and restart",
     "update.failedTitle": "Update failed",
     "update.exportLog": "Export update log",
     "update.logExported": "Update log was saved.",
     "update.safetyTitle": "Update safeguards",
-    "update.safetyBackup": "Database and local configuration are backed up before installation.",
-    "update.safetyShutdown": "Machine hardware and local services are stopped in a safe order.",
-    "update.safetyRollback": "A critical startup failure restores the database and previous app version.",
-    "update.completedNotice": "Update completed successfully: v{from} to v{to}.",
-    "update.rollbackNotice": "Update failed and v{version} was restored. Error: {error}",
+    "update.safetyBackup":
+      "Database and local configuration are backed up before installation.",
+    "update.safetyShutdown":
+      "Machine hardware and local services are stopped in a safe order.",
+    "update.safetyRollback":
+      "A critical startup failure restores the database and previous app version.",
+    "update.completedNotice":
+      "Update completed successfully: v{from} to v{to}.",
+    "update.rollbackNotice":
+      "Update failed and v{version} was restored. Error: {error}",
     "update.unknownError": "Unknown startup error",
     "update.overlayTitle.idle": "Preparing update",
     "update.overlayTitle.available": "Update available",
@@ -548,15 +560,23 @@ const translations = {
     "update.overlayTitle.preparing": "Creating recovery checkpoint",
     "update.overlayTitle.installing": "Installing update",
     "update.overlayTitle.error": "Update could not continue",
-    "update.overlayDescription.idle": "Please wait while the updater is initialized.",
-    "update.overlayDescription.available": "A newer application version is ready to download.",
-    "update.overlayDescription.checking": "Reading the latest release information.",
+    "update.overlayDescription.idle":
+      "Please wait while the updater is initialized.",
+    "update.overlayDescription.available":
+      "A newer application version is ready to download.",
+    "update.overlayDescription.checking":
+      "Reading the latest release information.",
     "update.overlayDescription.not-available": "No newer version was found.",
-    "update.overlayDescription.downloading": "Keep the app open while the release files are downloaded.",
-    "update.overlayDescription.downloaded": "Installation requires a safe service shutdown and app restart.",
-    "update.overlayDescription.preparing": "Do not turn off the computer while the recovery checkpoint is created.",
-    "update.overlayDescription.installing": "The app will close and reopen automatically.",
-    "update.overlayDescription.error": "The current version remains available. Export the log if support is needed.",
+    "update.overlayDescription.downloading":
+      "Keep the app open while the release files are downloaded.",
+    "update.overlayDescription.downloaded":
+      "Installation requires a safe service shutdown and app restart.",
+    "update.overlayDescription.preparing":
+      "Do not turn off the computer while the recovery checkpoint is created.",
+    "update.overlayDescription.installing":
+      "The app will close and reopen automatically.",
+    "update.overlayDescription.error":
+      "The current version remains available. Export the log if support is needed.",
     "settings.windowMode": "Window mode",
     "settings.fullscreen": "Fullscreen",
     "settings.fullscreenHint": "Use the whole factory monitor.",
@@ -593,6 +613,30 @@ const translations = {
     "settings.exitConfirmTitle": "Confirm exit",
     "settings.exitConfirmDescription": "Are you sure you want to exit the app?",
     "settings.exitConfirm": "Exit app",
+    "settings.exitModeTitle": "Choose how to shut down",
+    "settings.exitModeAppOnly": "App only",
+    "settings.exitModeAppOnlyDescription":
+      "Close the app and local services using the current shutdown flow.",
+    "settings.exitModeHardware": "App and hardware",
+    "settings.exitModeHardwareDescription":
+      "Safely stop the camera and PLC hardware before closing the app.",
+    "settings.exitHardwareConfirm": "Shut down app and hardware",
+    "settings.shutdownChecklistTitle": "Shutdown checklist",
+    "settings.shutdownStepCamera": "Disconnect camera",
+    "settings.shutdownStepCameraOutputs":
+      "Turn off inspection light and camera power",
+    "settings.shutdownStepSignals": "Turn off all remaining PLC outputs",
+    "settings.shutdownStepPlc": "Disconnect PLC",
+    "settings.shutdownStepApp": "Stop local services and close the app",
+    "settings.hardwareShutdownTitle": "Shutting down app and hardware",
+    "settings.hardwareShutdownDescription":
+      "Hardware is shut down in order before the app closes.",
+    "settings.hardwareShutdownPreparing": "Preparing hardware shutdown...",
+    "settings.hardwareShutdownError":
+      "Hardware could not be shut down completely. The app has not closed.",
+    "settings.shutdownRetry": "Retry",
+    "settings.shutdownAppOnlyFallback": "Close app only",
+    "settings.shutdownCancelled": "Shutdown was canceled. The app remains open.",
     "settings.restartApp": "Restart app",
     "settings.restarting": "Restarting local app...",
     "settings.restartError": "Cannot restart the local app cleanly.",
@@ -719,7 +763,8 @@ const translations = {
     "operator.liveEnabled": "Live camera enabled.",
     "operator.liveDisabled": "Live camera paused on the last frame.",
     "operator.aiEnabled": "Real-time AI enabled.",
-    "operator.aiDisabled": "Real-time AI disabled. Results will not be latched.",
+    "operator.aiDisabled":
+      "Real-time AI disabled. Results will not be latched.",
     "operator.autoEnabled": "Automatic mode enabled.",
     "operator.manualEnabled": "Manual mode enabled.",
     "operator.frameCaptured": "Frame captured without inspection or latching.",
@@ -1438,17 +1483,20 @@ const translations = {
     "startup.exportSuccess": "Đã lưu nhật ký khởi động.",
     "startup.exportCanceled": "Đã hủy xuất nhật ký.",
     "startup.exportFailed": "Không thể xuất nhật ký khởi động.",
-    "startup.serviceUnavailable": "Không có thông tin khởi động từ ứng dụng desktop.",
+    "startup.serviceUnavailable":
+      "Không có thông tin khởi động từ ứng dụng desktop.",
     "startup.group.system": "Ứng dụng và bảo mật",
     "startup.group.machine": "Phần cứng máy",
     "startup.stage.deviceTool": "Kiểm tra Device Tool",
-    "startup.stage.deviceToolDescription": "Dịch vụ điều khiển phần cứng nội bộ",
+    "startup.stage.deviceToolDescription":
+      "Dịch vụ điều khiển phần cứng nội bộ",
     "startup.stage.backend": "Kiểm tra dịch vụ backend",
     "startup.stage.backendDescription": "API nội bộ và dịch vụ ứng dụng",
     "startup.stage.frontend": "Khởi tạo giao diện",
     "startup.stage.frontendDescription": "Giao diện desktop Next.js",
     "startup.stage.database": "Kiểm tra cơ sở dữ liệu và hệ thống",
-    "startup.stage.databaseDescription": "Migration, dữ liệu, tài khoản admin và API",
+    "startup.stage.databaseDescription":
+      "Migration, dữ liệu, tài khoản admin và API",
     "startup.stage.license": "Kiểm tra bản quyền",
     "startup.stage.licenseDescription": "USB dongle bản quyền vật lý",
     "startup.stage.plc": "Kết nối PLC",
@@ -1460,7 +1508,8 @@ const translations = {
     "startup.stage.camera": "Kiểm tra camera",
     "startup.stage.cameraDescription": "Kết nối và nhận một frame hợp lệ",
     "startup.stage.plcSignals": "Kiểm tra tín hiệu PLC",
-    "startup.stage.plcSignalsDescription": "Ngõ ra kết quả và ngõ vào đã cấu hình",
+    "startup.stage.plcSignalsDescription":
+      "Ngõ ra kết quả và ngõ vào đã cấu hình",
     "startup.status.pending": "Đang chờ",
     "startup.status.running": "Đang kiểm tra",
     "startup.status.done": "Sẵn sàng",
@@ -1559,7 +1608,8 @@ const translations = {
     "plcTestOutput.sessionNotReady":
       "Chế độ kiểm thử PLC chưa sẵn sàng. Vui lòng chờ và thử lại.",
     "plcTestOutput.sessionPreparing": "Đang chuẩn bị chế độ kiểm thử PLC...",
-    "plcTestOutput.sessionFailed": "Không thể kích hoạt chế độ kiểm thử PLC độc lập.",
+    "plcTestOutput.sessionFailed":
+      "Không thể kích hoạt chế độ kiểm thử PLC độc lập.",
     "plcTestOutput.sessionRestored": "Đã khôi phục chế độ kiểm thử PLC.",
     "plcTestOutput.okPulseSent": "Đã phát xung kiểm thử OK đến PLC.",
     "plcTestOutput.ngPulseSent": "Đã phát xung kiểm thử NG đến PLC.",
@@ -1801,6 +1851,30 @@ const translations = {
     "settings.exitConfirmTitle": "Xác nhận thoát app",
     "settings.exitConfirmDescription": "Bạn có chắc chắn muốn thoát app không?",
     "settings.exitConfirm": "Thoát app",
+    "settings.exitModeTitle": "Chọn cách tắt",
+    "settings.exitModeAppOnly": "Chỉ tắt ứng dụng",
+    "settings.exitModeAppOnlyDescription":
+      "Đóng ứng dụng và các dịch vụ local theo luồng hiện tại.",
+    "settings.exitModeHardware": "Tắt ứng dụng và phần cứng",
+    "settings.exitModeHardwareDescription":
+      "Tắt camera và phần cứng PLC an toàn trước khi đóng ứng dụng.",
+    "settings.exitHardwareConfirm": "Tắt ứng dụng và phần cứng",
+    "settings.shutdownChecklistTitle": "Checklist thực hiện",
+    "settings.shutdownStepCamera": "Ngắt kết nối camera",
+    "settings.shutdownStepCameraOutputs":
+      "Tắt đèn kiểm tra và ngắt nguồn camera",
+    "settings.shutdownStepSignals": "Tắt toàn bộ tín hiệu đầu ra PLC còn lại",
+    "settings.shutdownStepPlc": "Ngắt kết nối PLC",
+    "settings.shutdownStepApp": "Tắt dịch vụ local và đóng ứng dụng",
+    "settings.hardwareShutdownTitle": "Đang tắt ứng dụng và phần cứng",
+    "settings.hardwareShutdownDescription":
+      "Phần cứng sẽ được tắt đúng thứ tự trước khi ứng dụng đóng.",
+    "settings.hardwareShutdownPreparing": "Đang chuẩn bị tắt phần cứng...",
+    "settings.hardwareShutdownError":
+      "Không thể tắt hoàn toàn phần cứng. Ứng dụng chưa được đóng.",
+    "settings.shutdownRetry": "Thử lại",
+    "settings.shutdownAppOnlyFallback": "Chỉ tắt ứng dụng",
+    "settings.shutdownCancelled": "Đã hủy thao tác tắt. Ứng dụng vẫn đang mở.",
     "settings.restartApp": "Khởi động lại app",
     "settings.restarting": "Đang khởi động lại app local...",
     "settings.restartError": "Không thể khởi động lại app local sạch sẽ.",
@@ -3431,7 +3505,8 @@ const translationOverrides: Record<Language, Record<string, string>> = {
       "Thi\u1ebfu dongle b\u1ea3n quy\u1ec1n. Vui l\u00f2ng c\u1eafm dongle r\u1ed3i ki\u1ec3m tra l\u1ea1i.",
     "auth.loginSuccess": "\u0110\u0103ng nh\u1eadp th\u00e0nh c\u00f4ng.",
     "login.statusTitle": "Ki\u1ec3m tra kh\u1edfi \u0111\u1ed9ng",
-    "login.ready": "\u0110\u00e3 ho\u00e0n t\u1ea5t ki\u1ec3m tra kh\u1edfi \u0111\u1ed9ng.",
+    "login.ready":
+      "\u0110\u00e3 ho\u00e0n t\u1ea5t ki\u1ec3m tra kh\u1edfi \u0111\u1ed9ng.",
     "login.blocked":
       "B\u1ea3n quy\u1ec1n ch\u01b0a h\u1ee3p l\u1ec7. Kh\u00f4ng th\u1ec3 \u0111\u0103ng nh\u1eadp.",
     "login.recheck": "Ki\u1ec3m tra l\u1ea1i",
@@ -3457,48 +3532,81 @@ const translationOverrides: Record<Language, Record<string, string>> = {
     "update.notChecked": "Ch\u01b0a ki\u1ec3m tra",
     "update.check": "Ki\u1ec3m tra c\u1eadp nh\u1eadt",
     "update.checking": "\u0110ang ki\u1ec3m tra c\u1eadp nh\u1eadt...",
-    "update.checkError": "Kh\u00f4ng th\u1ec3 ki\u1ec3m tra c\u1eadp nh\u1eadt.",
-    "update.availableToast": "\u0110\u00e3 c\u00f3 phi\u00ean b\u1ea3n c\u1eadp nh\u1eadt m\u1edbi.",
-    "update.upToDateToast": "\u1ee8ng d\u1ee5ng \u0111ang \u1edf phi\u00ean b\u1ea3n m\u1edbi nh\u1ea5t.",
+    "update.checkError":
+      "Kh\u00f4ng th\u1ec3 ki\u1ec3m tra c\u1eadp nh\u1eadt.",
+    "update.availableToast":
+      "\u0110\u00e3 c\u00f3 phi\u00ean b\u1ea3n c\u1eadp nh\u1eadt m\u1edbi.",
+    "update.upToDateToast":
+      "\u1ee8ng d\u1ee5ng \u0111ang \u1edf phi\u00ean b\u1ea3n m\u1edbi nh\u1ea5t.",
     "update.updateNow": "C\u1eadp nh\u1eadt ngay",
     "update.releaseNotes": "N\u1ed9i dung phi\u00ean b\u1ea3n",
-    "update.noReleaseNotes": "Ch\u01b0a c\u00f3 n\u1ed9i dung phi\u00ean b\u1ea3n.",
-    "update.desktopOnly": "Ch\u1ee9c n\u0103ng c\u1eadp nh\u1eadt ch\u1ec9 kh\u1ea3 d\u1ee5ng trong app Electron.",
-    "update.packagedOnly": "C\u1ea7n b\u1ea3n production \u0111\u00e3 c\u00e0i \u0111\u1eb7t \u0111\u1ec3 ki\u1ec3m tra c\u1eadp nh\u1eadt.",
-    "update.downloadError": "Kh\u00f4ng th\u1ec3 t\u1ea3i b\u1ea3n c\u1eadp nh\u1eadt.",
-    "update.installError": "Kh\u00f4ng th\u1ec3 chu\u1ea9n b\u1ecb ho\u1eb7c c\u00e0i b\u1ea3n c\u1eadp nh\u1eadt.",
+    "update.noReleaseNotes":
+      "Ch\u01b0a c\u00f3 n\u1ed9i dung phi\u00ean b\u1ea3n.",
+    "update.desktopOnly":
+      "Ch\u1ee9c n\u0103ng c\u1eadp nh\u1eadt ch\u1ec9 kh\u1ea3 d\u1ee5ng trong app Electron.",
+    "update.packagedOnly":
+      "C\u1ea7n b\u1ea3n production \u0111\u00e3 c\u00e0i \u0111\u1eb7t \u0111\u1ec3 ki\u1ec3m tra c\u1eadp nh\u1eadt.",
+    "update.downloadError":
+      "Kh\u00f4ng th\u1ec3 t\u1ea3i b\u1ea3n c\u1eadp nh\u1eadt.",
+    "update.installError":
+      "Kh\u00f4ng th\u1ec3 chu\u1ea9n b\u1ecb ho\u1eb7c c\u00e0i b\u1ea3n c\u1eadp nh\u1eadt.",
     "update.downloadProgress": "Ti\u1ebfn tr\u00ecnh t\u1ea3i",
-    "update.backupExplanation": "\u1ee8ng d\u1ee5ng \u0111ang sao l\u01b0u PostgreSQL v\u00e0 c\u1ea5u h\u00ecnh runtime, l\u01b0u b\u1ed9 c\u00e0i phi\u00ean b\u1ea3n c\u0169, sau \u0111\u00f3 d\u1eebng an to\u00e0n Line, AI, camera, PLC v\u00e0 c\u00e1c d\u1ecbch v\u1ee5 local.",
-    "update.restartExplanation": "B\u1ea3n c\u1eadp nh\u1eadt \u0111\u00e3 s\u1eb5n s\u00e0ng. H\u00e3y l\u01b0u c\u00f4ng vi\u1ec7c ch\u01b0a ho\u00e0n t\u1ea5t, sau \u0111\u00f3 c\u00e0i \u0111\u1eb7t v\u00e0 kh\u1edfi \u0111\u1ed9ng l\u1ea1i.",
-    "update.installAndRestart": "C\u00e0i \u0111\u1eb7t v\u00e0 kh\u1edfi \u0111\u1ed9ng l\u1ea1i",
+    "update.backupExplanation":
+      "\u1ee8ng d\u1ee5ng \u0111ang sao l\u01b0u PostgreSQL v\u00e0 c\u1ea5u h\u00ecnh runtime, l\u01b0u b\u1ed9 c\u00e0i phi\u00ean b\u1ea3n c\u0169, sau \u0111\u00f3 d\u1eebng an to\u00e0n Line, AI, camera, PLC v\u00e0 c\u00e1c d\u1ecbch v\u1ee5 local.",
+    "update.restartExplanation":
+      "B\u1ea3n c\u1eadp nh\u1eadt \u0111\u00e3 s\u1eb5n s\u00e0ng. H\u00e3y l\u01b0u c\u00f4ng vi\u1ec7c ch\u01b0a ho\u00e0n t\u1ea5t, sau \u0111\u00f3 c\u00e0i \u0111\u1eb7t v\u00e0 kh\u1edfi \u0111\u1ed9ng l\u1ea1i.",
+    "update.installAndRestart":
+      "C\u00e0i \u0111\u1eb7t v\u00e0 kh\u1edfi \u0111\u1ed9ng l\u1ea1i",
     "update.failedTitle": "C\u1eadp nh\u1eadt th\u1ea5t b\u1ea1i",
     "update.exportLog": "Xu\u1ea5t nh\u1eadt k\u00fd c\u1eadp nh\u1eadt",
-    "update.logExported": "\u0110\u00e3 l\u01b0u nh\u1eadt k\u00fd c\u1eadp nh\u1eadt.",
+    "update.logExported":
+      "\u0110\u00e3 l\u01b0u nh\u1eadt k\u00fd c\u1eadp nh\u1eadt.",
     "update.safetyTitle": "C\u01a1 ch\u1ebf an to\u00e0n",
-    "update.safetyBackup": "C\u01a1 s\u1edf d\u1eef li\u1ec7u v\u00e0 c\u1ea5u h\u00ecnh local \u0111\u01b0\u1ee3c sao l\u01b0u tr\u01b0\u1edbc khi c\u00e0i \u0111\u1eb7t.",
-    "update.safetyShutdown": "Ph\u1ea7n c\u1ee9ng m\u00e1y v\u00e0 c\u00e1c d\u1ecbch v\u1ee5 local \u0111\u01b0\u1ee3c d\u1eebng \u0111\u00fang th\u1ee9 t\u1ef1.",
-    "update.safetyRollback": "L\u1ed7i kh\u1edfi \u0111\u1ed9ng nghi\u00eam tr\u1ecdng s\u1ebd kh\u00f4i ph\u1ee5c DB v\u00e0 phi\u00ean b\u1ea3n app tr\u01b0\u1edbc.",
-    "update.completedNotice": "C\u1eadp nh\u1eadt th\u00e0nh c\u00f4ng: v{from} l\u00ean v{to}.",
-    "update.rollbackNotice": "C\u1eadp nh\u1eadt th\u1ea5t b\u1ea1i v\u00e0 \u0111\u00e3 kh\u00f4i ph\u1ee5c v{version}. L\u1ed7i: {error}",
-    "update.unknownError": "L\u1ed7i kh\u1edfi \u0111\u1ed9ng kh\u00f4ng x\u00e1c \u0111\u1ecbnh",
+    "update.safetyBackup":
+      "C\u01a1 s\u1edf d\u1eef li\u1ec7u v\u00e0 c\u1ea5u h\u00ecnh local \u0111\u01b0\u1ee3c sao l\u01b0u tr\u01b0\u1edbc khi c\u00e0i \u0111\u1eb7t.",
+    "update.safetyShutdown":
+      "Ph\u1ea7n c\u1ee9ng m\u00e1y v\u00e0 c\u00e1c d\u1ecbch v\u1ee5 local \u0111\u01b0\u1ee3c d\u1eebng \u0111\u00fang th\u1ee9 t\u1ef1.",
+    "update.safetyRollback":
+      "L\u1ed7i kh\u1edfi \u0111\u1ed9ng nghi\u00eam tr\u1ecdng s\u1ebd kh\u00f4i ph\u1ee5c DB v\u00e0 phi\u00ean b\u1ea3n app tr\u01b0\u1edbc.",
+    "update.completedNotice":
+      "C\u1eadp nh\u1eadt th\u00e0nh c\u00f4ng: v{from} l\u00ean v{to}.",
+    "update.rollbackNotice":
+      "C\u1eadp nh\u1eadt th\u1ea5t b\u1ea1i v\u00e0 \u0111\u00e3 kh\u00f4i ph\u1ee5c v{version}. L\u1ed7i: {error}",
+    "update.unknownError":
+      "L\u1ed7i kh\u1edfi \u0111\u1ed9ng kh\u00f4ng x\u00e1c \u0111\u1ecbnh",
     "update.overlayTitle.idle": "Chu\u1ea9n b\u1ecb c\u1eadp nh\u1eadt",
     "update.overlayTitle.available": "C\u00f3 b\u1ea3n c\u1eadp nh\u1eadt",
     "update.overlayTitle.checking": "Ki\u1ec3m tra c\u1eadp nh\u1eadt",
-    "update.overlayTitle.not-available": "\u1ee8ng d\u1ee5ng \u0111\u00e3 m\u1edbi nh\u1ea5t",
-    "update.overlayTitle.downloading": "\u0110ang t\u1ea3i b\u1ea3n c\u1eadp nh\u1eadt",
-    "update.overlayTitle.downloaded": "S\u1eb5n s\u00e0ng c\u00e0i \u0111\u1eb7t",
-    "update.overlayTitle.preparing": "\u0110ang t\u1ea1o checkpoint ph\u1ee5c h\u1ed3i",
-    "update.overlayTitle.installing": "\u0110ang c\u00e0i b\u1ea3n c\u1eadp nh\u1eadt",
-    "update.overlayTitle.error": "Kh\u00f4ng th\u1ec3 ti\u1ebfp t\u1ee5c c\u1eadp nh\u1eadt",
-    "update.overlayDescription.idle": "Vui l\u00f2ng ch\u1edd kh\u1edfi t\u1ea1o tr\u00ecnh c\u1eadp nh\u1eadt.",
-    "update.overlayDescription.available": "Phi\u00ean b\u1ea3n m\u1edbi \u0111\u00e3 s\u1eb5n s\u00e0ng \u0111\u1ec3 t\u1ea3i.",
-    "update.overlayDescription.checking": "\u0110ang \u0111\u1ecdc th\u00f4ng tin release m\u1edbi nh\u1ea5t.",
-    "update.overlayDescription.not-available": "Kh\u00f4ng t\u00ecm th\u1ea5y phi\u00ean b\u1ea3n m\u1edbi h\u01a1n.",
-    "update.overlayDescription.downloading": "Gi\u1eef \u1ee9ng d\u1ee5ng m\u1edf trong khi t\u1ea3i c\u00e1c t\u1ec7p release.",
-    "update.overlayDescription.downloaded": "Qu\u00e1 tr\u00ecnh c\u00e0i \u0111\u1eb7t s\u1ebd d\u1eebng d\u1ecbch v\u1ee5 an to\u00e0n v\u00e0 kh\u1edfi \u0111\u1ed9ng l\u1ea1i app.",
-    "update.overlayDescription.preparing": "Kh\u00f4ng t\u1eaft m\u00e1y t\u00ednh trong khi t\u1ea1o checkpoint ph\u1ee5c h\u1ed3i.",
-    "update.overlayDescription.installing": "\u1ee8ng d\u1ee5ng s\u1ebd t\u1ef1 \u0111\u00f3ng v\u00e0 m\u1edf l\u1ea1i.",
-    "update.overlayDescription.error": "Phi\u00ean b\u1ea3n hi\u1ec7n t\u1ea1i v\u1eabn \u0111\u01b0\u1ee3c gi\u1eef l\u1ea1i. H\u00e3y xu\u1ea5t log n\u1ebfu c\u1ea7n h\u1ed7 tr\u1ee3.",
+    "update.overlayTitle.not-available":
+      "\u1ee8ng d\u1ee5ng \u0111\u00e3 m\u1edbi nh\u1ea5t",
+    "update.overlayTitle.downloading":
+      "\u0110ang t\u1ea3i b\u1ea3n c\u1eadp nh\u1eadt",
+    "update.overlayTitle.downloaded":
+      "S\u1eb5n s\u00e0ng c\u00e0i \u0111\u1eb7t",
+    "update.overlayTitle.preparing":
+      "\u0110ang t\u1ea1o checkpoint ph\u1ee5c h\u1ed3i",
+    "update.overlayTitle.installing":
+      "\u0110ang c\u00e0i b\u1ea3n c\u1eadp nh\u1eadt",
+    "update.overlayTitle.error":
+      "Kh\u00f4ng th\u1ec3 ti\u1ebfp t\u1ee5c c\u1eadp nh\u1eadt",
+    "update.overlayDescription.idle":
+      "Vui l\u00f2ng ch\u1edd kh\u1edfi t\u1ea1o tr\u00ecnh c\u1eadp nh\u1eadt.",
+    "update.overlayDescription.available":
+      "Phi\u00ean b\u1ea3n m\u1edbi \u0111\u00e3 s\u1eb5n s\u00e0ng \u0111\u1ec3 t\u1ea3i.",
+    "update.overlayDescription.checking":
+      "\u0110ang \u0111\u1ecdc th\u00f4ng tin release m\u1edbi nh\u1ea5t.",
+    "update.overlayDescription.not-available":
+      "Kh\u00f4ng t\u00ecm th\u1ea5y phi\u00ean b\u1ea3n m\u1edbi h\u01a1n.",
+    "update.overlayDescription.downloading":
+      "Gi\u1eef \u1ee9ng d\u1ee5ng m\u1edf trong khi t\u1ea3i c\u00e1c t\u1ec7p release.",
+    "update.overlayDescription.downloaded":
+      "Qu\u00e1 tr\u00ecnh c\u00e0i \u0111\u1eb7t s\u1ebd d\u1eebng d\u1ecbch v\u1ee5 an to\u00e0n v\u00e0 kh\u1edfi \u0111\u1ed9ng l\u1ea1i app.",
+    "update.overlayDescription.preparing":
+      "Kh\u00f4ng t\u1eaft m\u00e1y t\u00ednh trong khi t\u1ea1o checkpoint ph\u1ee5c h\u1ed3i.",
+    "update.overlayDescription.installing":
+      "\u1ee8ng d\u1ee5ng s\u1ebd t\u1ef1 \u0111\u00f3ng v\u00e0 m\u1edf l\u1ea1i.",
+    "update.overlayDescription.error":
+      "Phi\u00ean b\u1ea3n hi\u1ec7n t\u1ea1i v\u1eabn \u0111\u01b0\u1ee3c gi\u1eef l\u1ea1i. H\u00e3y xu\u1ea5t log n\u1ebfu c\u1ea7n h\u1ed7 tr\u1ee3.",
     "products.manualDeviceName": "T\u00ean thi\u1ebft b\u1ecb nh\u1eadp tay",
     "products.selectCameraDevice": "Ch\u1ecdn camera",
     "products.refreshCameraDevices": "L\u00e0m m\u1edbi camera",
@@ -3586,7 +3694,9 @@ export function I18nProvider({ children }: { children: ReactNode }) {
 
     localStorage.setItem(LANGUAGE_KEY, language);
     document.documentElement.lang = language;
-    void window.ocrDesktop?.setLanguagePreference(language).catch(() => undefined);
+    void window.ocrDesktop
+      ?.setLanguagePreference(language)
+      .catch(() => undefined);
   }, [language, ready]);
 
   const value = useMemo<I18nContextValue>(

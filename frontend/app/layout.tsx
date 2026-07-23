@@ -3,6 +3,7 @@ import { Geist, Geist_Mono } from "next/font/google";
 import { Toaster } from "@/components/ui/sonner";
 import { VirtualKeyboardProvider } from "@/components/ui/virtual-keyboard";
 import { DesktopLifecycleProvider } from "@/components/system/desktop-lifecycle-provider";
+import { DragScrollProvider } from "@/components/system/drag-scroll-provider";
 import { AppUpdateProvider } from "@/components/update/app-update-provider";
 import { I18nProvider } from "@/lib/i18n";
 import "./globals.css";
@@ -33,16 +34,18 @@ export default function RootLayout({
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col">
-        <I18nProvider>
-          <VirtualKeyboardProvider>
-            <AppUpdateProvider>
-              <DesktopLifecycleProvider>
-                {children}
-                <Toaster />
-              </DesktopLifecycleProvider>
-            </AppUpdateProvider>
-          </VirtualKeyboardProvider>
-        </I18nProvider>
+        <DragScrollProvider>
+          <I18nProvider>
+            <VirtualKeyboardProvider>
+              <AppUpdateProvider>
+                <DesktopLifecycleProvider>
+                  {children}
+                  <Toaster />
+                </DesktopLifecycleProvider>
+              </AppUpdateProvider>
+            </VirtualKeyboardProvider>
+          </I18nProvider>
+        </DragScrollProvider>
       </body>
     </html>
   );

@@ -11,6 +11,7 @@ import type {
   StartupStageDetail,
   StartupStageStatus,
 } from "./startup-types";
+import type { ShutdownStageId, ShutdownStageUpdate } from "./shutdown-types";
 
 export type LocalServiceName = "backend" | "device-tool" | "frontend";
 export type {
@@ -277,7 +278,10 @@ export class ServiceManager {
   }
 
   getStartupServiceStages(): StartupServiceStageUpdate[] {
-    return [...this.startupServiceStages].map(([id, status]) => ({ id, status }));
+    return [...this.startupServiceStages].map(([id, status]) => ({
+      id,
+      status,
+    }));
   }
 
   getFrontendUrl() {
@@ -328,6 +332,70 @@ export class ServiceManager {
     );
     if (!response.ok) {
       throw new Error((await response.text()) || `${response.status}`);
+    }
+  }
+
+  async shutdownHardware(onStage: (stage: ShutdownStageUpdate) => void) {
+    const plcConnected = await this.getPlcConnectionForHardwareShutdown();
+    const stages: Array<{ id: ShutdownStageId; path: string }> = [
+      { id: "camera", path: "shutdown/camera" },
+    ];
+
+    if (plcConnected) {
+      stages.push(
+        { id: "cameraOutputs", path: "shutdown/camera-outputs" },
+        { id: "remainingSignals", path: "shutdown/remaining-signals" },
+      );
+    } else {
+      onStage({ id: "cameraOutputs", status: "skipped" });
+      onStage({ id: "remainingSignals", status: "skipped" });
+      onStage({ id: "plc", status: "skipped" });
+    }
+
+    const failures: string[] = [];
+
+    for (const stage of stages) {
+      onStage({ id: stage.id, status: "running" });
+
+      try {
+        await this.requestBackendHardwareShutdownStage(stage.path);
+        onStage({ id: stage.id, status: "done" });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        failures.push(`${stage.id}: ${message}`);
+        onStage({ id: stage.id, status: "failed", error: message });
+        this.emitLog(
+          "backend",
+          `hardware shutdown ${stage.id} failed (${message})`,
+        );
+      }
+    }
+
+    if (failures.length > 0) {
+      throw new Error(failures.join("; "));
+    }
+
+    if (!plcConnected) {
+      return;
+    }
+
+    const plcStage = { id: "plc" as const, path: "shutdown/plc" };
+    onStage({ id: plcStage.id, status: "running" });
+    try {
+      await this.requestBackendHardwareShutdownStage(plcStage.path);
+      onStage({ id: plcStage.id, status: "done" });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      onStage({
+        id: plcStage.id,
+        status: "failed",
+        error: message,
+      });
+      this.emitLog(
+        "backend",
+        `hardware shutdown ${plcStage.id} failed (${message})`,
+      );
+      throw error;
     }
   }
 
@@ -399,7 +467,8 @@ export class ServiceManager {
       onStage(result);
     };
 
-    const [plcStage, powerStage, lightStage, cameraStage, signalsStage] = stages;
+    const [plcStage, powerStage, lightStage, cameraStage, signalsStage] =
+      stages;
     const plc = await runStage(plcStage);
     if (plc.status !== "done") {
       for (const stage of [powerStage, lightStage, cameraStage, signalsStage]) {
@@ -1090,6 +1159,53 @@ export class ServiceManager {
       status: payload.data?.status ?? "done",
       details: payload.data?.checks,
     };
+  }
+
+  private async requestBackendHardwareShutdownStage(path: string) {
+    const response = await fetch(
+      `http://127.0.0.1:${this.getServicePort("backend")}/api/internal/plc-runtime/${path}`,
+      {
+        method: "POST",
+        headers: {
+          "x-desktop-internal-token": this.desktopInternalToken,
+        },
+        signal: AbortSignal.timeout(20_000),
+      },
+    );
+
+    if (!response.ok) {
+      throw new Error((await response.text()) || `${response.status}`);
+    }
+  }
+
+  private async getPlcConnectionForHardwareShutdown() {
+    try {
+      const response = await fetch(
+        `http://127.0.0.1:${this.getServicePort("backend")}/api/internal/plc-runtime/shutdown/plan`,
+        {
+          headers: {
+            "x-desktop-internal-token": this.desktopInternalToken,
+          },
+          signal: AbortSignal.timeout(5_000),
+        },
+      );
+
+      if (!response.ok) {
+        throw new Error((await response.text()) || `${response.status}`);
+      }
+
+      const payload = (await response.json()) as {
+        data?: { plcConnected?: boolean };
+      };
+      return payload.data?.plcConnected === true;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.emitLog(
+        "backend",
+        `could not read PLC status before hardware shutdown; using the safe PLC shutdown path (${message})`,
+      );
+      return true;
+    }
   }
 
   private updateStartupServiceStage(

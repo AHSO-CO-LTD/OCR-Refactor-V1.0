@@ -22,6 +22,7 @@ import {
   type StartupStageId,
   type StartupStageUpdate,
 } from "./startup-types";
+import type { DesktopExitMode, ShutdownStageUpdate } from "./shutdown-types";
 
 type WindowPreset = "factory" | "hd" | "fullHd" | "fourThree" | "custom";
 
@@ -77,7 +78,8 @@ let closeConfirmationReady = false;
 let shutdownPromise: Promise<{ success: boolean }> | null = null;
 let restartPromise: Promise<{ success: boolean }> | null = null;
 let windowSettings: DesktopWindowSettings = defaultWindowSettings;
-let testStorageSettings: DesktopTestStorageSettings = defaultTestStorageSettings;
+let testStorageSettings: DesktopTestStorageSettings =
+  defaultTestStorageSettings;
 let desktopLanguage: DesktopLanguage = "vi";
 let terminalShortcutCount = 0;
 let terminalShortcutLastAt = 0;
@@ -146,7 +148,8 @@ async function startDesktopApp() {
     emitStartupServiceStage,
     runRemainingStartupChecks,
   );
-  const frontendUrl = process.env.ELECTRON_RENDERER_URL ?? serviceManager.getFrontendUrl();
+  const frontendUrl =
+    process.env.ELECTRON_RENDERER_URL ?? serviceManager.getFrontendUrl();
 
   if (!startupResult) {
     await updateRecoveryManager.markStartupHealthy();
@@ -165,16 +168,24 @@ async function startDesktopApp() {
 }
 
 async function authorizeUpdateAccess(accessToken: string) {
-  if (!accessToken || !serviceManager) throw new Error("Update authorization is required.");
-  const response = await fetch(new URL("auth/me", serviceManager.getBackendUrl()), {
-    headers: { authorization: `Bearer ${accessToken}` },
-    signal: AbortSignal.timeout(10_000),
-  });
+  if (!accessToken || !serviceManager)
+    throw new Error("Update authorization is required.");
+  const response = await fetch(
+    new URL("auth/me", serviceManager.getBackendUrl()),
+    {
+      headers: { authorization: `Bearer ${accessToken}` },
+      signal: AbortSignal.timeout(10_000),
+    },
+  );
   if (!response.ok) throw new Error("Update authorization failed.");
-  const payload = (await response.json()) as { data?: { user?: { role?: string } } };
+  const payload = (await response.json()) as {
+    data?: { user?: { role?: string } };
+  };
   const role = payload.data?.user?.role;
   if (role !== "admin" && role !== "dev") {
-    throw new Error("Only administrator and developer roles can manage updates.");
+    throw new Error(
+      "Only administrator and developer roles can manage updates.",
+    );
   }
 }
 
@@ -245,12 +256,16 @@ function createMainWindow() {
 }
 
 function registerDesktopIpc() {
-  ipcMain.handle("desktop:get-test-storage-settings", () => testStorageSettings);
+  ipcMain.handle(
+    "desktop:get-test-storage-settings",
+    () => testStorageSettings,
+  );
   ipcMain.handle("desktop:get-window-settings", () => windowSettings);
   ipcMain.handle("desktop:get-terminal-logs", () => [...terminalLogs]);
   ipcMain.handle("desktop:get-startup-snapshot", () => getStartupSnapshot());
-  ipcMain.handle("desktop:get-update-recovery", () =>
-    updateRecoveryManager?.getNotice() ?? null,
+  ipcMain.handle(
+    "desktop:get-update-recovery",
+    () => updateRecoveryManager?.getNotice() ?? null,
   );
   ipcMain.handle("desktop:acknowledge-update-recovery", async () => {
     await updateRecoveryManager?.acknowledgeNotice();
@@ -330,7 +345,17 @@ function registerDesktopIpc() {
       filters: [
         {
           name: "Model files",
-          extensions: ["onnx", "pt", "pth", "engine", "xml", "bin", "trt", "tflite", "pb"],
+          extensions: [
+            "onnx",
+            "pt",
+            "pth",
+            "engine",
+            "xml",
+            "bin",
+            "trt",
+            "tflite",
+            "pb",
+          ],
         },
         { name: "All files", extensions: ["*"] },
       ],
@@ -345,8 +370,8 @@ function registerDesktopIpc() {
       filePath: result.filePaths[0] ?? null,
     };
   });
-  ipcMain.handle("desktop:exit-app", () => {
-    return requestAppShutdown();
+  ipcMain.handle("desktop:exit-app", (_event, mode?: DesktopExitMode) => {
+    return requestAppShutdown(mode === "app-and-hardware" ? mode : "app-only");
   });
   ipcMain.handle("desktop:restart-app", () => {
     return requestAppRestart();
@@ -414,8 +439,7 @@ async function runRemainingStartupChecks() {
   }>(new URL("system/license/public", backendUrl).toString()).then(
     (license) => {
       const valid =
-        license.data?.licensed === true &&
-        license.data?.donglePresent === true;
+        license.data?.licensed === true && license.data?.donglePresent === true;
       updateStartupStage({
         id: "license",
         status: valid ? "done" : "failed",
@@ -432,12 +456,9 @@ async function runRemainingStartupChecks() {
     emitStartupHardwareStage,
   );
 
-  const [setupResult, licenseResult, hardwareResult] =
-    await Promise.allSettled([
-      setupPromise,
-      licensePromise,
-      hardwarePromise,
-    ]);
+  const [setupResult, licenseResult, hardwareResult] = await Promise.allSettled(
+    [setupPromise, licensePromise, hardwarePromise],
+  );
 
   if (setupResult.status === "rejected") {
     await cleanupBlockedStartupHardware();
@@ -451,10 +472,7 @@ async function runRemainingStartupChecks() {
   }
 
   const license = licenseResult.value;
-  if (
-    license.data?.licensed !== true ||
-    license.data?.donglePresent !== true
-  ) {
+  if (license.data?.licensed !== true || license.data?.donglePresent !== true) {
     const reason = [license.data?.code, license.data?.message]
       .filter(Boolean)
       .join(": ");
@@ -510,12 +528,13 @@ function errorMessage(error: unknown) {
 }
 
 async function exportStartupLog(context?: StartupLogContext) {
-  const timestamp = new Date().toISOString().replaceAll(":", "-").replace(".", "-");
+  const timestamp = new Date()
+    .toISOString()
+    .replaceAll(":", "-")
+    .replace(".", "-");
   const options = {
     title:
-      desktopLanguage === "vi"
-        ? "Lưu nhật ký khởi động"
-        : "Save startup log",
+      desktopLanguage === "vi" ? "Lưu nhật ký khởi động" : "Save startup log",
     defaultPath: join(
       app.getPath("documents"),
       `AHSO-OCR-startup-${timestamp}.log`,
@@ -631,7 +650,9 @@ function createRuntimeEnvReadError(envPath: string, error: unknown) {
     );
   }
 
-  return new Error(`Cannot read runtime environment file ${envPath}: ${message}`);
+  return new Error(
+    `Cannot read runtime environment file ${envPath}: ${message}`,
+  );
 }
 
 function parseEnvFile(content: string) {
@@ -661,7 +682,9 @@ function parseEnvFile(content: string) {
 function getProgramDataRoot() {
   const basePath =
     process.env.PROGRAMDATA ??
-    (process.platform === "win32" ? "C:\\ProgramData" : app.getPath("userData"));
+    (process.platform === "win32"
+      ? "C:\\ProgramData"
+      : app.getPath("userData"));
 
   return join(basePath, "AHSO OCR");
 }
@@ -734,7 +757,9 @@ function loadWindowSettings() {
   }
 
   try {
-    const parsed = JSON.parse(readFileSync(settingsPath, "utf8")) as Partial<DesktopWindowSettings>;
+    const parsed = JSON.parse(
+      readFileSync(settingsPath, "utf8"),
+    ) as Partial<DesktopWindowSettings>;
     return normalizeWindowSettings({
       ...defaultWindowSettings,
       ...parsed,
@@ -769,15 +794,22 @@ function saveWindowSettings(settings: DesktopWindowSettings) {
 }
 
 function saveTestStorageSettings(settings: DesktopTestStorageSettings) {
-  writeFileSync(getTestStorageSettingsPath(), JSON.stringify(settings, null, 2));
+  writeFileSync(
+    getTestStorageSettingsPath(),
+    JSON.stringify(settings, null, 2),
+  );
 }
 
 function normalizeWindowSettings(settings: DesktopWindowSettings) {
   const presetSize = resolvePresetSize(settings.windowPreset);
   const width =
-    settings.windowPreset === "custom" ? clamp(settings.width, 1024, 3840) : presetSize.width;
+    settings.windowPreset === "custom"
+      ? clamp(settings.width, 1024, 3840)
+      : presetSize.width;
   const height =
-    settings.windowPreset === "custom" ? clamp(settings.height, 720, 2160) : presetSize.height;
+    settings.windowPreset === "custom"
+      ? clamp(settings.height, 720, 2160)
+      : presetSize.height;
 
   return {
     fullscreen: Boolean(settings.fullscreen),
@@ -905,7 +937,8 @@ async function rollbackFailedUpdate(error: unknown) {
   try {
     await serviceManager?.stopOwned(showTerminalLog);
     await serviceManager?.stopManagedPorts(showTerminalLog);
-    const rollbackStarted = await updateRecoveryManager.rollbackAfterStartupFailure(error);
+    const rollbackStarted =
+      await updateRecoveryManager.rollbackAfterStartupFailure(error);
     if (rollbackStarted) {
       isQuitting = true;
       app.exit(1);
@@ -947,7 +980,7 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
   });
 }
 
-async function requestAppShutdown() {
+async function requestAppShutdown(mode: DesktopExitMode = "app-only") {
   if (shutdownPromise) {
     return shutdownPromise;
   }
@@ -956,7 +989,10 @@ async function requestAppShutdown() {
     return restartPromise;
   }
 
-  shutdownPromise = shutdownAndQuit();
+  shutdownPromise = shutdownAndQuit(mode).catch((error) => {
+    shutdownPromise = null;
+    throw error;
+  });
   return shutdownPromise;
 }
 
@@ -1015,14 +1051,35 @@ function requestRendererCloseConfirmation(window: BrowserWindow) {
   }
 }
 
-async function shutdownAndQuit() {
+async function shutdownAndQuit(mode: DesktopExitMode) {
+  if (mode === "app-and-hardware") {
+    isQuitting = false;
+    reportShutdownStatus("Preparing hardware shutdown...");
+    try {
+      await serviceManager?.shutdownHardware(reportShutdownStage);
+    } catch (error) {
+      isQuitting = false;
+      reportShutdownStatus("Hardware shutdown failed.");
+      throw error;
+    }
+  }
+
   isQuitting = true;
+  reportShutdownStage({ id: "app", status: "running" });
   reportShutdownStatus("Preparing shutdown...");
 
   try {
     await serviceManager?.stopOwned(reportShutdownStatus);
     await serviceManager?.stopManagedPorts(reportShutdownStatus);
+    reportShutdownStage({ id: "app", status: "done" });
     reportShutdownStatus("Shutdown complete.");
+  } catch (error) {
+    reportShutdownStage({
+      id: "app",
+      status: "failed",
+      error: error instanceof Error ? error.message : String(error),
+    });
+    throw error;
   } finally {
     app.quit();
   }
@@ -1047,17 +1104,25 @@ async function shutdownAndRestart() {
 }
 
 async function exportUpdateLog() {
-  const timestamp = new Date().toISOString().replaceAll(":", "-").replace(".", "-");
+  const timestamp = new Date()
+    .toISOString()
+    .replaceAll(":", "-")
+    .replace(".", "-");
   const options = {
-    title: desktopLanguage === "vi" ? "Lưu nhật ký cập nhật" : "Save update log",
-    defaultPath: join(app.getPath("documents"), `AHSO-OCR-update-${timestamp}.log`),
+    title:
+      desktopLanguage === "vi" ? "Lưu nhật ký cập nhật" : "Save update log",
+    defaultPath: join(
+      app.getPath("documents"),
+      `AHSO-OCR-update-${timestamp}.log`,
+    ),
     filters: [{ name: "Log", extensions: ["log", "txt"] }],
   };
   const result =
     mainWindow && !mainWindow.isDestroyed()
       ? await dialog.showSaveDialog(mainWindow, options)
       : await dialog.showSaveDialog(options);
-  if (result.canceled || !result.filePath) return { canceled: true, filePath: null };
+  if (result.canceled || !result.filePath)
+    return { canceled: true, filePath: null };
 
   writeFileSync(
     result.filePath,
@@ -1067,7 +1132,9 @@ async function exportUpdateLog() {
       `App version: ${app.getVersion()}`,
       `Platform: ${process.platform}`,
       "",
-      ...terminalLogs.filter((line) => line.includes("[update]") || line.includes("[fatal]")),
+      ...terminalLogs.filter(
+        (line) => line.includes("[update]") || line.includes("[fatal]"),
+      ),
       "",
     ].join("\r\n"),
     "utf8",
@@ -1237,7 +1304,9 @@ async function loadRendererUrl() {
       return;
     }
 
-    showTerminalLog(`[startup] renderer navigation retry ${attempt}/${attempts}`);
+    showTerminalLog(
+      `[startup] renderer navigation retry ${attempt}/${attempts}`,
+    );
     await delay(1_000);
   }
 
@@ -1293,6 +1362,26 @@ function reportShutdownStatus(message: string) {
     }
   } catch (e) {
     console.error("Error sending shutdown status:", e);
+  }
+}
+
+function reportShutdownStage(stage: ShutdownStageUpdate) {
+  showTerminalLog(
+    `[shutdown] ${stage.id}: ${stage.status}${stage.error ? ` (${stage.error})` : ""}`,
+  );
+
+  if (
+    !mainWindow ||
+    mainWindow.isDestroyed() ||
+    mainWindow.webContents.isDestroyed()
+  ) {
+    return;
+  }
+
+  try {
+    mainWindow.webContents.send("desktop-shutdown-stage", stage);
+  } catch (error) {
+    console.error("Error sending shutdown stage:", error);
   }
 }
 

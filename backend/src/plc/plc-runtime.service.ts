@@ -89,6 +89,7 @@ export class PlcRuntimeService
   private ioQueue: Promise<unknown> = Promise.resolve();
   private connectPromise: Promise<unknown> | null = null;
   private shutdownPromise: Promise<void> | null = null;
+  private shutdownSequenceCompleted = false;
 
   constructor(
     private readonly prisma: PrismaService,
@@ -112,61 +113,146 @@ export class PlcRuntimeService
   }
 
   shutdownOutputsAndDisconnect() {
+    if (this.shutdownSequenceCompleted) return Promise.resolve();
     if (this.shutdownPromise) return this.shutdownPromise;
     this.shutdownPromise = this.performShutdown();
     return this.shutdownPromise;
   }
 
   private async performShutdown() {
-    this.intentionalDisconnect = true;
-    this.cancelReconnect();
-    this.stopWatchers();
-    const config = await this.loadConfig().catch(() => null);
+    await this.shutdownCameraOutputs().catch((error) => {
+      this.logger.warn(
+        `PLC shutdown could not clear camera outputs: ${this.errorMessage(error)}`,
+      );
+    });
+    await this.shutdownRemainingOutputs().catch((error) => {
+      this.logger.warn(
+        `PLC shutdown could not clear remaining outputs: ${this.errorMessage(error)}`,
+      );
+    });
+    await this.disconnectForShutdown().catch((error) => {
+      this.logger.warn(
+        `PLC shutdown disconnect failed: ${this.errorMessage(error)}`,
+      );
+    });
+  }
+
+  async shutdownCameraOutputs() {
+    this.prepareForShutdown();
+    const config = await this.loadConfig();
     const host = this.connectedHost ?? config?.ipAddress ?? null;
+    if (!config || !host) return;
 
-    if (config && host) {
-      const outputs = [
-        {
-          key: 'cameraLight' as const,
-          address: config.cameraLightAddress,
-        },
-        {
-          key: 'cameraPower' as const,
-          address: config.cameraPowerAddress,
-        },
-        {
-          key: 'waitingChecking' as const,
-          address: config.waitingCheckingAddress,
-        },
-      ].filter(
-        (output): output is { key: PlcFixedOutputKey; address: number } =>
-          output.address !== null,
-      );
+    await this.clearOutputsForShutdown(config, host, [
+      {
+        key: 'cameraLight',
+        address: config.cameraLightAddress,
+      },
+      {
+        key: 'cameraPower',
+        address: config.cameraPowerAddress,
+      },
+    ]);
+  }
 
-      for (const output of outputs) {
-        const toolAddress = toToolBooleanAddress(
-          config.protocol,
-          output.address,
-        );
-        await this.enqueue(() =>
-          this.toolClient.writeBoolean(host, toolAddress, false),
-        ).catch((error) => {
-          this.logger.warn(
-            `PLC shutdown could not clear ${output.key}: ${this.errorMessage(error)}`,
-          );
-        });
+  async shutdownRemainingOutputs() {
+    this.prepareForShutdown();
+    const config = await this.loadConfig();
+    const host = this.connectedHost ?? config?.ipAddress ?? null;
+    if (!config || !host) return;
+
+    const outputs = [
+      {
+        key: 'waitingChecking',
+        address: config.waitingCheckingAddress,
+      },
+      {
+        key: 'errorPulse',
+        address: config.errorPulseAddress,
+      },
+      {
+        key: 'okResult',
+        address: config.okResultAddress,
+      },
+      ...config.customKeys
+        .filter(
+          (key) =>
+            key.enabled && key.operation !== PlcKeyOperation.watch_boolean,
+        )
+        .map((key) => ({
+          key: `custom:${key.name}`,
+          address: key.address,
+        })),
+    ];
+
+    await this.clearOutputsForShutdown(config, host, outputs);
+  }
+
+  async disconnectForShutdown() {
+    this.prepareForShutdown();
+    const config = await this.loadConfig();
+    const host = this.connectedHost ?? config?.ipAddress ?? null;
+    let disconnectError: unknown = null;
+
+    if (host) {
+      try {
+        await this.enqueue(() => this.toolClient.disconnect(host));
+      } catch (error) {
+        disconnectError = error;
       }
-
-      await this.enqueue(() => this.toolClient.disconnect(host)).catch(
-        (error) => {
-          this.logger.warn(
-            `PLC shutdown disconnect failed: ${this.errorMessage(error)}`,
-          );
-        },
-      );
     }
 
     this.resetRuntime('disconnected', false);
+
+    if (disconnectError) {
+      throw disconnectError instanceof Error
+        ? disconnectError
+        : new Error(this.errorMessage(disconnectError));
+    }
+
+    this.shutdownSequenceCompleted = true;
+  }
+
+  private prepareForShutdown() {
+    this.intentionalDisconnect = true;
+    this.cancelReconnect();
+    this.stopWatchers();
+  }
+
+  private async clearOutputsForShutdown(
+    config: NonNullable<Awaited<ReturnType<typeof this.loadConfig>>>,
+    host: string,
+    outputs: Array<{ key: string; address: number | null }>,
+  ) {
+    const failures: string[] = [];
+    const clearedToolAddresses = new Set<number>();
+
+    for (const output of outputs) {
+      if (output.address === null) continue;
+      const toolAddress = toToolBooleanAddress(config.protocol, output.address);
+      if (clearedToolAddresses.has(toolAddress)) continue;
+      clearedToolAddresses.add(toolAddress);
+
+      try {
+        await this.enqueue(() =>
+          this.toolClient.writeBoolean(host, toolAddress, false),
+        );
+        if (
+          output.key === 'cameraLight' ||
+          output.key === 'cameraPower' ||
+          output.key === 'waitingChecking'
+        ) {
+          this.fixedOutputRevision[output.key] += 1;
+          this.setFixedOutputState(output.key, false);
+        }
+      } catch (error) {
+        failures.push(`${output.key}: ${this.errorMessage(error)}`);
+      }
+    }
+
+    if (failures.length > 0) {
+      throw new Error(failures.join('; '));
+    }
   }
 
   subscribe(listener: (event: PlcRuntimeEvent) => void) {
@@ -292,6 +378,7 @@ export class PlcRuntimeService
   private async performConnect() {
     const config = await this.requireConfig();
     this.intentionalDisconnect = false;
+    this.shutdownSequenceCompleted = false;
     this.cancelReconnect();
     this.stopWatchers();
     this.clearFixedOutputStates();
