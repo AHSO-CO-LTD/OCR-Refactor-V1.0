@@ -101,6 +101,24 @@ describe('PlcRuntimeService', () => {
       8295,
       false,
     );
+    expect(writeBoolean).toHaveBeenNthCalledWith(
+      4,
+      config.ipAddress,
+      8293,
+      false,
+    );
+    expect(writeBoolean).toHaveBeenNthCalledWith(
+      5,
+      config.ipAddress,
+      8294,
+      false,
+    );
+    expect(writeBoolean).toHaveBeenNthCalledWith(
+      6,
+      config.ipAddress,
+      8202,
+      false,
+    );
     expect(disconnect).toHaveBeenCalledWith(config.ipAddress);
     expect(
       events.some(

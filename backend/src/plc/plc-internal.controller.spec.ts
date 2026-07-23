@@ -14,13 +14,20 @@ describe('PlcInternalController', () => {
     } as unknown as ConfigService;
     const deviceTool = {
       disconnectCamera: jest.fn().mockResolvedValue({ success: true }),
+      stopCameraOcr: jest.fn().mockResolvedValue({ success: true }),
     };
     const inspections = {} as InspectionsService;
     const machineRuntime = {
       shutdownApplication: jest.fn().mockResolvedValue(undefined),
     };
     const plcRuntime = {
+      disconnectForShutdown: jest.fn().mockResolvedValue(undefined),
+      getRuntimeStatus: jest
+        .fn()
+        .mockResolvedValue({ data: { connected: false } }),
+      shutdownCameraOutputs: jest.fn().mockResolvedValue(undefined),
       shutdownOutputsAndDisconnect: jest.fn().mockResolvedValue(undefined),
+      shutdownRemainingOutputs: jest.fn().mockResolvedValue(undefined),
     };
     const controller = new PlcInternalController(
       configService,
@@ -60,5 +67,34 @@ describe('PlcInternalController', () => {
     expect(machineRuntime.shutdownApplication).toHaveBeenCalledTimes(1);
     expect(deviceTool.disconnectCamera).toHaveBeenCalledTimes(1);
     expect(plcRuntime.shutdownOutputsAndDisconnect).toHaveBeenCalledTimes(1);
+  });
+
+  it('runs explicit hardware shutdown stages independently', async () => {
+    const { controller, deviceTool, machineRuntime, plcRuntime } =
+      createController();
+
+    await controller.shutdownCamera(internalToken);
+    expect(machineRuntime.shutdownApplication).toHaveBeenCalledTimes(1);
+    expect(deviceTool.stopCameraOcr).toHaveBeenCalledTimes(1);
+    expect(deviceTool.disconnectCamera).toHaveBeenCalledTimes(1);
+
+    await controller.shutdownCameraOutputs(internalToken);
+    expect(plcRuntime.shutdownCameraOutputs).toHaveBeenCalledTimes(1);
+
+    await controller.shutdownRemainingSignals(internalToken);
+    expect(plcRuntime.shutdownRemainingOutputs).toHaveBeenCalledTimes(1);
+
+    await controller.shutdownPlc(internalToken);
+    expect(plcRuntime.disconnectForShutdown).toHaveBeenCalledTimes(1);
+  });
+
+  it('reports whether the PLC is connected before hardware shutdown', async () => {
+    const { controller, plcRuntime } = createController();
+
+    await expect(controller.getShutdownPlan(internalToken)).resolves.toEqual({
+      data: { plcConnected: false },
+    });
+
+    expect(plcRuntime.getRuntimeStatus).toHaveBeenCalledTimes(1);
   });
 });

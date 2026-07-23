@@ -42,6 +42,12 @@ body {
   -webkit-overflow-scrolling: touch;
 }
 
+html.drag-scroll-active,
+html.drag-scroll-active * {
+  cursor: grabbing !important;
+  user-select: none !important;
+}
+
 .login-page {
   scrollbar-gutter: stable;
 }

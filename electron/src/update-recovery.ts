@@ -5,7 +5,7 @@ import { basename, dirname, join } from "node:path";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 
-type RecoveryStatus = "completed" | "installing" | "rolled-back";
+type RecoveryStatus = "completed" | "installing" | "rolled-back" | "validating";
 
 type BackedUpFile = {
   backupPath: string;
@@ -87,11 +87,69 @@ export class UpdateRecoveryManager {
     return record;
   }
 
+  async armInstallerFailureRollback() {
+    const record = await this.readRecord();
+    if (!record || record.status !== "installing") {
+      throw new Error("Update recovery checkpoint is not ready for installation.");
+    }
+
+    if (!existsSync(record.previousInstallerPath)) {
+      throw new Error(`Rollback installer is missing: ${record.previousInstallerPath}`);
+    }
+
+    const fallbackScript = createInstallerFailureRollbackScript(this.markerPath);
+    const child = spawn(
+      "powershell.exe",
+      [
+        "-NoProfile",
+        "-NonInteractive",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-WindowStyle",
+        "Hidden",
+        "-Command",
+        fallbackScript,
+      ],
+      {
+        detached: true,
+        stdio: "ignore",
+        windowsHide: true,
+      },
+    );
+    child.unref();
+    this.options.onLog("[update] Installer rollback watchdog armed.");
+  }
+
+  async markStartupValidationStarted() {
+    const record = await this.readRecord();
+    if (!record || record.status !== "installing") return;
+
+    if (record.fromVersion === app.getVersion()) {
+      await this.writeRecord({
+        ...record,
+        failure: "The update installer did not replace the current application version.",
+        status: "rolled-back",
+        updatedAt: new Date().toISOString(),
+      });
+      this.options.onLog("[update] Update installer did not replace the current version; keeping it active.");
+      return;
+    }
+
+    await this.writeRecord({
+      ...record,
+      status: "validating",
+      updatedAt: new Date().toISOString(),
+    });
+    this.options.onLog(
+      `[update] Validating startup for ${record.fromVersion} -> ${record.targetVersion}.`,
+    );
+  }
+
   async markStartupHealthy() {
     const record = await this.readRecord();
     if (
       !record ||
-      record.status !== "installing" ||
+      (record.status !== "installing" && record.status !== "validating") ||
       record.fromVersion === app.getVersion()
     ) {
       return;
@@ -111,7 +169,7 @@ export class UpdateRecoveryManager {
     const record = await this.readRecord();
     if (
       !record ||
-      record.status !== "installing" ||
+      (record.status !== "installing" && record.status !== "validating") ||
       record.fromVersion === app.getVersion()
     ) {
       return false;
@@ -307,6 +365,26 @@ export class UpdateRecoveryManager {
     await fs.mkdir(this.updatesRoot, { recursive: true });
     await fs.writeFile(this.markerPath, JSON.stringify(record, null, 2), "utf8");
   }
+}
+
+function createInstallerFailureRollbackScript(markerPath: string) {
+  const watchdogTimeoutSeconds = 180;
+  const escapedMarkerPath = markerPath.replace(/'/g, "''");
+
+  return [
+    "$ErrorActionPreference = 'Stop'",
+    `Start-Sleep -Seconds ${watchdogTimeoutSeconds}`,
+    `$markerPath = '${escapedMarkerPath}'`,
+    "if (-not (Test-Path -LiteralPath $markerPath)) { exit 0 }",
+    "$record = Get-Content -LiteralPath $markerPath -Raw | ConvertFrom-Json",
+    "if ($record.status -ne 'installing') { exit 0 }",
+    "if (-not $record.previousInstallerPath -or -not (Test-Path -LiteralPath $record.previousInstallerPath)) { exit 0 }",
+    "$record.status = 'rolled-back'",
+    "$record.failure = 'The update installer did not restart the new application before the recovery timeout.'",
+    "$record.updatedAt = [DateTime]::UtcNow.ToString('o')",
+    "$record | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $markerPath -Encoding UTF8",
+    "Start-Process -FilePath $record.previousInstallerPath -ArgumentList @('/S', '--updated') -WindowStyle Hidden",
+  ].join("; ");
 }
 
 function createReadStreamFromResponse(response: Response) {

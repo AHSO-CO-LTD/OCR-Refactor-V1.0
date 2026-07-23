@@ -2,6 +2,7 @@ import {
   Body,
   Controller,
   ForbiddenException,
+  Get,
   Headers,
   HttpCode,
   Post,
@@ -108,6 +109,59 @@ export class PlcInternalController {
 
     await this.machineRuntime.shutdownApplication();
     await this.plcRuntime.shutdownOutputsAndDisconnect();
+  }
+
+  @Get('shutdown/plan')
+  async getShutdownPlan(
+    @Headers('x-desktop-internal-token') providedToken?: string,
+  ) {
+    this.assertInternalToken(providedToken);
+
+    const runtime = await this.plcRuntime.getRuntimeStatus();
+    return {
+      data: {
+        plcConnected: runtime.data.connected,
+      },
+    };
+  }
+
+  @Post('shutdown/camera')
+  @HttpCode(204)
+  async shutdownCamera(
+    @Headers('x-desktop-internal-token') providedToken?: string,
+  ) {
+    this.assertInternalToken(providedToken);
+
+    await this.machineRuntime.shutdownApplication();
+    await this.deviceToolService.stopCameraOcr().catch(() => undefined);
+    await this.deviceToolService.disconnectCamera();
+  }
+
+  @Post('shutdown/camera-outputs')
+  @HttpCode(204)
+  async shutdownCameraOutputs(
+    @Headers('x-desktop-internal-token') providedToken?: string,
+  ) {
+    this.assertInternalToken(providedToken);
+    await this.plcRuntime.shutdownCameraOutputs();
+  }
+
+  @Post('shutdown/remaining-signals')
+  @HttpCode(204)
+  async shutdownRemainingSignals(
+    @Headers('x-desktop-internal-token') providedToken?: string,
+  ) {
+    this.assertInternalToken(providedToken);
+    await this.plcRuntime.shutdownRemainingOutputs();
+  }
+
+  @Post('shutdown/plc')
+  @HttpCode(204)
+  async shutdownPlc(
+    @Headers('x-desktop-internal-token') providedToken?: string,
+  ) {
+    this.assertInternalToken(providedToken);
+    await this.plcRuntime.disconnectForShutdown();
   }
 
   private assertInternalToken(providedToken?: string) {

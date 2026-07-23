@@ -121,6 +121,28 @@ export type DesktopUpdateActionResult = {
   success: boolean;
 };
 
+export type DesktopExitMode = "app-and-hardware" | "app-only";
+
+export type DesktopShutdownStageId =
+  | "app"
+  | "camera"
+  | "cameraOutputs"
+  | "plc"
+  | "remainingSignals";
+
+export type DesktopShutdownStageStatus =
+  | "done"
+  | "failed"
+  | "pending"
+  | "running"
+  | "skipped";
+
+export type DesktopShutdownStageUpdate = {
+  error?: string;
+  id: DesktopShutdownStageId;
+  status: DesktopShutdownStageStatus;
+};
+
 export type DesktopBridge = {
   applyWindowSettings(
     settings: Partial<DesktopWindowSettings>,
@@ -128,7 +150,7 @@ export type DesktopBridge = {
   acknowledgeUpdateRecovery(): Promise<{ success: boolean }>;
   checkForUpdates(accessToken: string): Promise<DesktopUpdateActionResult>;
   downloadUpdate(accessToken: string): Promise<DesktopUpdateActionResult>;
-  exitApp(): Promise<{ success: boolean }>;
+  exitApp(mode?: DesktopExitMode): Promise<{ success: boolean }>;
   getTestStorageSettings(): Promise<DesktopTestStorageSettings>;
   getTerminalLogs(): Promise<string[]>;
   getStartupSnapshot(): Promise<DesktopStartupSnapshot>;
@@ -152,8 +174,13 @@ export type DesktopBridge = {
   selectModelFile(): Promise<{ canceled: boolean; filePath: string | null }>;
   onTerminalLog(callback: (message: string) => void): () => void;
   onCloseRequested(callback: () => void): () => void;
+  onShutdownStage(
+    callback: (stage: DesktopShutdownStageUpdate) => void,
+  ): () => void;
   onShutdownStatus(callback: (message: string) => void): () => void;
-  onStartupSnapshot(callback: (payload: DesktopStartupSnapshot) => void): () => void;
+  onStartupSnapshot(
+    callback: (payload: DesktopStartupSnapshot) => void,
+  ): () => void;
   onUpdateStatus(callback: (payload: DesktopUpdateState) => void): () => void;
   platform: string;
   versions: {

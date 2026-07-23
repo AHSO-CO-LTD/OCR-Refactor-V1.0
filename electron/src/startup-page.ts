@@ -22,6 +22,21 @@ const copy = {
     exitFailed: "Cannot close the local app cleanly.",
     exitTitle: "Confirm exit",
     exiting: "Closing local services...",
+    exitModeTitle: "Choose how to shut down",
+    exitAppOnly: "App only",
+    exitAppOnlyDescription: "Close the app and local services.",
+    exitHardware: "App and hardware",
+    exitHardwareDescription:
+      "Safely stop the camera and PLC hardware before closing the app.",
+    exitHardwareConfirm: "Shut down app and hardware",
+    shutdownChecklist: "Shutdown checklist",
+    shutdownSteps: {
+      app: "Stop local services and close the app",
+      camera: "Disconnect camera",
+      cameraOutputs: "Turn off inspection light and camera power",
+      plc: "Disconnect PLC",
+      remainingSignals: "Turn off all remaining PLC outputs",
+    },
     groupMachine: "Machine hardware",
     groupSystem: "Application and security",
     hardwareWarning: "Machine hardware needs attention",
@@ -81,6 +96,21 @@ const copy = {
     exitFailed: "Không thể đóng app local sạch sẽ.",
     exitTitle: "Xác nhận thoát app",
     exiting: "Đang đóng các dịch vụ local...",
+    exitModeTitle: "Chọn cách tắt",
+    exitAppOnly: "Chỉ tắt ứng dụng",
+    exitAppOnlyDescription: "Đóng ứng dụng và các dịch vụ local.",
+    exitHardware: "Tắt ứng dụng và phần cứng",
+    exitHardwareDescription:
+      "Tắt camera và phần cứng PLC an toàn trước khi đóng ứng dụng.",
+    exitHardwareConfirm: "Tắt ứng dụng và phần cứng",
+    shutdownChecklist: "Checklist thực hiện",
+    shutdownSteps: {
+      app: "Tắt dịch vụ local và đóng ứng dụng",
+      camera: "Ngắt kết nối camera",
+      cameraOutputs: "Tắt đèn kiểm tra và ngắt nguồn camera",
+      plc: "Ngắt kết nối PLC",
+      remainingSignals: "Tắt toàn bộ tín hiệu đầu ra PLC còn lại",
+    },
     groupMachine: "Phần cứng máy",
     groupSystem: "Ứng dụng và bảo mật",
     hardwareWarning: "Phần cứng máy cần được kiểm tra",
@@ -273,11 +303,26 @@ export function createStartupDocument(snapshot: StartupSnapshot) {
         background: rgba(2, 6, 23, .48);
       }
       .close-backdrop[hidden] { display: none; }
-      .close-dialog { width: min(448px, 100%); border: 1px solid #cbd5e1; background: #ffffff; }
+      .close-dialog { width: min(680px, 100%); max-height: calc(100dvh - 48px); overflow-y: auto; border: 1px solid #cbd5e1; background: #ffffff; }
       .close-dialog__body { display: flex; gap: 12px; padding: 20px; border-bottom: 1px solid #e2e8f0; }
       .close-dialog__icon { display: grid; width: 38px; height: 38px; flex: 0 0 auto; place-items: center; border: 1px solid #fecaca; background: #fef2f2; color: #b91c1c; font-weight: 800; }
       .close-dialog h2 { margin: 0; font-size: 17px; }
       .close-dialog p { margin: 6px 0 0; color: #475569; font-size: 14px; line-height: 1.5; }
+      .close-dialog__content { display: grid; gap: 18px; padding: 20px; }
+      .close-dialog__content fieldset { display: grid; gap: 8px; margin: 0; padding: 0; border: 0; }
+      .close-dialog__content legend, .close-checklist-title { margin: 0 0 8px; color: #0f172a; font-size: 13px; font-weight: 700; }
+      .close-options { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+      .close-option { display: grid; grid-template-columns: 20px minmax(0, 1fr); gap: 10px; min-height: 88px; padding: 12px; border: 1px solid #cbd5e1; cursor: pointer; }
+      .close-option:has(input:checked) { border-color: #06b6d4; background: #ecfeff; }
+      .close-option input { width: 18px; height: 18px; margin: 2px 0 0; accent-color: #0e7490; }
+      .close-option strong { display: block; color: #0f172a; font-size: 13px; }
+      .close-option small { display: block; margin-top: 5px; color: #64748b; font-size: 11px; line-height: 1.45; }
+      .close-checklist { display: grid; gap: 7px; margin: 0; padding: 0; list-style: none; }
+      .close-checklist li { display: grid; grid-template-columns: 28px minmax(0, 1fr); align-items: center; gap: 9px; min-height: 42px; padding: 7px 10px; border: 1px solid #e2e8f0; color: #475569; font-size: 12px; }
+      .close-checklist__icon { display: grid; width: 28px; height: 28px; place-items: center; border: 1px solid #cbd5e1; background: #ffffff; font-weight: 700; }
+      .close-checklist li[data-status="running"] { border-color: #67e8f9; background: #ecfeff; color: #155e75; }
+      .close-checklist li[data-status="done"] { border-color: #a7f3d0; background: #ecfdf5; color: #047857; }
+      .close-checklist li[data-status="failed"] { border-color: #fecaca; background: #fef2f2; color: #b91c1c; }
       .close-dialog__actions { display: flex; justify-content: flex-end; gap: 8px; padding: 16px; }
       .close-dialog__confirm { border-color: #b91c1c; background: #b91c1c; color: #ffffff; }
       .close-dialog__confirm:hover { background: #991b1b; }
@@ -295,6 +340,7 @@ export function createStartupDocument(snapshot: StartupSnapshot) {
         .actions { grid-column: 1 / -1; grid-template-columns: 120px 1fr 1fr; }
         .content { padding: 18px 20px 22px; }
         .groups { grid-template-columns: 1fr; }
+        .close-options { grid-template-columns: 1fr; }
       }
     </style>
   </head>
@@ -341,6 +387,25 @@ export function createStartupDocument(snapshot: StartupSnapshot) {
             <p id="close-description"></p>
           </div>
         </div>
+        <div class="close-dialog__content">
+          <fieldset>
+            <legend id="close-mode-title"></legend>
+            <div class="close-options">
+              <label class="close-option">
+                <input id="close-mode-app" type="radio" name="close-mode" value="app-only" checked>
+                <span><strong id="close-mode-app-label"></strong><small id="close-mode-app-description"></small></span>
+              </label>
+              <label class="close-option">
+                <input id="close-mode-hardware" type="radio" name="close-mode" value="app-and-hardware">
+                <span><strong id="close-mode-hardware-label"></strong><small id="close-mode-hardware-description"></small></span>
+              </label>
+            </div>
+          </fieldset>
+          <div>
+            <h3 id="close-checklist-title" class="close-checklist-title"></h3>
+            <ol id="close-checklist" class="close-checklist"></ol>
+          </div>
+        </div>
         <div class="close-dialog__actions">
           <button id="close-cancel" class="button" type="button"></button>
           <button id="close-confirm" class="button close-dialog__confirm" type="button"></button>
@@ -350,10 +415,63 @@ export function createStartupDocument(snapshot: StartupSnapshot) {
     <script>
       const copies = ${serializedCopy};
       let startupSnapshot = ${serializedSnapshot};
+      let closeMode = "app-only";
+      let closeShutdownStages = {};
       const stageIds = ${serializeForScript([...systemStageIds, ...machineStageIds])};
 
       function getText() { return copies[startupSnapshot.language]; }
       function setText(id, value) { const element = document.getElementById(id); if (element) element.textContent = value; }
+      function getCloseStageIds() {
+        return closeMode === "app-and-hardware"
+          ? ["camera", "cameraOutputs", "remainingSignals", "plc", "app"]
+          : ["app"];
+      }
+      function renderCloseChecklist() {
+        const text = getText();
+        const checklist = document.getElementById("close-checklist");
+        checklist.replaceChildren();
+        getCloseStageIds().forEach((id) => {
+          const stage = closeShutdownStages[id] || { status: "pending" };
+          if (stage.status === "skipped") return;
+          const item = document.createElement("li");
+          item.dataset.status = stage.status;
+          const icon = document.createElement("span");
+          icon.className = "close-checklist__icon";
+          icon.textContent =
+            stage.status === "done"
+              ? "\u2713"
+              : stage.status === "failed"
+                ? "!"
+                : stage.status === "running"
+                  ? "\u21bb"
+                  : "\u00b7";
+          const label = document.createElement("span");
+          label.textContent = text.shutdownSteps[id];
+          item.append(icon, label);
+          checklist.append(item);
+        });
+      }
+      function renderCloseDialog() {
+        const text = getText();
+        setText("close-title", text.exitTitle);
+        setText("close-description", text.exitDescription);
+        setText("close-mode-title", text.exitModeTitle);
+        setText("close-mode-app-label", text.exitAppOnly);
+        setText("close-mode-app-description", text.exitAppOnlyDescription);
+        setText("close-mode-hardware-label", text.exitHardware);
+        setText("close-mode-hardware-description", text.exitHardwareDescription);
+        setText("close-checklist-title", text.shutdownChecklist);
+        setText("close-cancel", text.exitCancel);
+        setText(
+          "close-confirm",
+          closeMode === "app-and-hardware"
+            ? text.exitHardwareConfirm
+            : text.exitConfirm,
+        );
+        document.getElementById("close-mode-app").checked = closeMode === "app-only";
+        document.getElementById("close-mode-hardware").checked = closeMode === "app-and-hardware";
+        renderCloseChecklist();
+      }
       function symbolFor(status) {
         if (status === "done") return "✓";
         if (status === "failed") return "×";
@@ -396,10 +514,7 @@ export function createStartupDocument(snapshot: StartupSnapshot) {
         setText("progress-label", text.progress);
         setText("export-button", text.exportLog);
         setText("retry-button", text.retry);
-        setText("close-title", text.exitTitle);
-        setText("close-description", text.exitDescription);
-        setText("close-cancel", text.exitCancel);
-        setText("close-confirm", text.exitConfirm);
+        renderCloseDialog();
         document.getElementById("language-vi").setAttribute("aria-pressed", String(startupSnapshot.language === "vi"));
         document.getElementById("language-en").setAttribute("aria-pressed", String(startupSnapshot.language === "en"));
         setText("system-title", text.groupSystem);
@@ -468,35 +583,72 @@ export function createStartupDocument(snapshot: StartupSnapshot) {
         document.getElementById("startup-shell").removeAttribute("aria-hidden");
       }
       function showCloseConfirmation() {
+        closeMode = "app-only";
+        closeShutdownStages = {};
+        closeCancel.disabled = false;
+        closeConfirm.disabled = false;
+        document
+          .querySelectorAll('input[name="close-mode"]')
+          .forEach((input) => { input.disabled = false; });
+        document.getElementById("close-dialog").removeAttribute("aria-busy");
+        renderCloseDialog();
         closeBackdrop.hidden = false;
         document.getElementById("startup-shell").setAttribute("aria-hidden", "true");
         closeConfirm.focus();
       }
       closeCancel.addEventListener("click", hideCloseConfirmation);
+      document.getElementById("close-mode-app").addEventListener("change", () => {
+        closeMode = "app-only";
+        closeShutdownStages = {};
+        renderCloseDialog();
+      });
+      document.getElementById("close-mode-hardware").addEventListener("change", () => {
+        closeMode = "app-and-hardware";
+        closeShutdownStages = {};
+        renderCloseDialog();
+      });
       closeBackdrop.addEventListener("mousedown", (event) => {
-        if (event.target === closeBackdrop) hideCloseConfirmation();
+        if (
+          event.target === closeBackdrop &&
+          !closeConfirm.disabled &&
+          !closeCancel.disabled
+        ) {
+          hideCloseConfirmation();
+        }
       });
       closeConfirm.addEventListener("click", async () => {
         const text = getText();
+        const closeModeInputs = document.querySelectorAll('input[name="close-mode"]');
         closeCancel.disabled = true;
         closeConfirm.disabled = true;
+        closeModeInputs.forEach((input) => { input.disabled = true; });
         setText("close-description", text.exiting);
         document.getElementById("close-dialog").setAttribute("aria-busy", "true");
         try {
-          await window.ocrDesktop.exitApp();
+          await window.ocrDesktop.exitApp(closeMode);
         } catch {
           closeCancel.disabled = false;
           closeConfirm.disabled = false;
+          closeModeInputs.forEach((input) => { input.disabled = false; });
           setText("close-description", text.exitFailed);
           document.getElementById("close-dialog").removeAttribute("aria-busy");
         }
       });
       document.addEventListener("keydown", (event) => {
-        if (event.key === "Escape" && !closeBackdrop.hidden && !closeConfirm.disabled) {
+        if (
+          event.key === "Escape" &&
+          !closeBackdrop.hidden &&
+          !closeConfirm.disabled &&
+          !closeCancel.disabled
+        ) {
           hideCloseConfirmation();
         }
       });
       window.ocrDesktop.onCloseRequested(showCloseConfirmation);
+      window.ocrDesktop.onShutdownStage((stage) => {
+        closeShutdownStages[stage.id] = stage;
+        renderCloseChecklist();
+      });
       window.ocrDesktop.setCloseConfirmationReady(true);
       window.ocrDesktop.getStartupSnapshot().then(render);
       window.ocrDesktop.onStartupSnapshot(render);
