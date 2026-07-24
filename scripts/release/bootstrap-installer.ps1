@@ -1,7 +1,8 @@
 param(
   [Parameter(Mandatory = $true)]
   [string]$InstallDir,
-  [string]$DbConfigPath = ""
+  [string]$DbConfigPath = "",
+  [switch]$UpdateExisting
 )
 
 $ErrorActionPreference = "Stop"
@@ -823,6 +824,35 @@ try {
   New-Item -ItemType Directory -Force -Path $programDataRoot | Out-Null
   Remove-StalePlaintextDongleHelper
 
+  if ($UpdateExisting) {
+    if (-not (Test-Path -LiteralPath $envPath)) {
+      throw "Existing runtime .env was not found; automated update cannot safely rebuild dependencies."
+    }
+
+    Install-NodeDependencies -Path (Join-Path $runtimeRoot "backend") -ProductionOnly
+    Install-NodeDependencies -Path (Join-Path $runtimeRoot "frontend-standalone") -ProductionOnly
+    Install-ToolPythonDependencies
+
+    $existingEnv = Read-EnvFile -Path $envPath
+    foreach ($entry in $existingEnv.GetEnumerator()) {
+      Set-Item -Path "Env:$($entry.Key)" -Value $entry.Value
+    }
+
+    Push-Location (Join-Path $runtimeRoot "backend")
+    try {
+      Invoke-BootstrapCommand -Command "npm.cmd" -Arguments @("exec", "--offline", "--", "prisma", "generate") -ErrorMessage "Prisma client generation failed"
+      Invoke-BootstrapCommand -Command "npm.cmd" -Arguments @("exec", "--offline", "--", "prisma", "migrate", "deploy") -ErrorMessage "Prisma migrate deploy failed"
+    } finally {
+      Pop-Location
+    }
+
+    Write-Status -State "ready" -Message "Updated runtime dependencies were rebuilt." -Details @{
+      envPath = $envPath
+      runtimeRoot = $runtimeRoot
+    }
+    exit 0
+  }
+
   $dbConfig = Get-DatabaseConfig
   Assert-PostgresIdentifier -Name $dbConfig.name -Label "Database name"
   Assert-PostgresIdentifier -Name $dbConfig.user -Label "Database user"
@@ -964,8 +994,10 @@ DONGLE_CHECK_TIMEOUT_MS=7000
       Write-BootstrapLog "Could not roll back database after bootstrap failure: $($_.Exception.Message)"
     }
   }
-  Remove-Item -LiteralPath $envPath -Force -ErrorAction SilentlyContinue
-  Remove-Item -LiteralPath $credentialPath -Force -ErrorAction SilentlyContinue
+  if (-not $UpdateExisting) {
+    Remove-Item -LiteralPath $envPath -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $credentialPath -Force -ErrorAction SilentlyContinue
+  }
   Write-Status -State "failed" -Message $_.Exception.Message -Details @{
     installDir = $InstallDir
     runtimeRoot = $runtimeRoot

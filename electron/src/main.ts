@@ -121,6 +121,7 @@ async function startDesktopApp() {
   updateRecoveryManager = new UpdateRecoveryManager({
     onLog: showTerminalLog,
     programDataRoot: getProgramDataRoot(),
+    runtimeRoot,
     userDataRoot: app.getPath("userData"),
   });
   windowSettings = loadWindowSettings();

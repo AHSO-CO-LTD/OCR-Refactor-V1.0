@@ -945,6 +945,7 @@ export class ServiceManager {
 
     const command = resolveNpmCommand([
       "exec",
+      "--offline",
       "--",
       "prisma",
       "migrate",
@@ -1344,6 +1345,15 @@ function resolveToolPython(repoRoot: string) {
 
   if (configured && canRunToolPython(configured, [])) {
     return { command: configured, args: [] };
+  }
+
+  const embeddedPython =
+    process.platform === "win32"
+      ? join(repoRoot, "tool", "python-embed", "python.exe")
+      : join(repoRoot, "tool", "python-embed", "bin", "python");
+
+  if (existsSync(embeddedPython) && canRunToolPython(embeddedPython, [])) {
+    return { command: embeddedPython, args: [] };
   }
 
   const venvPython =

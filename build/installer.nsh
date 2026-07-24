@@ -648,8 +648,10 @@ FunctionEnd
   CopyFiles /SILENT "$EXEPATH" "$0\AHSO OCR\updates\installers\$EXEFILE"
 
   ${If} ${Silent}
-    DetailPrint "Automated update: preserving runtime configuration for startup validation."
-    Goto bootstrap_done
+    DetailPrint "Automated update: rebuilding local runtime dependencies."
+    ExecWait '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File "$INSTDIR\resources\installer\bootstrap-installer.ps1" -InstallDir "$INSTDIR" -UpdateExisting' $0
+    IntCmp $0 0 bootstrap_done 0 0
+      Abort "AHSO OCR automated update runtime bootstrap failed."
   ${EndIf}
 
   DetailPrint "Bootstrapping local OCR runtime..."
