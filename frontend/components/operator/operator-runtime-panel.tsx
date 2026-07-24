@@ -165,6 +165,7 @@ export function OperatorRuntimePanel() {
   const liveRoiFingerprintsRef = useRef<Record<number, string>>({});
   const liveRoiStatusesRef = useRef<Record<number, OperatorRoiStatus>>({});
   const liveRoiLabelsRef = useRef<Record<number, string>>({});
+  const liveRoiAnimationDeadlineRef = useRef(0);
   const plcInspectionHandlerRef = useRef<
     (status: MachineRuntimeStatus) => Promise<void>
   >(async () => undefined);
@@ -484,6 +485,7 @@ export function OperatorRuntimePanel() {
 
   function resetAnimationState() {
     clearTimers();
+    liveRoiAnimationDeadlineRef.current = 0;
     liveRoiFingerprintsRef.current = {};
     liveRoiStatusesRef.current = {};
     liveRoiLabelsRef.current = {};
@@ -752,7 +754,15 @@ export function OperatorRuntimePanel() {
   async function playLatchedInspectionResult(
     inspection: CurrentInspectionState,
   ) {
+    const remainingAnimationMs = Math.max(
+      0,
+      liveRoiAnimationDeadlineRef.current - Date.now(),
+    );
+    if (remainingAnimationMs > 0) {
+      await wait(remainingAnimationMs);
+    }
     clearTimers();
+    liveRoiAnimationDeadlineRef.current = 0;
     const animation = buildAnimationResult(inspection);
     const finalResult = resolveVisibleInspectionResult(inspection);
 
@@ -1098,6 +1108,8 @@ export function OperatorRuntimePanel() {
 
     if (knownChangedRegions.length === 0) return;
 
+    liveRoiAnimationDeadlineRef.current =
+      Date.now() + inspectionResultDelayMs;
     const expectedFingerprints = { ...nextFingerprints };
     const resultTimer = window.setTimeout(() => {
       const finalStatuses = { ...liveRoiStatusesRef.current };
@@ -1131,6 +1143,9 @@ export function OperatorRuntimePanel() {
       setRoiStatuses({ ...finalStatuses });
       setRoiDetectedTextLabels({ ...finalLabels });
       setAnimationState(resolveLiveRoiAnimationState(finalStatuses));
+      if (Date.now() >= liveRoiAnimationDeadlineRef.current) {
+        liveRoiAnimationDeadlineRef.current = 0;
+      }
     }, inspectionResultDelayMs);
     timersRef.current.push(resultTimer);
   };

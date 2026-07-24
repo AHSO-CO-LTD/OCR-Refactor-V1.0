@@ -1612,17 +1612,24 @@ export function LineAnimationTestPanel({
           break;
         }
 
+        const animationCompleted = waitForFolderCyclePhase(
+          generation,
+          inspectionResultDelayMs + folderAnimationSettleMs,
+        );
+
         if (folderWaitForPlcRef.current) {
-          const latched = await waitForBatchLatch();
-          if (!latched || cancelBatchTestRef.current) {
+          const [latched, animationFinished] = await Promise.all([
+            waitForBatchLatch(),
+            animationCompleted,
+          ]);
+          if (
+            !latched ||
+            !animationFinished ||
+            cancelBatchTestRef.current
+          ) {
             break;
           }
-        } else if (
-          !(await waitForFolderCyclePhase(
-            generation,
-            inspectionResultDelayMs + folderAnimationSettleMs,
-          ))
-        ) {
+        } else if (!(await animationCompleted)) {
           break;
         }
 
