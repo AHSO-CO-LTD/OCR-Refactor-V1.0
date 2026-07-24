@@ -25,7 +25,9 @@ Var DbAdminUserInput
 Var DbAdminPasswordInput
 Var DbRenameInput
 Var DbExistsRenameRadio
+Var DbExistsReuseRadio
 Var DbExistsRecreateRadio
+Var DbExistingAction
 Var DbConfigPath
 Var DbProbeStatusPath
 Var DbScanState
@@ -52,7 +54,12 @@ Var EnvPreflightRecheckButton
   Page custom EnvPreflightReadyPageCreate EnvPreflightReadyPageLeave
   Page custom DbTargetPageCreate DbTargetPageLeave
   Page custom DbAdminProbePageCreate DbAdminProbePageLeave
-  Page custom DbCredentialPageCreate DbCredentialPageLeave
+  Page custom DbExistingChoicePageCreate DbExistingChoicePageLeave
+  Page custom DbRenamePageCreate DbRenamePageLeave
+  Page custom DbAdminProbePageCreate DbAdminProbePageLeave
+  Page custom DbReuseCredentialPageCreate DbReuseCredentialPageLeave
+  Page custom DbCreateCredentialPageCreate DbCreateCredentialPageLeave
+  Page custom DbReplaceCredentialPageCreate DbReplaceCredentialPageLeave
 !macroend
 
 Function EnsureEnvironmentPreflightFiles
@@ -138,14 +145,14 @@ Function EnvPreflightReadyPageCreate
   ${NSD_CreateLabel} 0u 0u 300u 22u ""
   Pop $EnvPreflightTitleLabel
 
-  !insertmacro AhsoCreateReadOnlyScrollBox 0u 28u 300u 44u $EnvPreflightBodyLabel
+  !insertmacro AhsoCreateReadOnlyScrollBox 0u 24u 300u 32u $EnvPreflightBodyLabel
 
-  !insertmacro AhsoCreateReadOnlyScrollBox 0u 80u 300u 48u $EnvPreflightStatusBox
+  !insertmacro AhsoCreateReadOnlyScrollBox 0u 62u 300u 38u $EnvPreflightStatusBox
 
-  ${NSD_CreateLabel} 0u 138u 196u 30u ""
+  ${NSD_CreateLabel} 0u 110u 196u 28u ""
   Pop $EnvPreflightActionLabel
 
-  ${NSD_CreateButton} 210u 140u 80u 16u "Check again"
+  ${NSD_CreateButton} 210u 112u 80u 16u "Check again"
   Pop $EnvPreflightRecheckButton
   ${NSD_OnClick} $EnvPreflightRecheckButton EnvPreflightRecheckClicked
 
@@ -319,6 +326,7 @@ Function DbTargetPageLeave
   StrCpy $DbAdminPassword ""
   StrCpy $DbPassword ""
   StrCpy $DbResetExisting "false"
+  StrCpy $DbExistingAction ""
   Call ProbeDatabase
 FunctionEnd
 
@@ -367,11 +375,15 @@ Function DbAdminProbePageLeave
     MessageBox MB_ICONEXCLAMATION|MB_OK "Could not scan the database.$\r$\n$\r$\n$DbScanMessage"
     Abort
   ${EndIf}
+  ${If} $DbExistingAction == "rename"
+  ${AndIf} $DbScanState == "exists"
+    MessageBox MB_ICONEXCLAMATION|MB_OK "Database '$DbName' already exists. Click Back and enter another database name."
+    Abort
+  ${EndIf}
 FunctionEnd
 
-Function DbCredentialPageCreate
-  ${If} $DbScanState == "unknown"
-    MessageBox MB_ICONEXCLAMATION|MB_OK "Database scan did not complete. Setup cannot continue."
+Function DbExistingChoicePageCreate
+  ${If} $DbScanState != "exists"
     Abort
   ${EndIf}
 
@@ -381,120 +393,250 @@ Function DbCredentialPageCreate
     Abort
   ${EndIf}
 
-  ${If} $DbScanState == "exists"
-    !insertmacro AhsoCreateReadOnlyScrollBox 0u 0u 300u 24u $0
-    ${NSD_SetText} $0 "Database '$DbName' already exists. Choose how setup should continue."
+  ${NSD_CreateLabel} 0u 0u 300u 18u "Database '$DbName' already exists."
+  Pop $0
 
-    ${NSD_CreateRadioButton} 0u 30u 300u 12u "Use a different database name"
-    Pop $DbExistsRenameRadio
-    ${NSD_Check} $DbExistsRenameRadio
+  !insertmacro AhsoCreateReadOnlyScrollBox 0u 24u 300u 30u $0
+  ${NSD_SetText} $0 "Choose one option. Setup will open a separate configuration page for that choice."
 
-    ${NSD_CreateLabel} 14u 51u 90u 12u "New DB name"
-    Pop $0
-    ${NSD_CreateText} 105u 49u 170u 12u "$DbName_new"
-    Pop $DbRenameInput
+  ${NSD_CreateRadioButton} 0u 64u 300u 14u "1. Use a new database name"
+  Pop $DbExistsRenameRadio
 
-    ${NSD_CreateRadioButton} 0u 62u 300u 12u "Delete existing '$DbName' and create a clean database"
-    Pop $DbExistsRecreateRadio
+  ${NSD_CreateRadioButton} 0u 88u 300u 14u "2. Reuse '$DbName' and keep its existing data"
+  Pop $DbExistsReuseRadio
 
-    !insertmacro AhsoCreateReadOnlyScrollBox 14u 80u 280u 26u $0
-    ${NSD_SetText} $0 "This permanently removes the selected database before migrations run.$\r$\nLeave app DB password empty to let setup generate one automatically."
+  ${NSD_CreateRadioButton} 0u 112u 300u 14u "3. Replace '$DbName' with a new clean database"
+  Pop $DbExistsRecreateRadio
 
-    ${NSD_CreateLabel} 0u 114u 90u 12u "Admin user"
-    Pop $0
-    ${NSD_CreateText} 95u 112u 180u 12u "$DbAdminUser"
-    Pop $DbAdminUserInput
+  !insertmacro AhsoCreateReadOnlyScrollBox 0u 138u 300u 30u $0
+  ${NSD_SetText} $0 "Warning: option 3 permanently deletes the current database. Options 1 and 2 preserve it."
 
-    ${NSD_CreateLabel} 0u 136u 90u 12u "Admin password"
-    Pop $0
-    ${NSD_CreatePassword} 95u 134u 180u 12u "$DbAdminPassword"
-    Pop $DbAdminPasswordInput
-
-    ${NSD_CreateLabel} 0u 158u 90u 12u "App DB password"
-    Pop $0
-    ${NSD_CreatePassword} 95u 156u 180u 12u "$DbPassword"
-    Pop $DbPasswordInput
+  ${If} $DbExistingAction == "reuse"
+    ${NSD_Check} $DbExistsReuseRadio
+  ${ElseIf} $DbExistingAction == "replace"
+    ${NSD_Check} $DbExistsRecreateRadio
   ${Else}
-    !insertmacro AhsoCreateReadOnlyScrollBox 0u 0u 300u 32u $0
-    ${NSD_SetText} $0 "Database '$DbName' does not exist. Setup will create it with PostgreSQL admin access."
-
-    ${NSD_CreateLabel} 0u 44u 90u 12u "Admin user"
-    Pop $0
-    ${NSD_CreateText} 95u 42u 180u 12u "$DbAdminUser"
-    Pop $DbAdminUserInput
-
-    ${NSD_CreateLabel} 0u 66u 90u 12u "Admin password"
-    Pop $0
-    ${NSD_CreatePassword} 95u 64u 180u 12u "$DbAdminPassword"
-    Pop $DbAdminPasswordInput
-
-    ${NSD_CreateLabel} 0u 90u 90u 12u "App DB password"
-    Pop $0
-    ${NSD_CreatePassword} 95u 88u 180u 12u "$DbPassword"
-    Pop $DbPasswordInput
-
-    !insertmacro AhsoCreateReadOnlyScrollBox 0u 114u 300u 32u $0
-    ${NSD_SetText} $0 "Leave app DB password empty to let setup generate one automatically."
+    ${NSD_Check} $DbExistsRenameRadio
   ${EndIf}
 
   nsDialogs::Show
 FunctionEnd
 
-Function DbCredentialPageLeave
-  ${If} $DbScanState == "exists"
-    ${NSD_GetText} $DbAdminUserInput $DbAdminUser
-    ${NSD_GetText} $DbAdminPasswordInput $DbAdminPassword
-    ${NSD_GetText} $DbPasswordInput $DbPassword
-
-    ${If} $DbAdminUser == ""
-      MessageBox MB_ICONEXCLAMATION|MB_OK "PostgreSQL admin user is required."
-      Abort
-    ${EndIf}
-    ${If} $DbAdminPassword == ""
-      MessageBox MB_ICONEXCLAMATION|MB_OK "PostgreSQL admin password is required."
-      Abort
-    ${EndIf}
-
-    ${NSD_GetState} $DbExistsRecreateRadio $0
-    ${If} $0 == ${BST_CHECKED}
-      StrCpy $DbResetExisting "true"
-    ${Else}
-      StrCpy $DbResetExisting "false"
-      ${NSD_GetText} $DbRenameInput $0
-      ${If} $0 == ""
-        MessageBox MB_ICONEXCLAMATION|MB_OK "New database name is required."
-        Abort
-      ${EndIf}
-      ${If} $0 == $DbName
-        MessageBox MB_ICONEXCLAMATION|MB_OK "New database name must be different from the existing database."
-        Abort
-      ${EndIf}
-
-      StrCpy $DbName "$0"
-      Call ProbeDatabase
-      ${If} $DbScanState == "exists"
-        MessageBox MB_ICONEXCLAMATION|MB_OK "Database '$DbName' already exists. Enter another database name or choose the delete-and-recreate option."
-        Abort
-      ${EndIf}
-      ${If} $DbScanState == "unknown"
-        MessageBox MB_ICONEXCLAMATION|MB_OK "Could not scan the new database name.$\r$\n$\r$\n$DbScanMessage"
-        Abort
-      ${EndIf}
-    ${EndIf}
-  ${Else}
-    ${NSD_GetText} $DbAdminUserInput $DbAdminUser
-    ${NSD_GetText} $DbAdminPasswordInput $DbAdminPassword
-    ${NSD_GetText} $DbPasswordInput $DbPassword
-
-    ${If} $DbAdminUser == ""
-      MessageBox MB_ICONEXCLAMATION|MB_OK "PostgreSQL admin user is required to create the database."
-      Abort
-    ${EndIf}
-    ${If} $DbAdminPassword == ""
-      MessageBox MB_ICONEXCLAMATION|MB_OK "PostgreSQL admin password is required to create the database."
-      Abort
-    ${EndIf}
+Function DbExistingChoicePageLeave
+  ${NSD_GetState} $DbExistsReuseRadio $0
+  ${If} $0 == ${BST_CHECKED}
+    StrCpy $DbExistingAction "reuse"
+    StrCpy $DbResetExisting "false"
+    Return
   ${EndIf}
+
+  ${NSD_GetState} $DbExistsRecreateRadio $0
+  ${If} $0 == ${BST_CHECKED}
+    StrCpy $DbExistingAction "replace"
+    StrCpy $DbResetExisting "true"
+    Return
+  ${EndIf}
+
+  StrCpy $DbExistingAction "rename"
+  StrCpy $DbResetExisting "false"
+FunctionEnd
+
+Function DbRenamePageCreate
+  ${If} $DbExistingAction != "rename"
+    Abort
+  ${EndIf}
+
+  nsDialogs::Create 1018
+  Pop $0
+  ${If} $0 == error
+    Abort
+  ${EndIf}
+
+  ${NSD_CreateLabel} 0u 0u 300u 18u "Use a new database name"
+  Pop $0
+
+  !insertmacro AhsoCreateReadOnlyScrollBox 0u 26u 300u 34u $0
+  ${NSD_SetText} $0 "The existing database will not be changed. Enter a different name for the new OCR database."
+
+  ${NSD_CreateLabel} 0u 74u 90u 12u "New DB name"
+  Pop $0
+  ${NSD_CreateText} 95u 72u 180u 12u "$DbName_new"
+  Pop $DbRenameInput
+
+  !insertmacro AhsoCreateReadOnlyScrollBox 0u 102u 300u 34u $0
+  ${NSD_SetText} $0 "Click Next to verify the new name. PostgreSQL admin credentials will be requested on the following page."
+
+  nsDialogs::Show
+FunctionEnd
+
+Function DbRenamePageLeave
+  ${NSD_GetText} $DbRenameInput $0
+  ${If} $0 == ""
+    MessageBox MB_ICONEXCLAMATION|MB_OK "New database name is required."
+    Abort
+  ${EndIf}
+  ${If} $0 == $DbName
+    MessageBox MB_ICONEXCLAMATION|MB_OK "New database name must be different from the existing database."
+    Abort
+  ${EndIf}
+
+  StrCpy $DbName "$0"
+  StrCpy $DbAdminPassword ""
+  StrCpy $DbPassword ""
+  Call ProbeDatabase
+  ${If} $DbScanState == "exists"
+    MessageBox MB_ICONEXCLAMATION|MB_OK "Database '$DbName' already exists. Enter another database name."
+    Abort
+  ${EndIf}
+FunctionEnd
+
+Function DbReuseCredentialPageCreate
+  ${If} $DbExistingAction != "reuse"
+    Abort
+  ${EndIf}
+
+  nsDialogs::Create 1018
+  Pop $0
+  ${If} $0 == error
+    Abort
+  ${EndIf}
+
+  ${NSD_CreateLabel} 0u 0u 300u 18u "Reuse existing database and preserve data"
+  Pop $0
+
+  !insertmacro AhsoCreateReadOnlyScrollBox 0u 26u 300u 38u $0
+  ${NSD_SetText} $0 "Setup will connect to '$DbName' as '$DbUser', run compatible migrations, and keep existing records."
+
+  ${NSD_CreateLabel} 0u 78u 90u 12u "App DB password"
+  Pop $0
+  ${NSD_CreatePassword} 95u 76u 180u 12u "$DbPassword"
+  Pop $DbPasswordInput
+
+  !insertmacro AhsoCreateReadOnlyScrollBox 0u 106u 300u 34u $0
+  ${NSD_SetText} $0 "Enter the current password for app DB user '$DbUser'. This option does not delete the database."
+
+  nsDialogs::Show
+FunctionEnd
+
+Function DbReuseCredentialPageLeave
+  ${NSD_GetText} $DbPasswordInput $DbPassword
+  ${If} $DbPassword == ""
+    MessageBox MB_ICONEXCLAMATION|MB_OK "The current app DB password is required to reuse this database."
+    Abort
+  ${EndIf}
+  StrCpy $DbResetExisting "false"
+FunctionEnd
+
+Function DbCreateCredentialPageCreate
+  ${If} $DbScanState != "missing"
+    Abort
+  ${EndIf}
+  ${If} $DbExistingAction == "reuse"
+  ${OrIf} $DbExistingAction == "replace"
+    Abort
+  ${EndIf}
+
+  nsDialogs::Create 1018
+  Pop $0
+  ${If} $0 == error
+    Abort
+  ${EndIf}
+
+  ${NSD_CreateLabel} 0u 0u 300u 18u "Create new database '$DbName'"
+  Pop $0
+
+  !insertmacro AhsoCreateReadOnlyScrollBox 0u 22u 300u 26u $0
+  ${NSD_SetText} $0 "Enter PostgreSQL admin credentials so setup can create the database and app user."
+
+  ${NSD_CreateLabel} 0u 58u 90u 12u "Admin user"
+  Pop $0
+  ${NSD_CreateText} 95u 56u 180u 12u "$DbAdminUser"
+  Pop $DbAdminUserInput
+
+  ${NSD_CreateLabel} 0u 80u 90u 12u "Admin password"
+  Pop $0
+  ${NSD_CreatePassword} 95u 78u 180u 12u "$DbAdminPassword"
+  Pop $DbAdminPasswordInput
+
+  ${NSD_CreateLabel} 0u 102u 90u 12u "App DB password"
+  Pop $0
+  ${NSD_CreatePassword} 95u 100u 180u 12u "$DbPassword"
+  Pop $DbPasswordInput
+
+  !insertmacro AhsoCreateReadOnlyScrollBox 0u 124u 300u 24u $0
+  ${NSD_SetText} $0 "App DB password is optional. Leave it empty to generate a secure password automatically."
+
+  nsDialogs::Show
+FunctionEnd
+
+Function DbCreateCredentialPageLeave
+  ${NSD_GetText} $DbAdminUserInput $DbAdminUser
+  ${NSD_GetText} $DbAdminPasswordInput $DbAdminPassword
+  ${NSD_GetText} $DbPasswordInput $DbPassword
+
+  ${If} $DbAdminUser == ""
+    MessageBox MB_ICONEXCLAMATION|MB_OK "PostgreSQL admin user is required to create the database."
+    Abort
+  ${EndIf}
+  ${If} $DbAdminPassword == ""
+    MessageBox MB_ICONEXCLAMATION|MB_OK "PostgreSQL admin password is required to create the database."
+    Abort
+  ${EndIf}
+  StrCpy $DbResetExisting "false"
+FunctionEnd
+
+Function DbReplaceCredentialPageCreate
+  ${If} $DbExistingAction != "replace"
+    Abort
+  ${EndIf}
+
+  nsDialogs::Create 1018
+  Pop $0
+  ${If} $0 == error
+    Abort
+  ${EndIf}
+
+  ${NSD_CreateLabel} 0u 0u 300u 18u "Replace existing database '$DbName'"
+  Pop $0
+
+  !insertmacro AhsoCreateReadOnlyScrollBox 0u 22u 300u 28u $0
+  ${NSD_SetText} $0 "Warning: setup will permanently delete the existing database and create a clean replacement."
+
+  ${NSD_CreateLabel} 0u 60u 90u 12u "Admin user"
+  Pop $0
+  ${NSD_CreateText} 95u 58u 180u 12u "$DbAdminUser"
+  Pop $DbAdminUserInput
+
+  ${NSD_CreateLabel} 0u 82u 90u 12u "Admin password"
+  Pop $0
+  ${NSD_CreatePassword} 95u 80u 180u 12u "$DbAdminPassword"
+  Pop $DbAdminPasswordInput
+
+  ${NSD_CreateLabel} 0u 104u 90u 12u "App DB password"
+  Pop $0
+  ${NSD_CreatePassword} 95u 102u 180u 12u "$DbPassword"
+  Pop $DbPasswordInput
+
+  !insertmacro AhsoCreateReadOnlyScrollBox 0u 126u 300u 24u $0
+  ${NSD_SetText} $0 "App DB password is optional. Leave it empty to generate a secure password automatically."
+
+  nsDialogs::Show
+FunctionEnd
+
+Function DbReplaceCredentialPageLeave
+  ${NSD_GetText} $DbAdminUserInput $DbAdminUser
+  ${NSD_GetText} $DbAdminPasswordInput $DbAdminPassword
+  ${NSD_GetText} $DbPasswordInput $DbPassword
+
+  ${If} $DbAdminUser == ""
+    MessageBox MB_ICONEXCLAMATION|MB_OK "PostgreSQL admin user is required to replace the database."
+    Abort
+  ${EndIf}
+  ${If} $DbAdminPassword == ""
+    MessageBox MB_ICONEXCLAMATION|MB_OK "PostgreSQL admin password is required to replace the database."
+    Abort
+  ${EndIf}
+  StrCpy $DbResetExisting "true"
 FunctionEnd
 
 !macro customInstall

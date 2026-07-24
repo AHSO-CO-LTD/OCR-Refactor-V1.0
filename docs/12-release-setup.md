@@ -26,8 +26,10 @@ still call the backend only; the backend calls the Tool through `/tool/v1`.
    the actual OCR database setup starts.
 7. User enters PostgreSQL host, port, database name, and app DB user.
 8. Installer probes PostgreSQL to check whether that database already exists.
-9. If the database exists, setup asks the user to either enter a different
-   database name or delete the existing database and recreate it cleanly.
+9. If the database exists, setup opens a dedicated choice page: use a different
+   database name, reuse the existing database and preserve its data, or replace
+   it with a clean database. Setup then opens only the configuration page
+   required by the selected option.
 10. If the database does not exist, setup asks for PostgreSQL admin credentials
    and creates the database.
 11. Installer copies Electron and `resources/runtime`.
@@ -125,18 +127,22 @@ App user: ahso_ocr
 ```
 
 Setup probes PostgreSQL before asking for database credentials. If the selected
-database already exists, setup gives two choices:
+database already exists, setup gives three choices on a dedicated page:
 
 1. enter a different database name, then setup scans that new name and creates
    it if it is available.
-2. delete the existing database and create a clean database with the same name.
+2. reuse the existing database with the current app DB password and preserve
+   its existing data.
+3. delete the existing database and create a clean database with the same name.
 
-The delete-and-recreate option requires PostgreSQL admin credentials and is
-destructive. The app DB password can be left empty so setup generates one. If
-the database does not exist, setup requires PostgreSQL admin credentials and
-creates the app DB/user. If the installer cannot probe without admin access, it
-asks for PostgreSQL admin credentials first, then continues based on the probe
-result.
+Each option continues to its own short configuration page. The reuse option
+requires the current app DB password and does not set the destructive reset
+flag. The delete-and-recreate option requires PostgreSQL admin credentials and
+is destructive. The app DB password can be left empty for new/replacement
+databases so setup generates one. If the database does not exist, setup requires
+PostgreSQL admin credentials and creates the app DB/user. If the installer
+cannot probe without admin access, it asks for PostgreSQL admin credentials
+first, then continues based on the probe result.
 
 If the online preflight installs PostgreSQL because the customer PC does not
 already have a compatible PostgreSQL runtime, setup creates the local
