@@ -24,6 +24,7 @@ const PLC_CONFIG_ID = 'default';
 const RECONNECT_DELAY_MS = 2000;
 const MAX_RECENT_EVENTS = 50;
 const DEFAULT_INACTIVITY_TIMEOUT_SECONDS = 300;
+const PLC_SIMULATOR_HOST = 'PLC-SIMULATOR';
 
 type PlcConnectionState =
   | 'not_configured'
@@ -34,6 +35,7 @@ type PlcConnectionState =
   | 'error';
 
 export type PlcRuntimeEvent = {
+  id?: string;
   type: 'status' | 'signal' | 'output' | 'error';
   at: string;
   key?: string;
@@ -90,6 +92,8 @@ export class PlcRuntimeService
   private connectPromise: Promise<unknown> | null = null;
   private shutdownPromise: Promise<void> | null = null;
   private shutdownSequenceCompleted = false;
+  private simulatorClientId: string | null = null;
+  private runtimeEventSequence = 0;
 
   constructor(
     private readonly prisma: PrismaService,
@@ -190,6 +194,11 @@ export class PlcRuntimeService
 
   async disconnectForShutdown() {
     this.prepareForShutdown();
+    if (this.isSimulatorActive()) {
+      this.deactivateSimulator();
+      this.shutdownSequenceCompleted = true;
+      return;
+    }
     const config = await this.loadConfig();
     const host = this.connectedHost ?? config?.ipAddress ?? null;
     let disconnectError: unknown = null;
@@ -224,6 +233,28 @@ export class PlcRuntimeService
     host: string,
     outputs: Array<{ key: string; address: number | null }>,
   ) {
+    if (this.isSimulatorActive()) {
+      for (const output of outputs) {
+        if (output.address === null) continue;
+        if (
+          output.key === 'cameraLight' ||
+          output.key === 'cameraPower' ||
+          output.key === 'waitingChecking'
+        ) {
+          this.fixedOutputRevision[output.key] += 1;
+          this.setFixedOutputState(output.key, false);
+        }
+        this.emit({
+          type: 'output',
+          key: output.key,
+          address: output.address,
+          value: false,
+          source: output.key.startsWith('custom:') ? 'custom' : 'fixed',
+        });
+      }
+      return;
+    }
+
     const failures: string[] = [];
     const clearedToolAddresses = new Set<number>();
 
@@ -329,6 +360,7 @@ export class PlcRuntimeService
   }
 
   connect() {
+    if (this.isSimulatorActive()) return this.getRuntimeStatus();
     if (this.connectPromise) return this.connectPromise;
     const operation = this.performConnect();
     this.connectPromise = operation.finally(() => {
@@ -403,6 +435,11 @@ export class PlcRuntimeService
   }
 
   async disconnect() {
+    if (this.isSimulatorActive()) {
+      this.deactivateSimulator();
+      return this.getRuntimeStatus();
+    }
+
     this.intentionalDisconnect = true;
     this.cancelReconnect();
     this.stopWatchers();
@@ -424,7 +461,11 @@ export class PlcRuntimeService
     const config = await this.loadConfig();
     if (!config) this.state = 'not_configured';
 
-    if (this.state === 'connected' && this.connectedHost) {
+    if (
+      this.state === 'connected' &&
+      this.connectedHost &&
+      !this.isSimulatorActive()
+    ) {
       try {
         const toolStatus = await this.toolClient.status(this.connectedHost);
         if (toolStatus.state !== 'connected') {
@@ -459,8 +500,93 @@ export class PlcRuntimeService
         waitingCheckingCommand: this.waitingCheckingCommand,
         lastError: this.lastError,
         recentEvents: this.recentEvents,
+        simulatorActive: this.isSimulatorActive(),
+        simulatorLeaseExpiresAt: null,
       },
     };
+  }
+
+  async enableSimulator(clientId: string) {
+    const config = await this.requireConfig();
+    if (!this.isSimulatorActive()) {
+      await this.disconnect().catch(() => undefined);
+    }
+
+    this.intentionalDisconnect = true;
+    this.cancelReconnect();
+    this.stopWatchers();
+    this.simulatorClientId = clientId;
+    this.connectedHost = PLC_SIMULATOR_HOST;
+    this.connectedProtocol = config.protocol;
+    this.lastError = null;
+    this.cameraPowerCommand = false;
+    this.cameraLightCommand = false;
+    this.waitingCheckingCommand = false;
+    this.simulatorClientId = clientId;
+    this.setState('connected');
+    return this.getRuntimeStatus();
+  }
+
+  async heartbeatSimulator(clientId: string) {
+    this.assertSimulatorClient(clientId);
+    return this.getRuntimeStatus();
+  }
+
+  async disableSimulator(clientId: string) {
+    this.assertSimulatorClient(clientId);
+    this.deactivateSimulator();
+    return this.getRuntimeStatus();
+  }
+
+  async emitSimulatorSignal(clientId: string, key: string) {
+    this.assertSimulatorClient(clientId);
+    const config = await this.requireConfig();
+    const fixedAddressByKey: Record<string, number | null> = {
+      captureTrigger: config.captureTriggerAddress,
+      startTrigger: config.startTriggerAddress,
+      stopTrigger: config.stopTriggerAddress,
+    };
+    const customInput = config.customKeys.find(
+      (item) =>
+        item.enabled &&
+        item.operation === PlcKeyOperation.watch_boolean &&
+        item.name === key,
+    );
+    const isFixed = Object.prototype.hasOwnProperty.call(
+      fixedAddressByKey,
+      key,
+    );
+
+    if (!isFixed && !customInput) {
+      throw new BadRequestException('PLC simulator input is not configured');
+    }
+
+    const address = isFixed ? fixedAddressByKey[key] : customInput!.address;
+    const source = isFixed ? ('fixed' as const) : ('custom' as const);
+    this.emit({
+      type: 'signal',
+      key,
+      address: address ?? undefined,
+      value: true,
+      source,
+    });
+    const activeClientId = this.simulatorClientId;
+    setTimeout(() => {
+      if (
+        this.isSimulatorActive() &&
+        this.simulatorClientId === activeClientId
+      ) {
+        this.emit({
+          type: 'signal',
+          key,
+          address: address ?? undefined,
+          value: false,
+          source,
+        });
+      }
+    }, 50).unref?.();
+
+    return this.getRuntimeStatus();
   }
 
   async setFixedOutput(key: PlcFixedOutputKey, value: boolean) {
@@ -472,6 +598,18 @@ export class PlcRuntimeService
     };
     const address = addressByKey[key];
     if (address === null) return this.getRuntimeStatus();
+    if (this.isSimulatorActive()) {
+      this.fixedOutputRevision[key] += 1;
+      this.setFixedOutputState(key, value);
+      this.emit({
+        type: 'output',
+        key,
+        address,
+        value,
+        source: 'fixed',
+      });
+      return this.getRuntimeStatus();
+    }
     if (this.state !== 'connected' || this.connectedHost !== config.ipAddress) {
       throw new BadRequestException('PLC is not connected');
     }
@@ -521,6 +659,31 @@ export class PlcRuntimeService
     durationMs: number,
   ) {
     if (address === null) return this.getRuntimeStatus();
+    if (this.isSimulatorActive()) {
+      this.emit({
+        type: 'output',
+        key,
+        address,
+        value: true,
+        source: 'fixed',
+      });
+      const activeClientId = this.simulatorClientId;
+      setTimeout(() => {
+        if (
+          this.isSimulatorActive() &&
+          this.simulatorClientId === activeClientId
+        ) {
+          this.emit({
+            type: 'output',
+            key,
+            address,
+            value: false,
+            source: 'fixed',
+          });
+        }
+      }, durationMs).unref?.();
+      return this.getRuntimeStatus();
+    }
     if (this.state !== 'connected' || this.connectedHost !== config.ipAddress) {
       throw new BadRequestException('PLC is not connected');
     }
@@ -603,6 +766,36 @@ export class PlcRuntimeService
       throw new BadRequestException('Watch keys are read-only');
     }
     const toolAddress = toToolBooleanAddress(config.protocol, key.address);
+    if (this.isSimulatorActive()) {
+      const value = key.operation === PlcKeyOperation.pulse ? true : dto.value;
+      this.emit({
+        type: 'output',
+        key: key.name,
+        address: key.address,
+        toolAddress,
+        value,
+        source: 'custom',
+      });
+      if (key.operation === PlcKeyOperation.pulse) {
+        const activeClientId = this.simulatorClientId;
+        setTimeout(() => {
+          if (
+            this.isSimulatorActive() &&
+            this.simulatorClientId === activeClientId
+          ) {
+            this.emit({
+              type: 'output',
+              key: key.name,
+              address: key.address,
+              toolAddress,
+              value: false,
+              source: 'custom',
+            });
+          }
+        }, config.errorPulseDurationMs).unref?.();
+      }
+      return this.getRuntimeStatus();
+    }
     if (key.operation === PlcKeyOperation.pulse) {
       await this.enqueue(() =>
         this.toolClient.pulse(
@@ -813,7 +1006,12 @@ export class PlcRuntimeService
   }
 
   private scheduleReconnect() {
-    if (this.reconnectTimer || this.intentionalDisconnect) return;
+    if (
+      this.reconnectTimer ||
+      this.intentionalDisconnect ||
+      this.isSimulatorActive()
+    )
+      return;
     this.stopWatchers();
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null;
@@ -853,8 +1051,13 @@ export class PlcRuntimeService
     this.emit({ type: message ? 'error' : 'status', state, message });
   }
 
-  private emit(event: Omit<PlcRuntimeEvent, 'at'>) {
-    const complete = { ...event, at: new Date().toISOString() };
+  private emit(event: Omit<PlcRuntimeEvent, 'at' | 'id'>) {
+    this.runtimeEventSequence += 1;
+    const complete = {
+      ...event,
+      at: new Date().toISOString(),
+      id: `plc-event-${this.runtimeEventSequence}`,
+    };
     this.recentEvents = [complete, ...this.recentEvents].slice(
       0,
       MAX_RECENT_EVENTS,
@@ -886,10 +1089,29 @@ export class PlcRuntimeService
 
   private async requireConnectedConfig() {
     const config = await this.requireConfig();
-    if (this.state !== 'connected' || this.connectedHost !== config.ipAddress) {
+    if (
+      this.state !== 'connected' ||
+      (!this.isSimulatorActive() && this.connectedHost !== config.ipAddress)
+    ) {
       throw new BadRequestException('PLC is not connected');
     }
     return config;
+  }
+
+  private isSimulatorActive() {
+    return this.simulatorClientId !== null;
+  }
+
+  private assertSimulatorClient(clientId: string) {
+    if (!this.isSimulatorActive() || this.simulatorClientId !== clientId) {
+      throw new BadRequestException('PLC simulator session is not active');
+    }
+  }
+
+  private deactivateSimulator() {
+    this.simulatorClientId = null;
+    this.intentionalDisconnect = true;
+    this.resetRuntime('disconnected');
   }
 
   private serializeConfig(

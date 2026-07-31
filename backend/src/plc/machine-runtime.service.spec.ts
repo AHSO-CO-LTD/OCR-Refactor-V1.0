@@ -479,6 +479,33 @@ describe('MachineRuntimeService', () => {
     });
   });
 
+  it('continues operation after the first real frame succeeds during reconnect', async () => {
+    inspections.verifyRunningInspectionCameraFrame
+      .mockRejectedValueOnce(new Error('Camera is still starting'))
+      .mockResolvedValueOnce({ success: true });
+    jest
+      .spyOn(
+        service as unknown as {
+          delay: (milliseconds: number) => Promise<void>;
+        },
+        'delay',
+      )
+      .mockResolvedValue(undefined);
+
+    await service.startOperation();
+
+    expect(
+      inspections.verifyRunningInspectionCameraFrame,
+    ).toHaveBeenCalledTimes(2);
+    expect(
+      inspections.verifyRunningInspectionCameraFrame,
+    ).toHaveBeenLastCalledWith(expect.any(AbortSignal));
+    expect(service.getStatus().data).toMatchObject({
+      state: 'running',
+      restartRequired: false,
+    });
+  });
+
   it('exposes but does not execute PLC capture triggers in manual mode', async () => {
     emitPlcEvent(signal('captureTrigger'));
     await settleAsyncWork();
@@ -569,10 +596,7 @@ describe('MachineRuntimeService', () => {
     ]);
   });
 
-  it('turns off camera resources on PLC stop and restores them on PLC start', async () => {
-    inspections.stopCurrentInspection.mockResolvedValueOnce({
-      data: { productId: 'product-1', operatorId: 'operator-1' },
-    });
+  it('keeps the Line session while camera resources stop and resume with PLC', async () => {
     await service.startOperation();
     service.updateControls({
       mode: MachineOperationModeDto.manual,
@@ -603,9 +627,7 @@ describe('MachineRuntimeService', () => {
       'cameraPower',
       false,
     );
-    expect(inspections.stopCurrentInspection).toHaveBeenCalledWith(
-      LineSessionEndReason.plc_stop,
-    );
+    expect(inspections.stopCurrentInspection).not.toHaveBeenCalled();
     expect(service.getStatus().data.state).toBe('idle_machine_stop');
 
     emitPlcEvent(signal('startTrigger'));
@@ -626,10 +648,7 @@ describe('MachineRuntimeService', () => {
       'waitingChecking',
       true,
     );
-    expect(inspections.beginInspectionSession).toHaveBeenCalledWith(
-      { productId: 'product-1' },
-      { id: 'operator-1', username: 'plc-resume', role: 'operator' },
-    );
+    expect(inspections.beginInspectionSession).not.toHaveBeenCalled();
     expect(inspections.verifyRunningInspectionCameraFrame).toHaveBeenCalled();
     expect(service.getStatus().data).toMatchObject({
       state: 'running',

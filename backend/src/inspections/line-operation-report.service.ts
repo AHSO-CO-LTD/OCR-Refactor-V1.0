@@ -68,7 +68,9 @@ export class LineOperationReportService {
       { header: 'Capture ID', key: 'captureId', width: 38 },
       { header: 'Session ID', key: 'jobId', width: 30 },
       { header: 'Product code', key: 'productCode', width: 22 },
-      { header: 'Operator', key: 'operator', width: 22 },
+      { header: 'Started by', key: 'startedBy', width: 22 },
+      { header: 'Ended by', key: 'endedBy', width: 22 },
+      { header: 'End operator inferred', key: 'endedByInferred', width: 22 },
       { header: 'Captured at', key: 'capturedAt', width: 26 },
       { header: 'Result', key: 'result', width: 14 },
       { header: 'Detected text', key: 'text', width: 50 },
@@ -135,6 +137,7 @@ export class LineOperationReportService {
       include: {
         job: {
           include: {
+            endedBy: { select: { username: true, fullName: true } },
             operator: { select: { username: true, fullName: true } },
           },
         },
@@ -166,7 +169,13 @@ export class LineOperationReportService {
         jobId: first.jobId,
         productCode:
           productCodes.get(first.job.productId) ?? first.job.productId,
-        operator: first.job.operator.fullName || first.job.operator.username,
+        startedBy: first.job.operator.fullName || first.job.operator.username,
+        endedBy:
+          first.job.endedBy?.fullName ||
+          first.job.endedBy?.username ||
+          first.job.operator.fullName ||
+          first.job.operator.username,
+        endedByInferred: first.job.endedByInferred ? 'Yes' : 'No',
         capturedAt: first.capturedAt.toISOString(),
         result,
         text: group

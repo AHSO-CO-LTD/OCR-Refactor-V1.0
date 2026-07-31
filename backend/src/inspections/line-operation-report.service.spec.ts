@@ -8,6 +8,8 @@ describe('LineOperationReportService', () => {
     const job = {
       productId: 'product-1',
       operator: { username: 'operator', fullName: 'Operator One' },
+      endedBy: { username: 'supervisor', fullName: 'Supervisor One' },
+      endedByInferred: false,
       startedAt: new Date('2026-07-20T07:00:00.000Z'),
       stoppedAt: null,
       endReason: null,

@@ -7,20 +7,30 @@ type SelectProps = Omit<
   React.ComponentProps<"select">,
   "children" | "onChange"
 > & {
+  activeOptionClassName?: string;
   children: React.ReactNode;
+  menuListClassName?: string;
   onChange?: (event: { target: { value: string } }) => void;
+  optionClassName?: string;
+  optionLabelClassName?: string;
   portalled?: boolean;
+  viewportFittedMenu?: boolean;
 };
 
 export function Select({
+  activeOptionClassName,
   children,
   className,
   disabled,
   id,
+  menuListClassName,
   onChange,
+  optionClassName,
+  optionLabelClassName,
   portalled = false,
   title,
   value,
+  viewportFittedMenu = false,
   ...props
 }: SelectProps) {
   const options = React.Children.toArray(children).flatMap((child) => {
@@ -55,9 +65,14 @@ export function Select({
       ariaLabel={
         typeof props["aria-label"] === "string" ? props["aria-label"] : undefined
       }
+      activeOptionClassName={activeOptionClassName}
       ariaInvalid={Boolean(props["aria-invalid"])}
       triggerClassName={className}
+      menuListClassName={menuListClassName}
+      optionClassName={optionClassName}
+      optionLabelClassName={optionLabelClassName}
       portalled={portalled}
+      viewportFittedMenu={viewportFittedMenu}
       options={options}
       onChange={(nextValue) => onChange?.({ target: { value: nextValue } })}
       emptyLabel={options[0]?.label}

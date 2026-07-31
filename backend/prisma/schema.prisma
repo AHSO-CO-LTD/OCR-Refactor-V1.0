@@ -76,7 +76,8 @@ model User {
   role           Role             @relation(fields: [roleCode], references: [code])
   permissions    UserPermission[]
   auditLogs      AuditLog[]
-  inspectionJobs InspectionJob[]
+  inspectionJobs InspectionJob[] @relation("InspectionJobStartedBy")
+  endedInspectionJobs InspectionJob[]     @relation("InspectionJobEndedBy")
   testSessionReports TestSessionReport[]
 }
 
@@ -197,6 +198,8 @@ model InspectionJob {
   id                      String                @id @default(cuid())
   productId               String
   operatorId              String
+  endedById               String?
+  endedByInferred         Boolean               @default(false)
   status                  InspectionStatus      @default(pending)
   startedAt               DateTime?
   stoppedAt               DateTime?
@@ -209,7 +212,8 @@ model InspectionJob {
   resultSaveError         String?
   createdAt               DateTime              @default(now())
   updatedAt               DateTime              @updatedAt
-  operator                User                  @relation(fields: [operatorId], references: [id])
+  operator                User                  @relation("InspectionJobStartedBy", fields: [operatorId], references: [id])
+  endedBy                 User?                 @relation("InspectionJobEndedBy", fields: [endedById], references: [id], onDelete: SetNull)
   logs                    InspectionLog[]
 }
 

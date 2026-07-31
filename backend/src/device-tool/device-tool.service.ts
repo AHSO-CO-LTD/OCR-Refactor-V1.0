@@ -114,6 +114,7 @@ type DeviceToolImageInspectionRequest = Omit<
 @Injectable()
 export class DeviceToolService {
   private activeCameraSerial: string | null = null;
+  private cameraAutoConnectSuppressed = false;
 
   constructor(
     private readonly configService: ConfigService,
@@ -237,6 +238,8 @@ export class DeviceToolService {
           is_grabbing: false,
           device_name: null,
           serial_number: null,
+          auto_connect_suppressed: this.cameraAutoConnectSuppressed,
+          intentional_disconnect: this.cameraAutoConnectSuppressed,
         },
       };
     }
@@ -245,16 +248,34 @@ export class DeviceToolService {
 
     return {
       success: true,
-      data: this.toRuntimeStatusData(session, identity),
+      data: {
+        ...this.toRuntimeStatusData(session, identity),
+        auto_connect_suppressed: this.cameraAutoConnectSuppressed,
+        intentional_disconnect: this.cameraAutoConnectSuppressed,
+      },
     };
   }
 
   async ensureCameraReady(camera: CameraProfileDto, signal?: AbortSignal) {
+    this.assertCameraAutoConnectAllowed();
     return this.ensureCameraConnected(camera, signal);
   }
 
-  async ensureCameraPreviewReady(camera: CameraProfileDto) {
+  async ensureCameraPreviewReady(
+    camera: CameraProfileDto,
+    options: { manualReconnect?: boolean } = {},
+  ) {
+    if (options.manualReconnect) {
+      this.cameraAutoConnectSuppressed = false;
+    } else {
+      this.assertCameraAutoConnectAllowed();
+    }
     return this.ensureCameraConnected(camera);
+  }
+
+  async disconnectCameraByUser(signal?: AbortSignal) {
+    this.cameraAutoConnectSuppressed = true;
+    return this.disconnectCamera(signal);
   }
 
   async disconnectCamera(signal?: AbortSignal) {
@@ -543,6 +564,14 @@ export class DeviceToolService {
 
   getActiveCameraSerialSync() {
     return this.activeCameraSerial;
+  }
+
+  private assertCameraAutoConnectAllowed() {
+    if (this.cameraAutoConnectSuppressed) {
+      throw new ServiceUnavailableException(
+        'Camera was intentionally disconnected. Reconnect it from Live View.',
+      );
+    }
   }
 
   async requireActiveCameraSerial(action: string, signal?: AbortSignal) {

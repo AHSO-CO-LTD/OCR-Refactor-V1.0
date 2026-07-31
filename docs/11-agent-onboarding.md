@@ -94,8 +94,8 @@ scripts/   future automation scripts
 ### In Progress
 
 - `dev/admin` use sidebar and `engineer/operator` use navbar.
-- Frontend responsive behavior is being standardized around the 1280x1080 factory-machine viewport while still supporting smaller and larger screens.
-- Existing dashboard, roles, users, and products screens need a final responsive verification pass at 1280x1080.
+- Frontend responsive behavior is being standardized around the 1280x1024 factory-machine viewport while still supporting smaller and larger screens.
+- Existing dashboard, roles, users, and products screens need a final responsive verification pass at 1280x1024.
 - Dedicated Camera page still needs verification with a real running Device Tool and connected hardware.
 - Operator runtime still mixes real product-profile data with demo fallback; backend Device Tool integration has started, but the frontend runtime is not wired to the new inspection endpoints yet.
 
@@ -189,9 +189,9 @@ Current UI behavior:
 - `dev/admin` should use sidebar.
 - `engineer/operator` should use navbar.
 - Menu items are filtered by permissions.
-- 1280x1080 is the primary factory-machine viewport for frontend validation.
+- 1280x1024 is the primary factory-machine viewport for frontend validation.
 - The target factory machine uses one touchscreen only; setup and runtime screens must be touch-first and virtual-keyboard-friendly.
-- Screens should avoid page-level horizontal overflow at 1280x1080; dense tables should scroll inside their own containers when needed.
+- Screens should avoid page-level horizontal overflow at 1280x1024; dense tables should scroll inside their own containers when needed.
 - Header, sidebar, and navbar are fixed app chrome; only the active content pane should scroll.
 - User-facing pages, modals, empty/error states, validation messages, and notifications must use the current selected language.
 - Normal admin must only see/manage `engineer/operator` on role permission screens; `admin/dev` are protected for `dev`.
@@ -285,7 +285,7 @@ NEXT_PUBLIC_API_BASE_URL=http://localhost:3979/api
 - Authorization must be enforced in backend, not only by hiding UI.
 - Dongle check must eventually happen immediately when Electron starts.
 - Prefer shadcn-style UI components, Sonner, and Recharts for frontend.
-- Optimize every frontend screen first for the 1280x1080 factory display, then verify mobile/tablet/laptop/wide-desktop responsiveness.
+- Optimize every frontend screen first for the 1280x1024 factory display, then verify mobile/tablet/laptop/wide-desktop responsiveness.
 - Never occupy or reuse a port already being used by the user. Always check target ports before starting dev servers, and stop any agent-started test server immediately after verification.
 
 ## Suggested Next Task
@@ -293,7 +293,7 @@ NEXT_PUBLIC_API_BASE_URL=http://localhost:3979/api
 Continue frontend hardening:
 
 1. Finish standard responsive pass across existing dashboard, roles, and users screens.
-2. Verify 1280x1080 does not produce page-level horizontal overflow.
+2. Verify 1280x1024 does not produce page-level horizontal overflow.
 3. Restart backend/frontend dev servers when validating role/user permission changes, to avoid stale dev-server state.
 4. Finish Product module hardening, Camera page verification, and persisted product profile verification.
 5. Create dedicated ROI/History/Reports pages and move the dashboard runtime foundation toward a real inspection flow.

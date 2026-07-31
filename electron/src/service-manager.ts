@@ -1135,6 +1135,7 @@ export class ServiceManager {
     path: string,
     body?: Record<string, string>,
   ) {
+    const timeoutMs = path === "startup/camera" ? 70_000 : 25_000;
     const response = await fetch(
       `http://127.0.0.1:${this.getServicePort("backend")}/api/internal/plc-runtime/${path}`,
       {
@@ -1144,7 +1145,7 @@ export class ServiceManager {
           "x-desktop-internal-token": this.desktopInternalToken,
         },
         body: JSON.stringify(body ?? {}),
-        signal: AbortSignal.timeout(25_000),
+        signal: AbortSignal.timeout(timeoutMs),
       },
     );
     if (!response.ok) {

@@ -29,6 +29,7 @@ export type CameraPreviewConnectionStatus =
   | "error";
 
 const STATUS_POLL_MS = 4000;
+const CAMERA_STARTUP_GRACE_MS = 60_000;
 
 export function useConnectedCameraPreview(
   expectedDeviceName?: string,
@@ -51,6 +52,8 @@ export function useConnectedCameraPreview(
   const accessTokenRef = useRef("");
   const ensuredProfileKeyRef = useRef("");
   const [reconnectAttempt, setReconnectAttempt] = useState(0);
+  const manualReconnectRef = useRef(false);
+  const connectionStartedAtRef = useRef(0);
   const cameraIdentityKey = buildCameraIdentityKey(
     cameraProfile,
     expectedDeviceName,
@@ -82,6 +85,8 @@ export function useConnectedCameraPreview(
   }, [enabled, streamEnabled]);
 
   const reconnect = useCallback(() => {
+    manualReconnectRef.current = true;
+    connectionStartedAtRef.current = Date.now();
     ensuredProfileKeyRef.current = "";
 
     if (socketRef.current) {
@@ -111,6 +116,7 @@ export function useConnectedCameraPreview(
 
   useEffect(() => {
     let active = true;
+    connectionStartedAtRef.current = Date.now();
     accessTokenRef.current = getAccessToken() ?? "";
 
     function replaceImage(nextImageSrc: string) {
@@ -189,7 +195,7 @@ export function useConnectedCameraPreview(
         setState((current) => ({
           ...current,
           connectionStatus: current.matchesExpectedCamera
-            ? "connected"
+            ? "connecting"
             : "mismatch",
         }));
       };
@@ -218,9 +224,14 @@ export function useConnectedCameraPreview(
         if (active && socketRef.current === socket) {
           socketRef.current = null;
           replaceImage("");
+          const withinStartupGrace =
+            Date.now() - connectionStartedAtRef.current <
+            CAMERA_STARTUP_GRACE_MS;
           setState((current) => ({
             ...current,
-            connectionStatus: "disconnected",
+            connectionStatus: withinStartupGrace
+              ? "connecting"
+              : "disconnected",
           }));
         }
       };
@@ -229,9 +240,12 @@ export function useConnectedCameraPreview(
         if (active && socketRef.current === socket) {
           socketRef.current = null;
           replaceImage("");
+          const withinStartupGrace =
+            Date.now() - connectionStartedAtRef.current <
+            CAMERA_STARTUP_GRACE_MS;
           setState((current) => ({
             ...current,
-            connectionStatus: "error",
+            connectionStatus: withinStartupGrace ? "connecting" : "error",
           }));
           socket.close();
         }
@@ -250,10 +264,30 @@ export function useConnectedCameraPreview(
       }
 
       try {
-        await connectCamera(accessTokenRef.current, currentCameraProfile);
+        const currentStatus = await getCameraStatus(accessTokenRef.current);
+        if (
+          currentStatus.data.auto_connect_suppressed === true &&
+          !manualReconnectRef.current
+        ) {
+          setState({
+            connected: false,
+            connectionStatus: "disconnected",
+            imageSrc: "",
+            matchesExpectedCamera: false,
+            runtimeConnected: false,
+            runtimeDeviceName: "",
+          });
+          closeSocket();
+          return false;
+        }
+
+        await connectCamera(accessTokenRef.current, currentCameraProfile, {
+          manualReconnect: manualReconnectRef.current,
+        });
         if (!active) {
           return false;
         }
+        manualReconnectRef.current = false;
         ensuredProfileKeyRef.current = currentHardwareProfileKey;
         return true;
       } catch {
@@ -261,9 +295,12 @@ export function useConnectedCameraPreview(
           return false;
         }
         ensuredProfileKeyRef.current = "";
+        const withinStartupGrace =
+          Date.now() - connectionStartedAtRef.current <
+          CAMERA_STARTUP_GRACE_MS;
         setState({
           connected: false,
-          connectionStatus: "error",
+          connectionStatus: withinStartupGrace ? "connecting" : "error",
           imageSrc: "",
           matchesExpectedCamera: false,
           runtimeConnected: false,
@@ -300,6 +337,8 @@ export function useConnectedCameraPreview(
           return;
         }
         const connected = Boolean(status.data.connected);
+        const intentionallyDisconnected =
+          status.data.auto_connect_suppressed === true;
         const runtimeDeviceName = String(status.data.device_name ?? "");
         const matchesExpectedCamera = isExpectedCamera(
           runtimeDeviceName,
@@ -309,10 +348,12 @@ export function useConnectedCameraPreview(
         setState((current) => ({
           ...current,
           connected,
-          connectionStatus: connected
+          connectionStatus: intentionallyDisconnected
+            ? "disconnected"
+            : connected
             ? matchesExpectedCamera
               ? !streamEnabledRef.current ||
-                socketRef.current?.readyState === WebSocket.OPEN
+                Boolean(current.imageSrc)
                 ? "connected"
                 : "connecting"
               : "mismatch"
@@ -336,9 +377,12 @@ export function useConnectedCameraPreview(
         if (!active) {
           return;
         }
+        const withinStartupGrace =
+          Date.now() - connectionStartedAtRef.current <
+          CAMERA_STARTUP_GRACE_MS;
         setState({
           connected: false,
-          connectionStatus: "error",
+          connectionStatus: withinStartupGrace ? "connecting" : "error",
           imageSrc: "",
           matchesExpectedCamera: false,
           runtimeConnected: false,

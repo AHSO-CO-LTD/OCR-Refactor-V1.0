@@ -196,8 +196,9 @@ export class InspectionsController {
   @RequirePermissions(PERMISSIONS.INSPECTION_STOP)
   stopInspection(
     @Param('jobId') jobId: string,
+    @CurrentUser() user: { id: string; username: string; role: string },
     @Body() dto?: StopInspectionDto,
   ) {
-    return this.inspectionsService.stopInspection(jobId, dto?.endReason);
+    return this.inspectionsService.stopInspection(jobId, dto?.endReason, user);
   }
 }

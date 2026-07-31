@@ -33,6 +33,8 @@ const productInclude = {
 };
 
 const LINE_RESULT_SETTINGS_ID = 'default';
+const STARTUP_CAMERA_RETRY_WINDOW_MS = 60_000;
+const STARTUP_CAMERA_RETRY_INTERVAL_MS = 2_000;
 
 type ProductWithProfile = Prisma.ProductGetPayload<{
   include: typeof productInclude;
@@ -40,8 +42,22 @@ type ProductWithProfile = Prisma.ProductGetPayload<{
 
 type InspectionJobWithLogs = Prisma.InspectionJobGetPayload<{
   include: {
+    endedBy: {
+      select: {
+        fullName: true;
+        id: true;
+        username: true;
+      };
+    };
     logs: {
       orderBy: { capturedAt: 'desc' };
+    };
+    operator: {
+      select: {
+        fullName: true;
+        id: true;
+        username: true;
+      };
     };
   };
 }>;
@@ -103,11 +119,7 @@ export class InspectionsService {
       orderBy: { createdAt: 'desc' },
     });
 
-    if (
-      existingRunningJob &&
-      (existingRunningJob.productId !== product.id ||
-        existingRunningJob.operatorId !== user.id)
-    ) {
+    if (existingRunningJob && existingRunningJob.productId !== product.id) {
       throw new ConflictException('Another inspection job is already running');
     }
 
@@ -243,11 +255,7 @@ export class InspectionsService {
       where: { status: InspectionStatus.running },
       orderBy: { createdAt: 'desc' },
     });
-    if (
-      existingRunningJob &&
-      (existingRunningJob.productId !== product.id ||
-        existingRunningJob.operatorId !== user.id)
-    ) {
+    if (existingRunningJob && existingRunningJob.productId !== product.id) {
       throw new ConflictException('Another inspection job is already running');
     }
 
@@ -444,7 +452,7 @@ export class InspectionsService {
     } satisfies RunningCameraFrame;
   }
 
-  async verifyRunningInspectionCameraFrame() {
+  async verifyRunningInspectionCameraFrame(signal?: AbortSignal) {
     const job = await this.prisma.inspectionJob.findFirst({
       where: { status: InspectionStatus.running },
       orderBy: { createdAt: 'desc' },
@@ -467,11 +475,15 @@ export class InspectionsService {
 
     await this.deviceToolService.ensureCameraReady(
       this.toCameraProfile(product),
+      signal,
     );
-    const frame = await this.deviceToolService.grabCameraFrame({
-      encodeFormat: '.jpg',
-      jpegQuality: 70,
-    });
+    const frame = await this.deviceToolService.grabCameraFrame(
+      {
+        encodeFormat: '.jpg',
+        jpegQuality: 70,
+      },
+      signal,
+    );
 
     if (!frame.image_base64) {
       throw new BadRequestException('Camera connected but returned no frame');
@@ -510,28 +522,47 @@ export class InspectionsService {
       );
     }
 
-    await this.deviceToolService.ensureCameraReady(
-      this.toCameraProfile(product),
-    );
-    const frame = await this.deviceToolService.grabCameraFrame({
-      encodeFormat: '.jpg',
-      jpegQuality: 70,
-    });
+    const deadline = Date.now() + STARTUP_CAMERA_RETRY_WINDOW_MS;
+    let lastError: unknown = new Error('Camera startup verification failed');
 
-    if (!frame.image_base64) {
-      throw new BadRequestException(
-        'Camera connected during startup but returned no frame',
-      );
+    while (Date.now() < deadline) {
+      try {
+        await this.deviceToolService.ensureCameraReady(
+          this.toCameraProfile(product),
+        );
+        const frame = await this.deviceToolService.grabCameraFrame({
+          encodeFormat: '.jpg',
+          jpegQuality: 70,
+        });
+
+        if (!frame.image_base64) {
+          throw new Error(
+            'Camera connected during startup but returned no frame',
+          );
+        }
+
+        return {
+          data: {
+            productId: product.id,
+            productCode: product.code,
+            width: frame.width,
+            height: frame.height,
+          },
+        };
+      } catch (error) {
+        lastError = error;
+        const remainingMs = deadline - Date.now();
+        if (remainingMs <= 0) break;
+        await new Promise((resolveDelay) =>
+          setTimeout(
+            resolveDelay,
+            Math.min(STARTUP_CAMERA_RETRY_INTERVAL_MS, remainingMs),
+          ),
+        );
+      }
     }
 
-    return {
-      data: {
-        productId: product.id,
-        productCode: product.code,
-        width: frame.width,
-        height: frame.height,
-      },
-    };
+    throw lastError;
   }
 
   async testImage(dto: TestInspectionImageDto) {
@@ -997,10 +1028,17 @@ export class InspectionsService {
   async stopInspection(
     jobId: string,
     endReason: LineSessionEndReason = LineSessionEndReason.line_stop,
+    endedBy?: { id: string },
   ) {
     const job = await this.prisma.inspectionJob.findUnique({
       where: { id: jobId },
-      select: { id: true, status: true },
+      select: {
+        endedById: true,
+        endedByInferred: true,
+        id: true,
+        operatorId: true,
+        status: true,
+      },
     });
 
     if (!job) {
@@ -1011,10 +1049,14 @@ export class InspectionsService {
       job.status === InspectionStatus.failed
         ? InspectionStatus.failed
         : InspectionStatus.completed;
+    const endedById = job.endedById ?? endedBy?.id ?? job.operatorId;
+    const endedByInferred = job.endedById ? job.endedByInferred : !endedBy;
 
     await this.prisma.inspectionJob.update({
       where: { id: jobId },
       data: {
+        endedById,
+        endedByInferred,
         status: nextStatus,
         stoppedAt: new Date(),
         endReason,
@@ -1208,6 +1250,13 @@ export class InspectionsService {
             fullName: true,
           },
         },
+        endedBy: {
+          select: {
+            id: true,
+            username: true,
+            fullName: true,
+          },
+        },
       },
     });
 
@@ -1278,6 +1327,10 @@ export class InspectionsService {
             operatorId: job.operatorId,
             operatorUsername: job.operator.username,
             operatorFullName: job.operator.fullName,
+            endedById: job.endedById,
+            endedByUsername: job.endedBy?.username ?? null,
+            endedByFullName: job.endedBy?.fullName ?? null,
+            endedByInferred: job.endedByInferred,
             savePolicy,
             saveBySession: settings.saveBySession,
             endReason: job.endReason ?? null,
@@ -1679,8 +1732,22 @@ export class InspectionsService {
     const job = await this.prisma.inspectionJob.findUnique({
       where: { id: jobId },
       include: {
+        endedBy: {
+          select: {
+            fullName: true,
+            id: true,
+            username: true,
+          },
+        },
         logs: {
           orderBy: [{ capturedAt: 'desc' }, { slotIndex: 'asc' }],
+        },
+        operator: {
+          select: {
+            fullName: true,
+            id: true,
+            username: true,
+          },
         },
       },
     });
@@ -1744,6 +1811,10 @@ export class InspectionsService {
       productId: product.id,
       productCode: product.code,
       operatorId: job.operatorId,
+      startedBy: job.operator,
+      endedById: job.endedById,
+      endedBy: job.endedBy,
+      endedByInferred: job.endedByInferred,
       startedAt: job.startedAt?.toISOString() ?? null,
       stoppedAt: job.stoppedAt?.toISOString() ?? null,
       endReason: job.endReason ?? null,

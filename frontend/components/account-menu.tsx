@@ -13,7 +13,7 @@ type AccountMenuProps = {
   canManageDesktopSettings: boolean;
   donglePresent: boolean;
   onExitApp: () => void | Promise<void>;
-  onLogout: () => void;
+  onLogout: () => void | Promise<void>;
   onRestartApp: () => void | Promise<void>;
   user: SessionUser;
 };
@@ -158,7 +158,7 @@ export function AccountMenu({
             className="flex h-10 w-full items-center gap-3 px-3 text-left text-sm font-medium text-rose-600 transition hover:bg-rose-50"
             onClick={() => {
               setOpen(false);
-              onLogout();
+              void onLogout();
             }}
           >
             <LogOut className="h-4 w-4" />

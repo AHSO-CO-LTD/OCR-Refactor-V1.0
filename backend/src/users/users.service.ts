@@ -221,7 +221,6 @@ export class UsersService {
       where: { id },
       data: {
         failedAttempts,
-        active: failedAttempts >= 3 ? false : undefined,
       },
     });
   }

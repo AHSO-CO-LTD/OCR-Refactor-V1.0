@@ -6,6 +6,7 @@ import { ReactNode, useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { AccountMenu } from "@/components/account-menu";
 import { BrandLogo } from "@/components/brand/brand-logo";
+import { DevPlcSimulator } from "@/components/plc/dev-plc-simulator";
 import { MachineRuntimeOverlay } from "@/components/plc/machine-runtime-overlay";
 import { useMachineUserActivity } from "@/components/plc/use-machine-user-activity";
 import { useDesktopLifecycle } from "@/components/system/desktop-lifecycle-provider";
@@ -26,6 +27,7 @@ import {
   isExpectedRuntimeCamera,
   selectOperatorStartupProduct,
 } from "@/lib/operator-startup-preferences";
+import { releasePlcSimulatorSession } from "@/lib/plc-simulator-session";
 import {
   clearSession,
   getAccessToken,
@@ -140,12 +142,18 @@ export function AppShell({ children }: AppShellProps) {
   const [selectedAdminGroup, setSelectedAdminGroup] = useState<NavGroupKey | null>(null);
   const handleLicenseLost = useCallback(
     (license: SystemLicenseState) => {
-      silentlyDisconnectCamera(getAccessToken());
+      const accessToken = getAccessToken();
+      silentlyDisconnectCamera(accessToken);
+      if (accessToken && user?.role === "dev") {
+        void releasePlcSimulatorSession(accessToken, user.id).catch(
+          () => undefined,
+        );
+      }
       clearSession();
       toast.error(license.message || t("session.licenseLost"));
       router.replace("/login");
     },
-    [router, t],
+    [router, t, user],
   );
   const { license } = useLicenseWatchdog({
     enabled: Boolean(user),
@@ -204,10 +212,7 @@ export function AppShell({ children }: AppShellProps) {
       if (shouldPrimeCameraRuntime(user)) {
         silentlyPrimeCameraRuntime(token);
       }
-      return;
     }
-
-    silentlyDisconnectCamera(token);
   }, [pathname, user]);
 
   useEffect(() => {
@@ -225,10 +230,13 @@ export function AppShell({ children }: AppShellProps) {
     router.replace(getPostLoginRoute());
   }, [pathname, router, t, user]);
 
-  function handleLogout() {
-    const token = getAccessToken();
-
-    silentlyDisconnectCamera(token);
+  async function handleLogout() {
+    const accessToken = getAccessToken();
+    if (accessToken && user?.role === "dev") {
+      await releasePlcSimulatorSession(accessToken, user.id).catch(
+        () => undefined,
+      );
+    }
     clearSession();
     router.replace("/login");
   }
@@ -483,7 +491,11 @@ export function AppShell({ children }: AppShellProps) {
             user?.permissions.includes("plc.manage") === true ||
             user?.permissions.includes("plc.operate") === true
           }
+          role={user?.role}
         />
+        {user?.role === "dev" ? (
+          <DevPlcSimulator userId={user.id} />
+        ) : null}
       </div>
     </main>
   );
@@ -561,6 +573,10 @@ async function primeCameraRuntime(accessToken: string) {
     listProductProfiles(accessToken),
   ]);
   const startupProduct = selectOperatorStartupProduct(productsResponse.data);
+
+  if (statusResponse.data.auto_connect_suppressed === true) {
+    return "intentionallyDisconnected" as const;
+  }
 
   if (!startupProduct) {
     return statusResponse.data.connected

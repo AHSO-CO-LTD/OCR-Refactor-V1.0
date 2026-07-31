@@ -45,11 +45,6 @@ type MachineRuntimeStep = {
   at: string;
 };
 
-type ResumeSessionContext = {
-  productId: string;
-  operatorId: string;
-};
-
 type MachineOperationMode = 'manual' | 'auto';
 type MachineTriggerSource = 'manual' | 'plc';
 type MachineTriggerAction = 'ignored' | 'captured' | 'latched' | 'unknown';
@@ -94,6 +89,7 @@ export class MachineRuntimeService
   private lastCaptureTriggerAt: string | null = null;
   private captureInProgress = false;
   private captureAbortController: AbortController | null = null;
+  private cameraRestoreAbortController: AbortController | null = null;
   private detectionAbortController: AbortController | null = null;
   private detectionTimer: NodeJS.Timeout | null = null;
   private detectionLoopActive = false;
@@ -104,7 +100,6 @@ export class MachineRuntimeService
   private stopRequested = false;
   private destroyed = false;
   private transitionSequence = 0;
-  private resumeSessionContext: ResumeSessionContext | null = null;
   private shutdownPromise: Promise<void> | null = null;
   private operationMode: MachineOperationMode = 'auto';
   private liveCameraEnabled = true;
@@ -139,6 +134,7 @@ export class MachineRuntimeService
       ) {
         this.stopRequested = true;
         this.captureAbortController?.abort();
+        this.cameraRestoreAbortController?.abort();
         this.stopContinuousDetection();
       }
       this.enqueuePlcEvent(event);
@@ -163,6 +159,8 @@ export class MachineRuntimeService
     this.clearCountdownTimer();
     this.captureAbortController?.abort();
     this.captureAbortController = null;
+    this.cameraRestoreAbortController?.abort();
+    this.cameraRestoreAbortController = null;
     this.stopContinuousDetection();
     this.testModeLeases.clear();
     this.destroyed = true;
@@ -380,6 +378,7 @@ export class MachineRuntimeService
   async stopOperation() {
     this.transitionSequence += 1;
     this.captureAbortController?.abort();
+    this.cameraRestoreAbortController?.abort();
     this.stopContinuousDetection();
     this.clearInactivityTimer();
     this.clearCountdownTimer();
@@ -768,26 +767,13 @@ export class MachineRuntimeService
     this.idleReason = 'machine_stop';
     this.message = null;
     this.steps = [
-      this.step('session', 'pending', 'Kết thúc session Line hiện tại.'),
+      this.step('session', 'done', 'Giữ nguyên session Line hiện tại.'),
       this.step('signal', 'done', 'Đã nhận tín hiệu dừng máy từ PLC.'),
       this.step('camera', 'pending', 'Ngắt kết nối camera.'),
       this.step('outputs', 'pending', 'Tắt đèn soi và nguồn camera.'),
       this.step('idle', 'pending', 'Chuyển ứng dụng về trạng thái nghỉ.'),
     ];
     this.setState('stopping');
-
-    await this.runTransitionStep('session', async () => {
-      const stopped = await this.inspectionsService.stopCurrentInspection(
-        LineSessionEndReason.plc_stop,
-      );
-      this.resumeSessionContext = stopped.data
-        ? {
-            productId: stopped.data.productId,
-            operatorId: stopped.data.operatorId,
-          }
-        : null;
-    });
-    if (sequence !== this.transitionSequence) return;
 
     await this.runTransitionStep('camera', async () => {
       await this.deviceToolService.stopCameraOcr().catch(() => undefined);
@@ -926,28 +912,174 @@ export class MachineRuntimeService
     }
     if (sequence !== this.transitionSequence) return;
 
-    if (this.resumeSessionContext) {
-      try {
-        await this.inspectionsService.beginInspectionSession(
-          { productId: this.resumeSessionContext.productId },
-          {
-            id: this.resumeSessionContext.operatorId,
-            username: 'plc-resume',
-            role: 'operator',
-          },
-        );
-        this.resumeSessionContext = null;
-      } catch (error) {
-        this.message = this.errorMessage(error);
-        this.updateStep('camera', 'failed', this.message);
-        this.setState('error');
-        return;
-      }
-    }
-
     this.setState('waiting_camera');
     const restored = await this.waitForCameraFrame(sequence);
-    if (!restored || sequence !== this.transitionSequence) return;
+    if (!restored || sequence !== this.transitionSequence) {
+      if (
+        sequence === this.transitionSequence &&
+        this.getStatus().data.state === 'waiting_camera' &&
+        !this.stopRequested &&
+        !this.destroyed
+      ) {
+        void this.continueWaitingForCameraFrame(sequence, plcReady);
+      }
+      return;
+    }
+    await this.completeCameraRestore(sequence, plcReady);
+  }
+
+  private restoreDefaultRuntimeControls() {
+    this.operationMode = 'auto';
+    this.liveCameraEnabled = true;
+    this.realtimeAiEnabled = true;
+    this.touch();
+  }
+
+  private async waitForCameraFrame(sequence: number) {
+    const timeoutMs = DEFAULT_CAMERA_RESTORE_TIMEOUT_MS;
+    const deadline = Date.now() + timeoutMs;
+    const abortController = new AbortController();
+    this.cameraRestoreAbortController?.abort();
+    this.cameraRestoreAbortController = abortController;
+    let attempts = 0;
+    try {
+      this.countdownSeconds = Math.ceil(timeoutMs / 1000);
+      this.updateStep(
+        'camera',
+        'running',
+        'Đang kết nối camera và chờ frame...',
+      );
+      this.countdownTimer = setInterval(() => {
+        this.countdownSeconds = Math.max(
+          0,
+          Math.ceil((deadline - Date.now()) / 1000),
+        );
+        this.touch();
+      }, 1000);
+
+      while (
+        Date.now() < deadline &&
+        sequence === this.transitionSequence &&
+        !this.destroyed &&
+        !this.stopRequested &&
+        !abortController.signal.aborted
+      ) {
+        attempts += 1;
+        try {
+          await this.inspectionsService.verifyRunningInspectionCameraFrame(
+            abortController.signal,
+          );
+          this.clearCountdownTimer();
+          this.countdownSeconds = null;
+          this.message = null;
+          this.updateStep(
+            'camera',
+            'done',
+            'Đã kết nối camera và nhận được frame.',
+          );
+          return true;
+        } catch (error) {
+          if (
+            abortController.signal.aborted ||
+            this.stopRequested ||
+            sequence !== this.transitionSequence
+          ) {
+            break;
+          }
+          this.message = this.errorMessage(error);
+          if (attempts === 1 || attempts % 5 === 0) {
+            this.logger.warn(
+              `Camera restore attempt ${attempts} failed: ${this.message}`,
+            );
+          }
+          await this.delay(CAMERA_RETRY_INTERVAL_MS);
+        }
+      }
+
+      this.clearCountdownTimer();
+      this.countdownSeconds = null;
+      if (
+        sequence === this.transitionSequence &&
+        !this.destroyed &&
+        !this.stopRequested &&
+        !abortController.signal.aborted
+      ) {
+        this.updateStep(
+          'camera',
+          'running',
+          'Camera chưa trả frame sau 60 giây. Hệ thống vẫn đang tự động thử lại.',
+        );
+      }
+      return false;
+    } finally {
+      if (this.cameraRestoreAbortController === abortController) {
+        this.cameraRestoreAbortController = null;
+      }
+    }
+  }
+
+  private async continueWaitingForCameraFrame(
+    sequence: number,
+    plcReady: boolean,
+  ) {
+    const abortController = new AbortController();
+    this.cameraRestoreAbortController?.abort();
+    this.cameraRestoreAbortController = abortController;
+    let attempts = 0;
+
+    try {
+      while (
+        sequence === this.transitionSequence &&
+        this.state === 'waiting_camera' &&
+        !this.destroyed &&
+        !this.stopRequested &&
+        !abortController.signal.aborted
+      ) {
+        attempts += 1;
+        try {
+          await this.inspectionsService.verifyRunningInspectionCameraFrame(
+            abortController.signal,
+          );
+          this.message = null;
+          this.updateStep(
+            'camera',
+            'done',
+            'Đã kết nối camera và nhận được frame.',
+          );
+          await this.completeCameraRestore(sequence, plcReady);
+          return;
+        } catch (error) {
+          if (
+            abortController.signal.aborted ||
+            this.stopRequested ||
+            sequence !== this.transitionSequence
+          ) {
+            return;
+          }
+          this.message = this.errorMessage(error);
+          if (attempts === 1 || attempts % 5 === 0) {
+            this.logger.warn(
+              `Extended camera restore attempt ${attempts} failed: ${this.message}`,
+            );
+          }
+          await this.delay(CAMERA_RETRY_INTERVAL_MS);
+        }
+      }
+    } finally {
+      if (this.cameraRestoreAbortController === abortController) {
+        this.cameraRestoreAbortController = null;
+      }
+    }
+  }
+
+  private async completeCameraRestore(sequence: number, plcReady: boolean) {
+    if (
+      sequence !== this.transitionSequence ||
+      this.destroyed ||
+      this.stopRequested
+    ) {
+      return;
+    }
 
     this.updateStep(
       'running',
@@ -966,56 +1098,6 @@ export class MachineRuntimeService
     }
     if (this.plcOffline) this.message = this.plcErrorMessage;
     await this.recordActivity();
-  }
-
-  private restoreDefaultRuntimeControls() {
-    this.operationMode = 'auto';
-    this.liveCameraEnabled = true;
-    this.realtimeAiEnabled = true;
-    this.touch();
-  }
-
-  private async waitForCameraFrame(sequence: number) {
-    const timeoutMs = DEFAULT_CAMERA_RESTORE_TIMEOUT_MS;
-    const deadline = Date.now() + timeoutMs;
-    this.countdownSeconds = Math.ceil(timeoutMs / 1000);
-    this.updateStep('camera', 'running', 'Đang kết nối camera và chờ frame...');
-    this.countdownTimer = setInterval(() => {
-      this.countdownSeconds = Math.max(
-        0,
-        Math.ceil((deadline - Date.now()) / 1000),
-      );
-      this.touch();
-    }, 1000);
-
-    while (Date.now() < deadline && sequence === this.transitionSequence) {
-      try {
-        await this.inspectionsService.verifyRunningInspectionCameraFrame();
-        this.clearCountdownTimer();
-        this.countdownSeconds = null;
-        this.updateStep(
-          'camera',
-          'done',
-          'Đã kết nối camera và nhận được frame.',
-        );
-        return true;
-      } catch (error) {
-        this.message = this.errorMessage(error);
-        await this.delay(CAMERA_RETRY_INTERVAL_MS);
-      }
-    }
-
-    this.clearCountdownTimer();
-    this.countdownSeconds = 0;
-    this.updateStep(
-      'camera',
-      'failed',
-      'Không kết nối được camera trong 60 giây.',
-    );
-    this.message =
-      'Không thể nhận frame từ camera. Cần khởi động lại ứng dụng.';
-    this.setState('restart_required');
-    return false;
   }
 
   private async recordActivity() {

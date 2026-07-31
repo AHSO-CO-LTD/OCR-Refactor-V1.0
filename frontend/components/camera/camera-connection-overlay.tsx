@@ -16,6 +16,7 @@ import { useI18n } from "@/lib/i18n";
 type CameraConnectionOverlayProps = {
   deviceName?: string;
   onReconnect: () => void;
+  showReconnectWhileConnecting?: boolean;
   status: CameraPreviewConnectionStatus;
 };
 
@@ -64,6 +65,7 @@ const statusConfig: Record<
 export function CameraConnectionOverlay({
   deviceName,
   onReconnect,
+  showReconnectWhileConnecting = false,
   status,
 }: CameraConnectionOverlayProps) {
   const { t } = useI18n();
@@ -74,7 +76,8 @@ export function CameraConnectionOverlay({
 
   const config = statusConfig[status];
   const Icon = config.icon;
-  const canReconnect = status !== "connecting";
+  const canReconnect =
+    status !== "connecting" || showReconnectWhileConnecting;
 
   return (
     <div

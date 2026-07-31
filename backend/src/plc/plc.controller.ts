@@ -31,6 +31,10 @@ import {
   UpdateMachineTestModeDto,
   UpdateMachineTestOutputDto,
 } from './dto/machine-runtime.dto';
+import {
+  PlcSimulatorSessionDto,
+  PlcSimulatorSignalDto,
+} from './dto/plc-simulator.dto';
 import { PlcRuntimeService } from './plc-runtime.service';
 import { MachineRuntimeService } from './machine-runtime.service';
 
@@ -74,6 +78,46 @@ export class PlcController {
   @RequireAnyPermission(PERMISSIONS.PLC_MANAGE, PERMISSIONS.PLC_OPERATE)
   disconnect() {
     return this.plcRuntime.disconnect();
+  }
+
+  @Post('simulator/enable')
+  @ApiOperation({ summary: 'Enable the in-memory PLC simulator for dev only' })
+  async enableSimulator(
+    @Body() dto: PlcSimulatorSessionDto,
+    @CurrentUser() user: AuthenticatedRequest['user'],
+  ) {
+    this.assertDev(user);
+    return this.plcRuntime.enableSimulator(dto.clientId);
+  }
+
+  @Post('simulator/heartbeat')
+  @ApiOperation({ summary: 'Refresh the active dev PLC simulator lease' })
+  heartbeatSimulator(
+    @Body() dto: PlcSimulatorSessionDto,
+    @CurrentUser() user: AuthenticatedRequest['user'],
+  ) {
+    this.assertDev(user);
+    return this.plcRuntime.heartbeatSimulator(dto.clientId);
+  }
+
+  @Post('simulator/disable')
+  @ApiOperation({ summary: 'Disable the active dev PLC simulator' })
+  disableSimulator(
+    @Body() dto: PlcSimulatorSessionDto,
+    @CurrentUser() user: AuthenticatedRequest['user'],
+  ) {
+    this.assertDev(user);
+    return this.plcRuntime.disableSimulator(dto.clientId);
+  }
+
+  @Post('simulator/signal')
+  @ApiOperation({ summary: 'Emit a PLC-to-app signal from the dev simulator' })
+  emitSimulatorSignal(
+    @Body() dto: PlcSimulatorSignalDto,
+    @CurrentUser() user: AuthenticatedRequest['user'],
+  ) {
+    this.assertDev(user);
+    return this.plcRuntime.emitSimulatorSignal(dto.clientId, dto.key);
   }
 
   @Put('outputs/camera-power')
@@ -259,6 +303,12 @@ export class PlcController {
   })
   reconnectMachinePlc() {
     return this.machineRuntime.reconnectPlc();
+  }
+
+  private assertDev(user: AuthenticatedRequest['user']) {
+    if (user.role !== 'dev') {
+      throw new ForbiddenException('PLC simulator is available to dev only');
+    }
   }
 
   private assertCanManageInactivitySettings(

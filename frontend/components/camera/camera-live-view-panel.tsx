@@ -8,6 +8,7 @@ import {
   ScanEye,
   ScanLine,
   SlidersHorizontal,
+  Unplug,
   Wrench,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -459,7 +460,9 @@ export function CameraLiveViewPanel({ configurationMode = false }: CameraLiveVie
 
     try {
       await disconnectCamera(accessToken).catch(() => undefined);
-      const response = await connectCamera(accessToken, product.camera);
+      const response = await connectCamera(accessToken, product.camera, {
+        manualReconnect: true,
+      });
       const cameraRuntime = await loadCameraRuntime(accessToken);
       setStatus(response);
       setDevices(cameraRuntime.devices);
@@ -513,6 +516,37 @@ export function CameraLiveViewPanel({ configurationMode = false }: CameraLiveVie
     }
 
     await startLiveStream();
+  }
+
+  async function handleDisconnectCamera() {
+    const accessToken = getAccessToken();
+
+    if (!accessToken) {
+      toast.error(t("users.missingSession"));
+      return;
+    }
+
+    setConnecting(true);
+    const toastId = toast.loading(t("camera.disconnecting"));
+    closeAiResults();
+    closeLiveStream({ silent: true });
+
+    try {
+      await stopCameraAi(accessToken).catch(() => undefined);
+      const response = await disconnectCamera(accessToken, {
+        manualDisconnect: true,
+      });
+      setStatus(response);
+      setFrame(null);
+      toast.success(t("camera.disconnectSuccess"), { id: toastId });
+    } catch (cause) {
+      toast.error(
+        formatCameraApiError(cause, apiError, t, "camera.disconnectError"),
+        { id: toastId },
+      );
+    } finally {
+      setConnecting(false);
+    }
   }
 
   async function handleToggleAi() {
@@ -604,7 +638,11 @@ export function CameraLiveViewPanel({ configurationMode = false }: CameraLiveVie
     const toastId = toast.loading(t("camera.connecting"));
 
     try {
-      const response = await connectCamera(accessToken, selectedProduct.camera);
+      const response = await connectCamera(
+        accessToken,
+        selectedProduct.camera,
+        { manualReconnect: true },
+      );
       const cameraRuntime = await loadCameraRuntime(accessToken);
       setStatus(response);
       setDevices(cameraRuntime.devices);
@@ -867,7 +905,11 @@ export function CameraLiveViewPanel({ configurationMode = false }: CameraLiveVie
 
     try {
       await disconnectCamera(accessToken).catch(() => undefined);
-      const runtimeStatus = await connectCamera(accessToken, savedProduct.camera);
+      const runtimeStatus = await connectCamera(
+        accessToken,
+        savedProduct.camera,
+        { manualReconnect: true },
+      );
       const cameraRuntime = await loadCameraRuntime(accessToken);
       setStatus(runtimeStatus);
       setDevices(cameraRuntime.devices);
@@ -1021,6 +1063,17 @@ export function CameraLiveViewPanel({ configurationMode = false }: CameraLiveVie
               <Camera className="h-4 w-4" />
               {live ? t("camera.stopLive") : t("camera.startLive")}
             </Button>
+            {configurationMode && canManageCamera && connected ? (
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => void handleDisconnectCamera()}
+                disabled={loading || connecting || applyingCameraSettings}
+              >
+                <Unplug className="h-4 w-4" />
+                {t("camera.disconnect")}
+              </Button>
+            ) : null}
             {canRunCameraAi && !configurationMode ? (
               <Button
                 type="button"

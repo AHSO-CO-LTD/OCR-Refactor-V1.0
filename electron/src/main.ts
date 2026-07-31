@@ -54,7 +54,7 @@ const defaultWindowSettings: DesktopWindowSettings = {
   zoomFactor: 1,
   windowPreset: "factory",
   width: 1280,
-  height: 1080,
+  height: 1024,
 };
 
 const defaultTestStorageSettings: DesktopTestStorageSettings = {
@@ -848,7 +848,7 @@ function resolvePresetSize(preset: WindowPreset) {
     case "factory":
     case "custom":
     default:
-      return { width: 1280, height: 1080 };
+      return { width: 1280, height: 1024 };
   }
 }
 

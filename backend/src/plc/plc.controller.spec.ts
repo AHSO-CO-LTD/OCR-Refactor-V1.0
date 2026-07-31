@@ -54,6 +54,32 @@ describe('PlcController inactivity settings', () => {
   });
 });
 
+describe('PlcController simulator access', () => {
+  const enableSimulator = jest.fn();
+  const controller = new PlcController(
+    { enableSimulator } as unknown as PlcRuntimeService,
+    {} as MachineRuntimeService,
+  );
+
+  beforeEach(() => {
+    enableSimulator.mockReset();
+    enableSimulator.mockResolvedValue({ data: { simulatorActive: true } });
+  });
+
+  it('allows dev to start the simulator without stopping machine runtime', async () => {
+    await controller.enableSimulator({ clientId: 'dev-client' }, user('dev'));
+
+    expect(enableSimulator).toHaveBeenCalledWith('dev-client');
+  });
+
+  it('rejects non-dev users', async () => {
+    await expect(
+      controller.enableSimulator({ clientId: 'admin-client' }, user('admin')),
+    ).rejects.toThrow(ForbiddenException);
+    expect(enableSimulator).not.toHaveBeenCalled();
+  });
+});
+
 function user(role: string): AuthenticatedRequest['user'] {
   return { id: `${role}-1`, username: role, role };
 }

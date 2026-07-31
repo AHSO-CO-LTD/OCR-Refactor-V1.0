@@ -100,6 +100,8 @@ export type CameraRuntimeStatus = {
     connected?: boolean;
     is_grabbing?: boolean;
     device_name?: string | null;
+    auto_connect_suppressed?: boolean;
+    intentional_disconnect?: boolean;
     image_width?: number | null;
     image_height?: number | null;
     [key: string]: unknown;
@@ -399,6 +401,10 @@ export type CurrentInspectionState = {
   productCode: string;
   currentProductCode?: string;
   operatorId: string;
+  startedBy: Pick<SessionUser, "id" | "username" | "fullName">;
+  endedById: string | null;
+  endedBy: Pick<SessionUser, "id" | "username" | "fullName"> | null;
+  endedByInferred: boolean;
   startedAt: string | null;
   stoppedAt: string | null;
   endReason: LineSessionEndReason | null;
@@ -512,6 +518,7 @@ export type PlcConfigurationPayload = Omit<
 };
 
 export type PlcRuntimeEvent = {
+  id?: string;
   type: "status" | "signal" | "output" | "error";
   at: string;
   key?: string;
@@ -539,6 +546,8 @@ export type PlcRuntimeStatus = {
   waitingCheckingCommand: boolean | null;
   lastError: string | null;
   recentEvents: PlcRuntimeEvent[];
+  simulatorActive: boolean;
+  simulatorLeaseExpiresAt: string | null;
 };
 
 export type ProductImportResult = {
@@ -1172,6 +1181,7 @@ export async function getCameraDebugInfo(accessToken: string) {
 export async function connectCamera(
   accessToken: string,
   camera: CameraProfile,
+  options: { manualReconnect?: boolean } = {},
 ) {
   const response = await fetch(`${API_BASE_URL}/camera/connect`, {
     method: "POST",
@@ -1179,7 +1189,10 @@ export async function connectCamera(
       Authorization: `Bearer ${accessToken}`,
       "Content-Type": "application/json",
     },
-    body: JSON.stringify(camera),
+    body: JSON.stringify({
+      ...camera,
+      manualReconnect: options.manualReconnect ?? false,
+    }),
   });
 
   if (!response.ok) {
@@ -1189,19 +1202,26 @@ export async function connectCamera(
   return (await response.json()) as CameraRuntimeStatus;
 }
 
-export async function disconnectCamera(accessToken: string) {
+export async function disconnectCamera(
+  accessToken: string,
+  options: { manualDisconnect?: boolean } = {},
+) {
   const response = await fetch(`${API_BASE_URL}/camera/disconnect`, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json",
     },
+    body: JSON.stringify({
+      manualDisconnect: options.manualDisconnect ?? false,
+    }),
   });
 
   if (!response.ok) {
     throw new ApiError(await parseError(response), response.status);
   }
 
-  return (await response.json()) as { success: boolean; error?: string };
+  return (await response.json()) as CameraRuntimeStatus;
 }
 
 export async function grabCameraFrame(accessToken: string) {
@@ -1467,10 +1487,7 @@ export async function downloadProductImportTemplate(
   );
 }
 
-export async function importProductProfiles(
-  accessToken: string,
-  file: File,
-) {
+export async function importProductProfiles(accessToken: string, file: File) {
   const formData = new FormData();
   formData.append("file", file);
   const response = await fetch(`${API_BASE_URL}/products/import`, {
@@ -1756,6 +1773,63 @@ export async function disconnectPlc(accessToken: string) {
     "/plc/disconnect",
     {
       method: "POST",
+    },
+  );
+}
+
+export async function enablePlcSimulator(
+  accessToken: string,
+  clientId: string,
+) {
+  return plcRequest<{ data: PlcRuntimeStatus }>(
+    accessToken,
+    "/plc/simulator/enable",
+    {
+      method: "POST",
+      body: JSON.stringify({ clientId }),
+    },
+  );
+}
+
+export async function heartbeatPlcSimulator(
+  accessToken: string,
+  clientId: string,
+) {
+  return plcRequest<{ data: PlcRuntimeStatus }>(
+    accessToken,
+    "/plc/simulator/heartbeat",
+    {
+      method: "POST",
+      body: JSON.stringify({ clientId }),
+    },
+  );
+}
+
+export async function disablePlcSimulator(
+  accessToken: string,
+  clientId: string,
+) {
+  return plcRequest<{ data: PlcRuntimeStatus }>(
+    accessToken,
+    "/plc/simulator/disable",
+    {
+      method: "POST",
+      body: JSON.stringify({ clientId }),
+    },
+  );
+}
+
+export async function emitPlcSimulatorSignal(
+  accessToken: string,
+  clientId: string,
+  key: string,
+) {
+  return plcRequest<{ data: PlcRuntimeStatus }>(
+    accessToken,
+    "/plc/simulator/signal",
+    {
+      method: "POST",
+      body: JSON.stringify({ clientId, key }),
     },
   );
 }

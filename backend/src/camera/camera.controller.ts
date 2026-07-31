@@ -16,7 +16,10 @@ import { PermissionsGuard } from '../auth/permissions.guard';
 import { PERMISSIONS } from '../common/constants/permissions';
 import { PrismaService } from '../database/prisma.service';
 import { DeviceToolService } from '../device-tool/device-tool.service';
-import { CameraProfileDto } from '../products/dto/product-profile.dto';
+import {
+  ConnectCameraDto,
+  DisconnectCameraDto,
+} from './dto/connect-camera.dto';
 import { GrabCameraFrameDto } from './dto/grab-camera-frame.dto';
 import { StartCameraAiDto } from './dto/start-camera-ai.dto';
 import { UpdateCameraIdentityDto } from './dto/update-camera-identity.dto';
@@ -146,8 +149,10 @@ export class CameraController {
     PERMISSIONS.INSPECTION_START,
     PERMISSIONS.INSPECTION_TEST,
   )
-  async connect(@Body() dto: CameraProfileDto) {
-    await this.deviceToolService.ensureCameraPreviewReady(dto);
+  async connect(@Body() dto: ConnectCameraDto) {
+    await this.deviceToolService.ensureCameraPreviewReady(dto, {
+      manualReconnect: dto.manualReconnect,
+    });
     return this.deviceToolService.getCameraStatus();
   }
 
@@ -160,8 +165,13 @@ export class CameraController {
     PERMISSIONS.INSPECTION_START,
     PERMISSIONS.INSPECTION_TEST,
   )
-  disconnect() {
-    return this.deviceToolService.disconnectCamera();
+  async disconnect(@Body() dto?: DisconnectCameraDto) {
+    if (dto?.manualDisconnect) {
+      await this.deviceToolService.disconnectCameraByUser();
+    } else {
+      await this.deviceToolService.disconnectCamera();
+    }
+    return this.deviceToolService.getCameraStatus();
   }
 
   @ApiOperation({ summary: 'Grab one camera frame from the Device Tool' })

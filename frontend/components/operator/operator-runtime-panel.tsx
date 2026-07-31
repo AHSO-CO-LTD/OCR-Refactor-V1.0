@@ -229,6 +229,17 @@ export function OperatorRuntimePanel() {
     runtimeControlsActive && liveCameraEnabled;
   const effectiveRealtimeAiEnabled =
     runtimeControlsActive && realtimeAiEnabled;
+  const cameraRecoveryInProgress = [
+    "resuming",
+    "waiting_camera",
+    "restart_required",
+    "error",
+  ].includes(machineRuntimeState);
+  const previewStreamEnabled =
+    liveCameraEnabled &&
+    !["stopping", "idle_machine_stop", "idle_capture_timeout"].includes(
+      machineRuntimeState,
+    );
 
   useEffect(() => {
     if (!keypadOpen) {
@@ -264,15 +275,36 @@ export function OperatorRuntimePanel() {
         const activeProducts = response.data.filter(
           (product) => product.active,
         );
+        const currentInspection = await getCurrentInspection(accessToken)
+          .then((currentResponse) => currentResponse.data)
+          .catch(() => null);
 
         if (!cancelled && activeProducts.length > 0) {
+          const runningProduct = currentInspection
+            ? activeProducts.find(
+                (product) => product.id === currentInspection.productId,
+              )
+            : null;
           const startupProduct =
-            selectOperatorStartupProduct(activeProducts) ?? activeProducts[0];
+            runningProduct ??
+            selectOperatorStartupProduct(activeProducts) ??
+            activeProducts[0];
 
           setProducts(activeProducts);
           setSelectedProductId(startupProduct.id);
-          setBatchSize(startupProduct.batchSize || 1);
-          setBatchDraft(String(startupProduct.batchSize || 1));
+          if (currentInspection && runningProduct) {
+            currentJobIdRef.current = currentInspection.jobId;
+            setBatchSize(currentInspection.batchSize || 1);
+            setBatchDraft(String(currentInspection.batchSize || 1));
+            setBatchQuantity(currentInspection.quantity);
+            setScanCount(currentInspection.count);
+            setBatchCount(currentInspection.batch);
+            setOkCount(currentInspection.okCount);
+            setNgCount(currentInspection.ngCount);
+          } else {
+            setBatchSize(startupProduct.batchSize || 1);
+            setBatchDraft(String(startupProduct.batchSize || 1));
+          }
           setDataSource("api");
         }
       } catch {
@@ -385,7 +417,18 @@ export function OperatorRuntimePanel() {
           accessToken,
           selectedProductId,
         );
-        const runtime = await startMachineOperation(accessToken);
+        const currentRuntime = await getMachineRuntimeStatus(accessToken);
+        const runtime = [
+          "error",
+          "idle_capture_timeout",
+          "idle_machine_stop",
+          "restart_required",
+          "resuming",
+          "stopping",
+          "waiting_camera",
+        ].includes(currentRuntime.data.state)
+          ? currentRuntime
+          : await startMachineOperation(accessToken);
         const machineIsRunning = runtime.data.state === "running";
 
         currentJobIdRef.current = inspection.data.jobId;
@@ -449,7 +492,7 @@ export function OperatorRuntimePanel() {
     selectedProduct.camera.deviceName,
     dataSource === "api",
     dataSource === "api" ? selectedProduct.camera : undefined,
-    effectiveLiveCameraEnabled,
+    previewStreamEnabled,
   );
 
   const safeBatchSize = Math.max(1, Number(batchSize) || 1);
@@ -1248,8 +1291,13 @@ export function OperatorRuntimePanel() {
                   aria-label={t("products.code")}
                   value={selectedProduct.id}
                   portalled
+                  viewportFittedMenu
                   disabled={loadingProducts || scanRunning || changingProduct}
-                  className="operator-line-form-control h-11 border-[#9db7d8] bg-white text-base"
+                  className="operator-line-form-control h-12 border-[#9db7d8] bg-white px-4 text-xl font-semibold"
+                  menuListClassName="py-1"
+                  optionClassName="min-h-11 items-center border-b border-[#c9d6e5] px-4 py-2 last:border-b-0 active:bg-slate-200"
+                  optionLabelClassName="text-xl font-semibold"
+                  activeOptionClassName="border-[#8ab6df] bg-[#d5eaff] text-[#123f73] shadow-[inset_4px_0_0_#1670b9] hover:bg-[#c5e1ff]"
                   onChange={(event) =>
                     void handleProductChange(event.target.value)
                   }
@@ -1424,6 +1472,7 @@ export function OperatorRuntimePanel() {
                       selectedProduct.camera.deviceName
                     }
                     onReconnect={reconnectLivePreview}
+                    showReconnectWhileConnecting={cameraRecoveryInProgress}
                   />
                 ) : undefined
               }

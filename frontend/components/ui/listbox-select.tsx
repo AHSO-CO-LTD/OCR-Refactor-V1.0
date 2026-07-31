@@ -19,19 +19,24 @@ type ListboxOption = {
 };
 
 type ListboxSelectProps = {
+  activeOptionClassName?: string;
   ariaInvalid?: boolean;
   ariaLabel?: string;
   containerClassName?: string;
   disabled?: boolean;
   emptyLabel?: string;
   id?: string;
+  menuListClassName?: string;
   onChange: (value: string) => void;
+  optionClassName?: string;
+  optionLabelClassName?: string;
   options: ListboxOption[];
   placeholder?: string;
   portalled?: boolean;
   title?: string;
   triggerClassName?: string;
   value: string;
+  viewportFittedMenu?: boolean;
 };
 
 type PortalPosition = {
@@ -43,19 +48,24 @@ type PortalPosition = {
 };
 
 export function ListboxSelect({
+  activeOptionClassName,
   ariaInvalid = false,
   ariaLabel,
   containerClassName,
   disabled = false,
   emptyLabel,
   id,
+  menuListClassName,
   onChange,
+  optionClassName,
+  optionLabelClassName,
   options,
   placeholder,
   portalled = false,
   title,
   triggerClassName,
   value,
+  viewportFittedMenu = false,
 }: ListboxSelectProps) {
   const [open, setOpen] = useState(false);
   const [portalPosition, setPortalPosition] =
@@ -105,10 +115,15 @@ export function ListboxSelect({
         ? { bottom: window.innerHeight - rect.top + menuGap }
         : { top: rect.bottom + menuGap }),
       left,
-      maxHeight: Math.max(48, Math.min(256, availableHeight)),
+      maxHeight: Math.max(
+        48,
+        viewportFittedMenu
+          ? availableHeight
+          : Math.min(256, availableHeight),
+      ),
       width,
     });
-  }, []);
+  }, [viewportFittedMenu]);
 
   useEffect(() => {
     function handlePointerDown(event: PointerEvent) {
@@ -171,7 +186,7 @@ export function ListboxSelect({
       }
     >
       <div
-        className="max-h-64 overflow-y-auto py-1"
+        className={cn("max-h-64 overflow-y-auto py-1", menuListClassName)}
         style={
           portalled && portalPosition
             ? { maxHeight: portalPosition.maxHeight }
@@ -196,6 +211,8 @@ export function ListboxSelect({
                 className={cn(
                   "flex w-full items-start justify-between gap-3 px-3 py-2 text-left transition hover:bg-slate-100",
                   active ? "bg-slate-100 text-slate-950" : "text-slate-700",
+                  optionClassName,
+                  active ? activeOptionClassName : "",
                 )}
                 onClick={() => {
                   onChange(option.value);
@@ -203,7 +220,12 @@ export function ListboxSelect({
                 }}
               >
                 <span className="min-w-0">
-                  <span className="block truncate text-sm font-medium">
+                  <span
+                    className={cn(
+                      "block truncate text-sm font-medium",
+                      optionLabelClassName,
+                    )}
+                  >
                     {option.label}
                   </span>
                   {option.description ? (
