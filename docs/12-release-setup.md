@@ -166,6 +166,12 @@ Normal admin screens still hide and protect `dev`.
 The uninstaller shows options before removal starts. The default is a clean
 uninstall with no boxes checked.
 
+When the uninstaller is invoked by an application update (`--updated`), it
+removes only the previous application files. It must not run runtime cleanup:
+the PostgreSQL database, `C:\ProgramData\AHSO OCR`, runtime configuration,
+support credentials, recovery checkpoints, Node.js, PostgreSQL, and other
+frameworks are all preserved for the new version.
+
 - Clean uninstall: app files, shortcuts, local OCR database/config, and runtime
   frameworks installed by this setup are removed.
 - Keep database: app files are removed, but the local PostgreSQL database and
@@ -183,7 +189,8 @@ If the database is kept, PostgreSQL is kept too even when framework cleanup is
 selected, because the preserved database depends on the local PostgreSQL
 runtime.
 
-Silent uninstall uses the default clean mode.
+An explicit silent uninstall that is not part of an application update uses
+the default clean mode.
 
 ## Customer Admin Account
 

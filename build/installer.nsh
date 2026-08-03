@@ -725,6 +725,11 @@ Function un.UninstallOptionsPageLeave
 FunctionEnd
 
 !macro customUnInstall
+  ${If} ${isUpdated}
+    DetailPrint "Application update: keeping database, runtime config, and frameworks."
+    Goto uninstall_runtime_done
+  ${EndIf}
+
   ${If} ${Silent}
     StrCpy $UninstallKeepDatabase "false"
     StrCpy $UninstallKeepFrameworks "false"
@@ -742,9 +747,9 @@ FunctionEnd
     ${EndIf}
 
     ExecWait '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File "$INSTDIR\resources\installer\uninstall-runtime.ps1"$0' $1
-    IntCmp $1 0 uninstall_cleanup_done 0 0
+    IntCmp $1 0 uninstall_runtime_done 0 0
       MessageBox MB_ICONEXCLAMATION|MB_OK "The app will be removed, but selected uninstall cleanup failed. Open C:\ProgramData\AHSO OCR\uninstall.log for details."
 
-  uninstall_cleanup_done:
+  uninstall_runtime_done:
 !macroend
 !endif
