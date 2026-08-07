@@ -27,6 +27,7 @@ import {
 import {
   PulseMachineTestResultDto,
   UpdateMachineInactivitySettingsDto,
+  UpdateMachineStopSettingsDto,
   UpdateMachineRuntimeControlsDto,
   UpdateMachineTestModeDto,
   UpdateMachineTestOutputDto,
@@ -191,6 +192,23 @@ export class PlcController {
     return this.machineRuntime.updateInactivitySettings(dto);
   }
 
+  @Get('machine/stop-settings')
+  @ApiOperation({ summary: 'Get PLC stop delay settings' })
+  getMachineStopSettings(@CurrentUser() user: AuthenticatedRequest['user']) {
+    this.assertCanManageMachineStopSettings(user);
+    return this.machineRuntime.getStopSettings();
+  }
+
+  @Put('machine/stop-settings')
+  @ApiOperation({ summary: 'Update PLC stop delay settings' })
+  updateMachineStopSettings(
+    @Body() dto: UpdateMachineStopSettingsDto,
+    @CurrentUser() user: AuthenticatedRequest['user'],
+  ) {
+    this.assertCanManageMachineStopSettings(user);
+    return this.machineRuntime.updateStopSettings(dto);
+  }
+
   @Post('machine/activity')
   @ApiOperation({ summary: 'Record authenticated user activity in the app' })
   notifyMachineUserActivity() {
@@ -317,6 +335,16 @@ export class PlcController {
     if (user.role !== 'admin' && user.role !== 'dev') {
       throw new ForbiddenException(
         'Only admin or dev can manage machine inactivity settings',
+      );
+    }
+  }
+
+  private assertCanManageMachineStopSettings(
+    user: AuthenticatedRequest['user'],
+  ) {
+    if (user.role !== 'admin' && user.role !== 'dev') {
+      throw new ForbiddenException(
+        'Only admin or dev can manage PLC stop delay settings',
       );
     }
   }

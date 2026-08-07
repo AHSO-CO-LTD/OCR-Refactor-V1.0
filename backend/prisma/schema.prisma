@@ -42,6 +42,12 @@ enum LineResultSavePolicy {
   none
 }
 
+enum TrainingImageSavePolicy {
+  all
+  ok
+  ng
+}
+
 enum LineSessionEndReason {
   line_stop
   product_change
@@ -61,24 +67,24 @@ enum PlcKeyOperation {
 }
 
 model User {
-  id             String           @id @default(cuid())
-  username       String           @unique
-  passwordHash   String
-  fullName       String
-  department     String?
-  employeeNo     String?
-  roleCode       RoleCode
-  active         Boolean          @default(true)
-  failedAttempts Int              @default(0)
-  lastLoginAt    DateTime?
-  createdAt      DateTime         @default(now())
-  updatedAt      DateTime         @updatedAt
-  role           Role             @relation(fields: [roleCode], references: [code])
-  permissions    UserPermission[]
-  auditLogs      AuditLog[]
-  inspectionJobs InspectionJob[] @relation("InspectionJobStartedBy")
+  id                  String              @id @default(cuid())
+  username            String              @unique
+  passwordHash        String
+  fullName            String
+  department          String?
+  employeeNo          String?
+  roleCode            RoleCode
+  active              Boolean             @default(true)
+  failedAttempts      Int                 @default(0)
+  lastLoginAt         DateTime?
+  createdAt           DateTime            @default(now())
+  updatedAt           DateTime            @updatedAt
+  role                Role                @relation(fields: [roleCode], references: [code])
+  permissions         UserPermission[]
+  auditLogs           AuditLog[]
+  inspectionJobs      InspectionJob[]     @relation("InspectionJobStartedBy")
   endedInspectionJobs InspectionJob[]     @relation("InspectionJobEndedBy")
-  testSessionReports TestSessionReport[]
+  testSessionReports  TestSessionReport[]
 }
 
 model Role {
@@ -120,23 +126,23 @@ model UserPermission {
 }
 
 model Product {
-  id              String   @id @default(cuid())
-  code            String   @unique
-  name            String   @unique
-  defaultNumber   Int      @default(160)
-  batchSize       Int      @default(160)
-  exposure        Int      @default(3500)
-  thresholdAccept Decimal  @default(0.5) @db.Decimal(4, 2)
-  thresholdMns    Decimal  @default(0.5) @db.Decimal(4, 2)
-  rowThreshold    Int      @default(20)
-  modelPath       String?
-  rotateTestImageClockwise Boolean @default(true)
-  active          Boolean  @default(true)
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
-  cameraConfig    CameraConfig?
-  roiRegions      RoiRegion[]
-  testSessionReports TestSessionReport[]
+  id                       String              @id @default(cuid())
+  code                     String              @unique
+  name                     String              @unique
+  defaultNumber            Int                 @default(160)
+  batchSize                Int                 @default(160)
+  exposure                 Int                 @default(3500)
+  thresholdAccept          Decimal             @default(0.5) @db.Decimal(4, 2)
+  thresholdMns             Decimal             @default(0.5) @db.Decimal(4, 2)
+  rowThreshold             Int                 @default(20)
+  modelPath                String?
+  rotateTestImageClockwise Boolean             @default(true)
+  active                   Boolean             @default(true)
+  createdAt                DateTime            @default(now())
+  updatedAt                DateTime            @updatedAt
+  cameraConfig             CameraConfig?
+  roiRegions               RoiRegion[]
+  testSessionReports       TestSessionReport[]
 }
 
 model CameraIdentity {
@@ -157,25 +163,25 @@ model CameraIdentity {
 }
 
 model CameraConfig {
-  id         String   @id @default(cuid())
-  productId  String?  @unique
+  id               String          @id @default(cuid())
+  productId        String?         @unique
   cameraIdentityId String?
-  sourceType String   @default("usb")
-  deviceName String?
-  rtspUrl    String?
-  exposure   Int      @default(3500)
-  imageWidth Int      @default(1500)
-  imageHeight Int     @default(500)
-  offsetX    Int      @default(0)
-  offsetY    Int      @default(0)
-  zoomFactor Decimal  @default(0.4) @db.Decimal(4, 2)
-  previewPanX Decimal @default(0) @db.Decimal(6, 4)
-  previewPanY Decimal @default(0) @db.Decimal(6, 4)
-  previewRotation Decimal @default(0) @db.Decimal(6, 2)
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
-  product    Product? @relation(fields: [productId], references: [id], onDelete: Cascade)
-  cameraIdentity CameraIdentity? @relation(fields: [cameraIdentityId], references: [id], onDelete: SetNull)
+  sourceType       String          @default("usb")
+  deviceName       String?
+  rtspUrl          String?
+  exposure         Int             @default(3500)
+  imageWidth       Int             @default(1500)
+  imageHeight      Int             @default(500)
+  offsetX          Int             @default(0)
+  offsetY          Int             @default(0)
+  zoomFactor       Decimal         @default(0.4) @db.Decimal(4, 2)
+  previewPanX      Decimal         @default(0) @db.Decimal(6, 4)
+  previewPanY      Decimal         @default(0) @db.Decimal(6, 4)
+  previewRotation  Decimal         @default(0) @db.Decimal(6, 2)
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+  product          Product?        @relation(fields: [productId], references: [id], onDelete: Cascade)
+  cameraIdentity   CameraIdentity? @relation(fields: [cameraIdentityId], references: [id], onDelete: SetNull)
 }
 
 model RoiRegion {
@@ -255,37 +261,42 @@ model LicenseLog {
 }
 
 model LineResultSettings {
-  id                          String               @id @default("default")
+  id                          String                  @id @default("default")
   saveFolderPath              String?
-  savePolicy                  LineResultSavePolicy @default(all)
-  saveBySession               Boolean              @default(true)
-  newSessionOnLineStop        Boolean              @default(true)
-  newSessionOnProductChange   Boolean              @default(true)
-  showNgRecognizedText        Boolean              @default(true)
-  createdAt                   DateTime             @default(now())
-  updatedAt                   DateTime             @updatedAt
+  savePolicy                  LineResultSavePolicy    @default(all)
+  saveBySession               Boolean                 @default(true)
+  newSessionOnLineStop        Boolean                 @default(true)
+  newSessionOnProductChange   Boolean                 @default(true)
+  showNgRecognizedText        Boolean                 @default(true)
+  trainingImageEnabled        Boolean                 @default(false)
+  trainingImageSaveFolderPath String?
+  trainingImageSavePolicy     TrainingImageSavePolicy @default(all)
+  createdAt                   DateTime                @default(now())
+  updatedAt                   DateTime                @updatedAt
 }
 
 model PlcConfig {
-  id                    String         @id @default("default")
-  ipAddress             String
-  protocol              PlcProtocol    @default(modbus_tcp)
-  port                  Int            @default(502)
-  captureTriggerAddress Int?
-  stopTriggerAddress    Int?
-  startTriggerAddress   Int?
-  cameraPowerAddress    Int?
-  cameraLightAddress    Int?
-  errorPulseAddress     Int?
-  okResultAddress       Int?
-  waitingCheckingAddress Int?
-  errorPulseDurationMs  Int            @default(500)
-  okPulseDurationMs     Int            @default(500)
-  inactivityTimeoutEnabled Boolean     @default(true)
-  sleepTimeSeconds      Int            @default(300)
-  createdAt             DateTime       @default(now())
-  updatedAt             DateTime       @updatedAt
-  customKeys            PlcCustomKey[]
+  id                       String         @id @default("default")
+  ipAddress                String
+  protocol                 PlcProtocol    @default(modbus_tcp)
+  port                     Int            @default(502)
+  captureTriggerAddress    Int?
+  stopTriggerAddress       Int?
+  startTriggerAddress      Int?
+  cameraPowerAddress       Int?
+  cameraLightAddress       Int?
+  errorPulseAddress        Int?
+  okResultAddress          Int?
+  waitingCheckingAddress   Int?
+  errorPulseDurationMs     Int            @default(500)
+  okPulseDurationMs        Int            @default(500)
+  inactivityTimeoutEnabled Boolean        @default(true)
+  sleepTimeSeconds         Int            @default(300)
+  stopDelaySeconds         Int            @default(5)
+  powerOffCameraOnStop     Boolean        @default(true)
+  createdAt                DateTime       @default(now())
+  updatedAt                DateTime       @updatedAt
+  customKeys               PlcCustomKey[]
 }
 
 model PlcCustomKey {
@@ -304,19 +315,19 @@ model PlcCustomKey {
 }
 
 model TestSessionReport {
-  id            String                 @id @default(cuid())
+  id            String                   @id @default(cuid())
   productId     String
   actorId       String
   folderName    String?
   totalImages   Int
   okImages      Int
   ngImages      Int
-  unknownImages Int                   @default(0)
+  unknownImages Int                      @default(0)
   errorImages   Int
-  createdAt     DateTime              @default(now())
-  updatedAt     DateTime              @updatedAt
-  actor         User                  @relation(fields: [actorId], references: [id])
-  product       Product               @relation(fields: [productId], references: [id])
+  createdAt     DateTime                 @default(now())
+  updatedAt     DateTime                 @updatedAt
+  actor         User                     @relation(fields: [actorId], references: [id])
+  product       Product                  @relation(fields: [productId], references: [id])
   failedImages  TestSessionFailedImage[]
 
   @@index([productId, createdAt])
@@ -324,34 +335,34 @@ model TestSessionReport {
 }
 
 model TestSessionFailedImage {
-  id                String                 @id @default(cuid())
-  reportId          String
-  fileName          String
-  relativePath      String
-  result            TestSessionImageResult
-  cycleTimeMs       Int?
-  errorMessage      String?
-  originalImageBase64 String               @db.Text
-  createdAt         DateTime               @default(now())
-  report            TestSessionReport      @relation(fields: [reportId], references: [id], onDelete: Cascade)
-  roiResults        TestSessionFailedRoiResult[]
+  id                  String                       @id @default(cuid())
+  reportId            String
+  fileName            String
+  relativePath        String
+  result              TestSessionImageResult
+  cycleTimeMs         Int?
+  errorMessage        String?
+  originalImageBase64 String                       @db.Text
+  createdAt           DateTime                     @default(now())
+  report              TestSessionReport            @relation(fields: [reportId], references: [id], onDelete: Cascade)
+  roiResults          TestSessionFailedRoiResult[]
 
   @@index([reportId, createdAt])
 }
 
 model TestSessionFailedRoiResult {
-  id                 String              @id @default(cuid())
-  failedImageId      String
-  slotIndex          Int?
-  slotLabel          String?
-  expectedText       String?
-  rawText            String?
-  rows               Json?
-  result             InspectionResult    @default(UNKNOWN)
-  errorMessage       String?
-  toolDebugImageBase64 String?           @db.Text
-  createdAt          DateTime            @default(now())
-  failedImage        TestSessionFailedImage @relation(fields: [failedImageId], references: [id], onDelete: Cascade)
+  id                   String                 @id @default(cuid())
+  failedImageId        String
+  slotIndex            Int?
+  slotLabel            String?
+  expectedText         String?
+  rawText              String?
+  rows                 Json?
+  result               InspectionResult       @default(UNKNOWN)
+  errorMessage         String?
+  toolDebugImageBase64 String?                @db.Text
+  createdAt            DateTime               @default(now())
+  failedImage          TestSessionFailedImage @relation(fields: [failedImageId], references: [id], onDelete: Cascade)
 
   @@index([failedImageId, slotIndex])
 }

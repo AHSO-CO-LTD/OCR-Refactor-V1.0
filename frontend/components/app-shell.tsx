@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { ReactNode, useCallback, useEffect, useRef, useState } from "react";
+import { Fragment, ReactNode, useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { AccountMenu } from "@/components/account-menu";
 import { BrandLogo } from "@/components/brand/brand-logo";
@@ -10,7 +10,7 @@ import { DevPlcSimulator } from "@/components/plc/dev-plc-simulator";
 import { MachineRuntimeOverlay } from "@/components/plc/machine-runtime-overlay";
 import { useMachineUserActivity } from "@/components/plc/use-machine-user-activity";
 import { useDesktopLifecycle } from "@/components/system/desktop-lifecycle-provider";
-import type { SessionUser, SystemLicenseState } from "@/lib/api";
+import type { RoleWithPermissions, SessionUser, SystemLicenseState } from "@/lib/api";
 import {
   connectCamera,
   disconnectCamera,
@@ -18,6 +18,7 @@ import {
   getCurrentSession,
   listCameraDevices,
   listProductProfiles,
+  listRoles,
 } from "@/lib/api";
 import type { TranslationKey } from "@/lib/i18n";
 import { useI18n } from "@/lib/i18n";
@@ -29,9 +30,13 @@ import {
 } from "@/lib/operator-startup-preferences";
 import { releasePlcSimulatorSession } from "@/lib/plc-simulator-session";
 import {
+  applyDevRolePreview,
+  clearDevRolePreview,
   clearSession,
+  getDevRolePreview,
   getAccessToken,
   refreshSession,
+  setDevRolePreview,
 } from "@/lib/session";
 import { useLicenseWatchdog } from "@/lib/use-license-watchdog";
 
@@ -138,8 +143,11 @@ export function AppShell({ children }: AppShellProps) {
   const { requestExit, requestRestart } = useDesktopLifecycle();
   const adminNavRef = useRef<HTMLDivElement | null>(null);
   const [user, setUser] = useState<SessionUser | null>(null);
+  const [rolePreview, setRolePreview] = useState<ReturnType<typeof getDevRolePreview>>(null);
+  const [rolePreviewRoles, setRolePreviewRoles] = useState<RoleWithPermissions[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedAdminGroup, setSelectedAdminGroup] = useState<NavGroupKey | null>(null);
+  const displayUser = applyDevRolePreview(user, rolePreview);
   const handleLicenseLost = useCallback(
     (license: SystemLicenseState) => {
       const accessToken = getAccessToken();
@@ -198,6 +206,44 @@ export function AppShell({ children }: AppShellProps) {
   }, [pathname, router]);
 
   useEffect(() => {
+    if (!user?.isDev) {
+      return;
+    }
+
+    const accessToken = getAccessToken();
+
+    if (!accessToken) {
+      return;
+    }
+
+    listRoles(accessToken)
+      .then((response) => {
+        const roles = response.data;
+        const storedPreview = getDevRolePreview();
+        const selectedRole = storedPreview
+          ? roles.find((role) => role.code === storedPreview.role)
+          : null;
+
+        setRolePreviewRoles(roles);
+
+        if (selectedRole && selectedRole.code !== "dev") {
+          setDevRolePreview(selectedRole);
+          setRolePreview({
+            permissions: selectedRole.permissions,
+            role: selectedRole.code,
+          });
+          return;
+        }
+
+        clearDevRolePreview();
+        setRolePreview(null);
+      })
+      .catch(() => {
+        setRolePreviewRoles([]);
+      });
+  }, [user?.id, user?.isDev]);
+
+  useEffect(() => {
     if (!user) {
       return;
     }
@@ -216,19 +262,19 @@ export function AppShell({ children }: AppShellProps) {
   }, [pathname, user]);
 
   useEffect(() => {
-    if (!user) {
+    if (!displayUser) {
       return;
     }
 
     const currentMenuItem = findMenuItemForPath(pathname);
 
-    if (!currentMenuItem || canAccessMenuItem(currentMenuItem, user)) {
+    if (!currentMenuItem || canAccessMenuItem(currentMenuItem, displayUser)) {
       return;
     }
 
     toast.error(t("apiError.Missing required permission"));
     router.replace(getPostLoginRoute());
-  }, [pathname, router, t, user]);
+  }, [displayUser, pathname, router, t]);
 
   async function handleLogout() {
     const accessToken = getAccessToken();
@@ -241,11 +287,27 @@ export function AppShell({ children }: AppShellProps) {
     router.replace("/login");
   }
 
+  function handleRolePreviewChange(role: RoleWithPermissions) {
+    if (!user?.isDev) {
+      return;
+    }
+
+    setDevRolePreview(role);
+    setRolePreview(
+      role.code === "dev"
+        ? null
+        : { permissions: role.permissions, role: role.code },
+    );
+    setSelectedAdminGroup(null);
+    toast.success(t("devRolePreview.changed"));
+    router.replace(role.code === "operator" ? "/dashboard/line" : "/dashboard");
+  }
+
   const visibleMenuItems = menuItems.filter(
-    (item) => !item.hidden && user && canAccessMenuItem(item, user),
+    (item) => !item.hidden && displayUser && canAccessMenuItem(item, displayUser),
   );
   const canManageDesktopSettings = true;
-  const usesSidebar = user?.role === "dev" || user?.role === "admin";
+  const usesSidebar = displayUser?.role === "dev" || displayUser?.role === "admin";
   const showNavbar = !usesSidebar && visibleMenuItems.length > 1;
   const visibleAdminGroups = navGroups
     .map((group) => ({
@@ -300,7 +362,7 @@ export function AppShell({ children }: AppShellProps) {
     );
   }
 
-  if (!user) {
+  if (!displayUser) {
     return null;
   }
 
@@ -339,7 +401,7 @@ export function AppShell({ children }: AppShellProps) {
       <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
         <header
           className={[
-            "app-shell-header relative z-20 shrink-0 border-b border-slate-200 bg-white px-4 py-2 sm:px-5 lg:px-6",
+            "app-shell-header relative z-[100] shrink-0 border-b border-slate-200 bg-white px-4 py-2 sm:px-5 lg:px-6",
             isOperatorLinePage ? "operator-line-shell-header" : "",
           ].join(" ")}
         >
@@ -440,11 +502,15 @@ export function AppShell({ children }: AppShellProps) {
             <div className="app-shell-account col-start-2 row-start-1 flex min-w-0 items-center justify-end text-sm min-[1180px]:col-start-3">
               <AccountMenu
                 canManageDesktopSettings={canManageDesktopSettings}
+                canPreviewRoles={user?.isDev === true}
                 donglePresent={license?.licensed === true && license.donglePresent === true}
                 onExitApp={requestExit}
                 onLogout={handleLogout}
+                onRolePreviewChange={handleRolePreviewChange}
                 onRestartApp={requestRestart}
-                user={user}
+                rolePreviewActive={rolePreview !== null}
+                rolePreviewRoles={rolePreviewRoles}
+                user={displayUser}
               />
             </div>
           </div>
@@ -464,7 +530,7 @@ export function AppShell({ children }: AppShellProps) {
                     : "",
                 ].join(" ")}
               >
-                {children}
+                <Fragment key={displayUser.role}>{children}</Fragment>
               </section>
             </div>
           </div>
@@ -481,7 +547,7 @@ export function AppShell({ children }: AppShellProps) {
                   : "",
               ].join(" ")}
             >
-              {children}
+              <Fragment key={displayUser.role}>{children}</Fragment>
             </section>
           </div>
         )}
@@ -491,7 +557,6 @@ export function AppShell({ children }: AppShellProps) {
             user?.permissions.includes("plc.manage") === true ||
             user?.permissions.includes("plc.operate") === true
           }
-          role={user?.role}
         />
         {user?.role === "dev" ? (
           <DevPlcSimulator userId={user.id} />

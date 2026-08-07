@@ -22,6 +22,8 @@ describe('PlcRuntimeService', () => {
     okPulseDurationMs: 750,
     inactivityTimeoutEnabled: true,
     sleepTimeSeconds: 300,
+    stopDelaySeconds: 5,
+    powerOffCameraOnStop: true,
     createdAt: new Date(),
     updatedAt: new Date(),
     customKeys: [

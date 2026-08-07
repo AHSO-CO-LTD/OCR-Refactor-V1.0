@@ -164,7 +164,17 @@ export function CameraIdentitiesPanel() {
   function replaceIdentity(nextIdentity: CameraIdentity) {
     setIdentities((current) =>
       current.map((identity) =>
-        identity.id === nextIdentity.id ? nextIdentity : identity,
+        identity.id === nextIdentity.id
+          ? {
+              ...nextIdentity,
+              detected: identity.detected,
+              connectable: Boolean(
+                identity.detected &&
+                  nextIdentity.identified &&
+                  nextIdentity.active,
+              ),
+            }
+          : identity,
       ),
     );
     setDraftNames((current) => ({
@@ -209,7 +219,7 @@ export function CameraIdentitiesPanel() {
           </div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="min-w-[880px] w-full border-collapse text-sm">
+            <table className="min-w-[1100px] w-full border-collapse text-sm">
               <thead>
                 <tr className="border-b border-slate-200 bg-slate-50 text-left text-xs uppercase tracking-[0.02em] text-slate-500">
                   <th className="px-3 py-3 font-semibold">
@@ -222,10 +232,16 @@ export function CameraIdentitiesPanel() {
                     {t("cameraIdentity.hardware")}
                   </th>
                   <th className="px-3 py-3 font-semibold">
-                    {t("cameraIdentity.lastSeen")}
+                    {t("cameraIdentity.detected")}
                   </th>
                   <th className="px-3 py-3 font-semibold">
                     {t("cameraIdentity.status")}
+                  </th>
+                  <th className="px-3 py-3 font-semibold">
+                    {t("cameraIdentity.connection")}
+                  </th>
+                  <th className="px-3 py-3 font-semibold">
+                    {t("cameraIdentity.lastSeen")}
                   </th>
                   <th className="px-3 py-3 text-right font-semibold">
                     {t("common.actions")}
@@ -261,7 +277,19 @@ export function CameraIdentitiesPanel() {
                       </div>
                     </td>
                     <td className="px-3 py-3 text-slate-600">
-                      {formatDate(identity.lastSeenAt)}
+                      <Badge
+                        className={
+                          identity.detected
+                            ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                            : "border-red-200 bg-red-50 text-red-700"
+                        }
+                      >
+                        {t(
+                          identity.detected
+                            ? "cameraIdentity.detectedNow"
+                            : "cameraIdentity.notDetectedNow",
+                        )}
+                      </Badge>
                     </td>
                     <td className="px-3 py-3">
                       <Badge
@@ -275,6 +303,14 @@ export function CameraIdentitiesPanel() {
                       >
                         {t(`cameraIdentity.status.${identity.status}`)}
                       </Badge>
+                    </td>
+                    <td className="px-3 py-3">
+                      <Badge className={connectionBadgeClass(identity)}>
+                        {t(`cameraIdentity.connection.${connectionState(identity)}`)}
+                      </Badge>
+                    </td>
+                    <td className="px-3 py-3 text-slate-600">
+                      {formatDate(identity.lastSeenAt)}
                     </td>
                     <td className="px-3 py-3">
                       <div className="flex justify-end gap-2">
@@ -320,6 +356,26 @@ function formatDate(value: string | null) {
     dateStyle: "short",
     timeStyle: "short",
   }).format(new Date(value));
+}
+
+function connectionState(identity: CameraIdentity) {
+  if (identity.connectable) return "ready";
+  if (!identity.detected) return "notDetected";
+  if (!identity.identified) return "notIdentified";
+  return "disabled";
+}
+
+function connectionBadgeClass(identity: CameraIdentity) {
+  switch (connectionState(identity)) {
+    case "ready":
+      return "border-emerald-200 bg-emerald-50 text-emerald-700";
+    case "notDetected":
+      return "border-red-200 bg-red-50 text-red-700";
+    case "notIdentified":
+      return "border-amber-200 bg-amber-50 text-amber-800";
+    case "disabled":
+      return "border-slate-200 bg-slate-50 text-slate-600";
+  }
 }
 
 function formatApiError(

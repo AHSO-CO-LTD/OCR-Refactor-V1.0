@@ -373,8 +373,8 @@ function registerDesktopIpc() {
       filePath: result.filePaths[0] ?? null,
     };
   });
-  ipcMain.handle("desktop:exit-app", (_event, mode?: DesktopExitMode) => {
-    return requestAppShutdown(mode === "app-and-hardware" ? mode : "app-only");
+  ipcMain.handle("desktop:exit-app", () => {
+    return requestAppShutdown("app-and-hardware");
   });
   ipcMain.handle("desktop:restart-app", () => {
     return requestAppRestart();
@@ -983,7 +983,7 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
   });
 }
 
-async function requestAppShutdown(mode: DesktopExitMode = "app-only") {
+async function requestAppShutdown(mode: DesktopExitMode = "app-and-hardware") {
   if (shutdownPromise) {
     return shutdownPromise;
   }

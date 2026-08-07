@@ -1,5 +1,5 @@
 import { ForbiddenException } from '@nestjs/common';
-import { LineResultSavePolicy } from '@prisma/client';
+import { LineResultSavePolicy, TrainingImageSavePolicy } from '@prisma/client';
 import { InspectionsController } from './inspections.controller';
 
 describe('InspectionsController line result settings permissions', () => {
@@ -34,6 +34,39 @@ describe('InspectionsController line result settings permissions', () => {
     expect(() =>
       controller.updateLineResultSettings(
         { showNgRecognizedText: false },
+        { id: 'engineer-1', username: 'engineer', role: 'engineer' },
+      ),
+    ).toThrow(ForbiddenException);
+
+    expect(updateLineResultSettings).not.toHaveBeenCalled();
+  });
+
+  it.each(['admin', 'dev'])(
+    'allows %s to manage training image settings',
+    async (role) => {
+      await expect(
+        controller.updateLineResultSettings(
+          {
+            trainingImageEnabled: true,
+            trainingImageSaveFolderPath: 'C:\\OCR\\TrainingImages',
+            trainingImageSavePolicy: TrainingImageSavePolicy.ng,
+          },
+          { id: `${role}-1`, username: role, role },
+        ),
+      ).resolves.toEqual({ data: {} });
+
+      expect(updateLineResultSettings).toHaveBeenCalledWith({
+        trainingImageEnabled: true,
+        trainingImageSaveFolderPath: 'C:\\OCR\\TrainingImages',
+        trainingImageSavePolicy: TrainingImageSavePolicy.ng,
+      });
+    },
+  );
+
+  it('blocks engineer from managing training image settings', () => {
+    expect(() =>
+      controller.updateLineResultSettings(
+        { trainingImageEnabled: true },
         { id: 'engineer-1', username: 'engineer', role: 'engineer' },
       ),
     ).toThrow(ForbiddenException);

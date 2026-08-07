@@ -39,6 +39,17 @@ export class UpdateMachineInactivitySettingsDto {
   timeoutSeconds!: number;
 }
 
+export class UpdateMachineStopSettingsDto {
+  @IsInt()
+  @Min(0)
+  @Max(300)
+  delaySeconds!: number;
+
+  @IsOptional()
+  @IsBoolean()
+  powerOffCameraOnStop?: boolean;
+}
+
 export enum MachineTestResultDto {
   OK = 'OK',
   NG = 'NG',

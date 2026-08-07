@@ -515,8 +515,10 @@ export function LineAnimationTestPanel({
         const response = await getMachineRuntimeStatus(accessToken);
         if (!active) return;
         setPlcConnected(!response.data.plcOffline);
-        setTestMachineRuntimeState(response.data.state);
-        applyTestRuntimeControls(response.data);
+        if (response.data.idleReason !== "machine_stop") {
+          setTestMachineRuntimeState(response.data.state);
+          applyTestRuntimeControls(response.data);
+        }
       } catch {
         if (active) setPlcConnected(false);
         // The shared application watchdog surfaces backend connectivity errors.
@@ -809,8 +811,10 @@ export function LineAnimationTestPanel({
         accessToken,
         controls,
       );
-      setTestMachineRuntimeState(response.data.state);
-      applyTestRuntimeControls(response.data);
+      if (response.data.idleReason !== "machine_stop") {
+        setTestMachineRuntimeState(response.data.state);
+        applyTestRuntimeControls(response.data);
+      }
       if (controls.liveCameraEnabled === true) {
         setRuntimeCapturedImageSrc("");
       }

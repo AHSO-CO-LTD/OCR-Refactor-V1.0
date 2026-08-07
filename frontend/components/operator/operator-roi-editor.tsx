@@ -207,6 +207,8 @@ export type OperatorRoiEditorProps = {
   cameraDisplayName?: string;
   showClock?: boolean;
   connectionOverlay?: ReactNode;
+  machineStopCountdownSeconds?: number | null;
+  machineStopOverlay?: boolean;
   clockLeadingContent?: ReactNode;
   clockTrailingContent?: ReactNode;
   footerLeadingContent?: ReactNode;
@@ -228,6 +230,8 @@ export function OperatorRoiEditor({
   cameraDisplayName,
   showClock = false,
   connectionOverlay,
+  machineStopCountdownSeconds = null,
+  machineStopOverlay = false,
   clockLeadingContent,
   clockTrailingContent,
   footerLeadingContent,
@@ -908,6 +912,35 @@ export function OperatorRoiEditor({
       ) : null}
       {connectionOverlay ? (
         <div className="absolute inset-0 z-50">{connectionOverlay}</div>
+      ) : null}
+      {machineStopCountdownSeconds !== null &&
+      machineStopCountdownSeconds > 0 ? (
+        <div
+          className="pointer-events-none absolute left-1/2 top-1/2 z-40 -translate-x-1/2 -translate-y-1/2 border-2 border-orange-200 bg-orange-600/95 px-8 py-5 text-center text-white shadow-[0_8px_24px_rgba(0,0,0,0.35)]"
+          role="status"
+          aria-live="assertive"
+        >
+          <p className="text-xl font-semibold">
+            {t("machine.stopCountdown").replace(
+              "{seconds}",
+              String(machineStopCountdownSeconds),
+            )}
+          </p>
+          <p className="mt-1 text-5xl font-black leading-none">
+            {machineStopCountdownSeconds}
+          </p>
+        </div>
+      ) : null}
+      {machineStopOverlay ? (
+        <div
+          className="operator-stop-overlay"
+          role="status"
+          aria-live="assertive"
+        >
+          <div className="border-[5px] border-white px-[clamp(3rem,5vw,6rem)] py-[clamp(1.75rem,3vw,3.5rem)] text-[clamp(7rem,13vw,12rem)] font-black leading-none tracking-normal text-white drop-shadow-[0_6px_20px_rgba(0,0,0,0.45)]">
+            STOP
+          </div>
+        </div>
       ) : null}
     </div>
   );

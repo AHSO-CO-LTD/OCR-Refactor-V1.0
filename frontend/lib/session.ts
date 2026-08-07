@@ -1,8 +1,14 @@
-import type { SessionUser } from "./api";
+import type { RoleCode, RoleWithPermissions, SessionUser } from "./api";
 
 const TOKEN_KEY = "ocr_access_token";
 const USER_KEY = "ocr_session_user";
 const REMEMBER_KEY = "ocr_remember_session";
+const DEV_ROLE_PREVIEW_KEY = "ocr_dev_role_preview";
+
+export type DevRolePreview = {
+  permissions: string[];
+  role: RoleCode;
+};
 
 type SaveSessionOptions = {
   remember?: boolean;
@@ -13,6 +19,7 @@ export function saveSession(
   user: SessionUser,
   options: SaveSessionOptions = {},
 ) {
+  clearDevRolePreview();
   const userPayload = JSON.stringify(user);
 
   if (options.remember) {
@@ -84,6 +91,79 @@ export function refreshSession(accessToken: string, user: SessionUser) {
 }
 
 export function getStoredUser() {
+  return applyDevRolePreview(getAuthenticatedStoredUser());
+}
+
+export function getDevRolePreview() {
+  const storage = getTemporaryStorage();
+  const rawPreview = storage?.getItem(DEV_ROLE_PREVIEW_KEY);
+
+  if (!rawPreview) {
+    return null;
+  }
+
+  try {
+    const preview = JSON.parse(rawPreview) as DevRolePreview;
+    const validRole = ["dev", "admin", "engineer", "operator"].includes(
+      preview.role,
+    );
+    const validPermissions = Array.isArray(preview.permissions) &&
+      preview.permissions.every((permission) => typeof permission === "string");
+
+    if (validRole && validPermissions) {
+      return preview;
+    }
+  } catch {
+    // Clear the malformed preview state below.
+  }
+
+  clearDevRolePreview();
+  return null;
+}
+
+export function setDevRolePreview(role: RoleWithPermissions) {
+  const user = getAuthenticatedStoredUser();
+  const storage = getTemporaryStorage();
+
+  if (!user?.isDev || !storage) {
+    return;
+  }
+
+  if (role.code === "dev") {
+    clearDevRolePreview();
+    return;
+  }
+
+  storage.setItem(
+    DEV_ROLE_PREVIEW_KEY,
+    JSON.stringify({
+      permissions: role.permissions,
+      role: role.code,
+    } satisfies DevRolePreview),
+  );
+}
+
+export function clearDevRolePreview() {
+  getTemporaryStorage()?.removeItem(DEV_ROLE_PREVIEW_KEY);
+}
+
+export function applyDevRolePreview(
+  user: SessionUser | null,
+  preview = getDevRolePreview(),
+) {
+  if (!user?.isDev || !preview) {
+    return user;
+  }
+
+  return {
+    ...user,
+    isDev: preview.role === "dev",
+    permissions: preview.permissions,
+    role: preview.role,
+  } satisfies SessionUser;
+}
+
+function getAuthenticatedStoredUser() {
   const rawUser =
     getTemporaryStorage()?.getItem(USER_KEY) ??
     getRememberedStoredUser();
@@ -103,6 +183,7 @@ export function getStoredUser() {
 export function clearSession() {
   getTemporaryStorage()?.removeItem(TOKEN_KEY);
   getTemporaryStorage()?.removeItem(USER_KEY);
+  clearDevRolePreview();
   clearPersistentSession();
 }
 

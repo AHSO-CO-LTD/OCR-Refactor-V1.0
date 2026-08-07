@@ -166,6 +166,7 @@ export type CameraIdentity = {
   toolName: string | null;
   identified: boolean;
   identifiedAt: string | null;
+  detected: boolean;
   connectable: boolean;
   status: "identified" | "unidentified" | "disabled";
   active: boolean;
@@ -276,6 +277,7 @@ export type TestInspectionImageResult = {
 export type TestSessionImageResult = "OK" | "NG" | "UNKNOWN" | "ERROR";
 
 export type LineResultSavePolicy = "all" | "ok" | "ng" | "none";
+export type TrainingImageSavePolicy = "all" | "ok" | "ng";
 
 export type LineSessionEndReason =
   | "line_stop"
@@ -291,6 +293,9 @@ export type LineResultSettings = {
   newSessionOnLineStop: boolean;
   newSessionOnProductChange: boolean;
   showNgRecognizedText: boolean;
+  trainingImageEnabled: boolean;
+  trainingImageSaveFolderPath: string | null;
+  trainingImageSavePolicy: TrainingImageSavePolicy;
   createdAt: string;
   updatedAt: string;
 };
@@ -302,6 +307,9 @@ export type LineResultSettingsPayload = {
   newSessionOnLineStop?: boolean;
   newSessionOnProductChange?: boolean;
   showNgRecognizedText?: boolean;
+  trainingImageEnabled?: boolean;
+  trainingImageSaveFolderPath?: string | null;
+  trainingImageSavePolicy?: TrainingImageSavePolicy;
 };
 
 export type TestSessionReportPayload = {
@@ -452,6 +460,14 @@ export type ApplyProductProfilePayload = {
   applyToAll?: boolean;
 };
 
+export type ApplyCameraSettingsToAllProductsPayload = {
+  camera: CameraProfile;
+};
+
+export type ApplyRoiRegionsToAllProductsPayload = {
+  roiRegions: RoiRegion[];
+};
+
 export type BulkProductOcrTestSettingsPayload = {
   rotateTestImageClockwise: boolean;
   applyToAll: boolean;
@@ -500,6 +516,8 @@ export type PlcConfiguration = {
   okPulseDurationMs: number;
   inactivityTimeoutEnabled: boolean;
   sleepTimeSeconds: number;
+  stopDelaySeconds: number;
+  powerOffCameraOnStop: boolean;
   customKeys: PlcCustomKey[];
   createdAt: string;
   updatedAt: string;
@@ -513,6 +531,8 @@ export type PlcConfigurationPayload = Omit<
   | "customKeys"
   | "inactivityTimeoutEnabled"
   | "sleepTimeSeconds"
+  | "stopDelaySeconds"
+  | "powerOffCameraOnStop"
 > & {
   customKeys: Array<Omit<PlcCustomKey, "id">>;
 };
@@ -580,6 +600,52 @@ export type LineOperationReportSummary = {
   }>;
 };
 
+export type LineOperationResultSession = {
+  id: string;
+  productId: string;
+  productCode: string;
+  startedBy: string;
+  endedBy: string;
+  startedAt: string;
+  stoppedAt: string | null;
+  totalResults: number;
+  okResults: number;
+  ngResults: number;
+  unknownResults: number;
+  results: Array<{
+    captureId: string;
+    capturedAt: string;
+    imageAvailable: boolean;
+    result: "OK" | "NG" | "UNKNOWN";
+    slots: Array<{
+      slotIndex: number | null;
+      slotLabel: string | null;
+      expectedText: string | null;
+      rawText: string | null;
+      rows: string[];
+      result: "OK" | "NG" | "UNKNOWN";
+      errorMessage: string | null;
+    }>;
+  }>;
+};
+
+export type PaginatedLineOperationResultsResponse = {
+  data: LineOperationResultSession[];
+  meta: {
+    page: number;
+    limit: number;
+    total: number;
+    totalPages: number;
+  };
+  summary: {
+    sessions: number;
+    results: number;
+    ok: number;
+    ng: number;
+    unknown: number;
+  };
+};
+
 export type MachineRuntimeStep = {
   id: string;
   status: "pending" | "running" | "done" | "failed";
@@ -602,6 +668,7 @@ export type MachineRuntimeStatus = {
   steps: MachineRuntimeStep[];
   message: string | null;
   countdownSeconds: number | null;
+  stopCountdownSeconds: number | null;
   lastActivityAt: string | null;
   inactivityTimeoutEnabled: boolean;
   sleepTimeSeconds: number;
@@ -637,6 +704,12 @@ export type MachineRuntimeFrame = {
 export type MachineInactivitySettings = {
   enabled: boolean;
   timeoutSeconds: number;
+  configured: boolean;
+};
+
+export type MachineStopSettings = {
+  delaySeconds: number;
+  powerOffCameraOnStop: boolean;
   configured: boolean;
 };
 
@@ -989,6 +1062,35 @@ export async function getLineOperationReport(
     throw new ApiError(await parseError(response), response.status);
   }
   return (await response.json()) as { data: LineOperationReportSummary };
+}
+
+export async function listLineOperationResults(
+  accessToken: string,
+  limit = 5,
+  page = 1,
+) {
+  const response = await fetch(
+    `${API_BASE_URL}/inspections/line-reports/results?limit=${limit}&page=${page}`,
+    { headers: { Authorization: `Bearer ${accessToken}` } },
+  );
+  if (!response.ok) {
+    throw new ApiError(await parseError(response), response.status);
+  }
+  return (await response.json()) as PaginatedLineOperationResultsResponse;
+}
+
+export async function getLineOperationResultImage(
+  accessToken: string,
+  captureId: string,
+) {
+  const response = await fetch(
+    `${API_BASE_URL}/inspections/line-reports/results/${encodeURIComponent(captureId)}/image`,
+    { headers: { Authorization: `Bearer ${accessToken}` } },
+  );
+  if (!response.ok) {
+    throw new ApiError(await parseError(response), response.status);
+  }
+  return (await response.json()) as { data: { imageBase64: string } };
 }
 
 export async function downloadLineOperationReport(
@@ -1740,6 +1842,52 @@ export async function applyProductProfile(
   return (await response.json()) as { data: { updatedCount: number } };
 }
 
+export async function applyCameraSettingsToAllProducts(
+  accessToken: string,
+  payload: ApplyCameraSettingsToAllProductsPayload,
+) {
+  const response = await fetch(
+    `${API_BASE_URL}/products/camera-settings/apply-all`,
+    {
+      method: "PATCH",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(payload),
+    },
+  );
+
+  if (!response.ok) {
+    throw new ApiError(await parseError(response), response.status);
+  }
+
+  return (await response.json()) as { data: { updatedCount: number } };
+}
+
+export async function applyRoiRegionsToAllProducts(
+  accessToken: string,
+  payload: ApplyRoiRegionsToAllProductsPayload,
+) {
+  const response = await fetch(
+    `${API_BASE_URL}/products/roi-regions/apply-all`,
+    {
+      method: "PATCH",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(payload),
+    },
+  );
+
+  if (!response.ok) {
+    throw new ApiError(await parseError(response), response.status);
+  }
+
+  return (await response.json()) as { data: { updatedCount: number } };
+}
+
 export async function getPlcConfiguration(accessToken: string) {
   return plcRequest<{ data: PlcConfiguration | null }>(
     accessToken,
@@ -1910,6 +2058,27 @@ export async function updateMachineInactivitySettings(
   return plcRequest<{ data: MachineInactivitySettings }>(
     accessToken,
     "/plc/machine/inactivity-settings",
+    { method: "PUT", body: JSON.stringify(settings) },
+  );
+}
+
+export async function getMachineStopSettings(accessToken: string) {
+  return plcRequest<{ data: MachineStopSettings }>(
+    accessToken,
+    "/plc/machine/stop-settings",
+  );
+}
+
+export async function updateMachineStopSettings(
+  accessToken: string,
+  settings: Pick<
+    MachineStopSettings,
+    "delaySeconds" | "powerOffCameraOnStop"
+  >,
+) {
+  return plcRequest<{ data: MachineStopSettings }>(
+    accessToken,
+    "/plc/machine/stop-settings",
     { method: "PUT", body: JSON.stringify(settings) },
   );
 }

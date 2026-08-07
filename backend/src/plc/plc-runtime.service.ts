@@ -407,6 +407,40 @@ export class PlcRuntimeService
     };
   }
 
+  async getMachineStopSettings() {
+    const config = await this.loadConfig();
+    return {
+      data: {
+        delaySeconds: config?.stopDelaySeconds ?? 5,
+        powerOffCameraOnStop: config?.powerOffCameraOnStop ?? true,
+        configured: Boolean(config),
+      },
+    };
+  }
+
+  async updateMachineStopSettings(settings: {
+    delaySeconds: number;
+    powerOffCameraOnStop?: boolean;
+  }) {
+    await this.requireConfig();
+    const config = await this.prisma.plcConfig.update({
+      where: { id: PLC_CONFIG_ID },
+      data: {
+        stopDelaySeconds: settings.delaySeconds,
+        ...(settings.powerOffCameraOnStop === undefined
+          ? {}
+          : { powerOffCameraOnStop: settings.powerOffCameraOnStop }),
+      },
+    });
+    return {
+      data: {
+        delaySeconds: config.stopDelaySeconds,
+        powerOffCameraOnStop: config.powerOffCameraOnStop,
+        configured: true,
+      },
+    };
+  }
+
   private async performConnect() {
     const config = await this.requireConfig();
     this.intentionalDisconnect = false;
@@ -1134,6 +1168,8 @@ export class PlcRuntimeService
       okPulseDurationMs: config.okPulseDurationMs,
       inactivityTimeoutEnabled: config.inactivityTimeoutEnabled,
       sleepTimeSeconds: config.sleepTimeSeconds,
+      stopDelaySeconds: config.stopDelaySeconds,
+      powerOffCameraOnStop: config.powerOffCameraOnStop,
       customKeys: config.customKeys,
       createdAt: config.createdAt.toISOString(),
       updatedAt: config.updatedAt.toISOString(),

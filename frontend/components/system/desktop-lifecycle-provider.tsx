@@ -19,7 +19,6 @@ import { Button } from "@/components/ui/button";
 import { ConfirmModal } from "@/components/ui/confirm-modal";
 import { useVirtualKeyboard } from "@/components/ui/virtual-keyboard";
 import {
-  type DesktopExitMode,
   type DesktopShutdownStageId,
   type DesktopShutdownStageUpdate,
   getDesktopBridge,
@@ -45,7 +44,6 @@ export function DesktopLifecycleProvider({
   const [restartConfirmOpen, setRestartConfirmOpen] = useState(false);
   const [shutdownLoading, setShutdownLoading] = useState(false);
   const [shutdownMode, setShutdownMode] = useState<"exit" | "restart">("exit");
-  const [exitMode, setExitMode] = useState<DesktopExitMode>("app-only");
   const [shutdownError, setShutdownError] = useState<string | null>(null);
   const [shutdownStages, setShutdownStages] = useState<
     Partial<Record<DesktopShutdownStageId, DesktopShutdownStageUpdate>>
@@ -64,7 +62,6 @@ export function DesktopLifecycleProvider({
 
     closeKeyboard();
     setRestartConfirmOpen(false);
-    setExitMode("app-only");
     setShutdownError(null);
     setShutdownStages({});
     setExitConfirmOpen(true);
@@ -109,7 +106,7 @@ export function DesktopLifecycleProvider({
     };
   }, [requestExit, t]);
 
-  async function executeExitApp(selectedMode: DesktopExitMode) {
+  async function executeExitApp() {
     const bridge = getDesktopBridge();
 
     if (!bridge) {
@@ -121,28 +118,16 @@ export function DesktopLifecycleProvider({
     setExitConfirmOpen(false);
     setShutdownLoading(true);
     setShutdownMode("exit");
-    setExitMode(selectedMode);
     setShutdownError(null);
     setShutdownStages({});
-    setShutdownStatus(
-      selectedMode === "app-and-hardware"
-        ? t("settings.hardwareShutdownPreparing")
-        : t("settings.shutdownPreparing"),
-    );
-    const toastId = toast.loading(
-      selectedMode === "app-and-hardware"
-        ? t("settings.hardwareShutdownTitle")
-        : t("settings.exiting"),
-    );
+    setShutdownStatus(t("settings.hardwareShutdownPreparing"));
+    const toastId = toast.loading(t("settings.hardwareShutdownTitle"));
 
     try {
-      await bridge.exitApp(selectedMode);
+      await bridge.exitApp("app-and-hardware");
     } catch {
       toast.dismiss(toastId);
-      const errorMessage =
-        selectedMode === "app-and-hardware"
-          ? t("settings.hardwareShutdownError")
-          : t("settings.exitError");
+      const errorMessage = t("settings.hardwareShutdownError");
       toast.error(errorMessage);
       setShutdownError(errorMessage);
       setShutdownStatus(errorMessage);
@@ -150,7 +135,7 @@ export function DesktopLifecycleProvider({
   }
 
   function confirmExitApp() {
-    void executeExitApp(exitMode);
+    void executeExitApp();
   }
 
   function cancelExitAppShutdown() {
@@ -198,31 +183,10 @@ export function DesktopLifecycleProvider({
         open={exitConfirmOpen}
         title={t("settings.exitConfirmTitle")}
         description={t("settings.exitConfirmDescription")}
-        modeTitle={t("settings.exitModeTitle")}
-        mode={exitMode}
-        options={[
-          {
-            mode: "app-only",
-            label: t("settings.exitModeAppOnly"),
-            description: t("settings.exitModeAppOnlyDescription"),
-          },
-          {
-            mode: "app-and-hardware",
-            label: t("settings.exitModeHardware"),
-            description: t("settings.exitModeHardwareDescription"),
-          },
-        ]}
-        checklistTitle={t("settings.shutdownChecklistTitle")}
-        checklist={createShutdownChecklist(exitMode, {}, t)}
-        confirmLabel={
-          exitMode === "app-and-hardware"
-            ? t("settings.exitHardwareConfirm")
-            : t("settings.exitConfirm")
-        }
+        confirmLabel={t("settings.exitHardwareConfirm")}
         cancelLabel={t("common.cancel")}
         onConfirm={confirmExitApp}
         onCancel={() => setExitConfirmOpen(false)}
-        onModeChange={setExitMode}
       />
       <ConfirmModal
         open={restartConfirmOpen}
@@ -240,36 +204,24 @@ export function DesktopLifecycleProvider({
           error={shutdownError}
           checklist={
             shutdownMode === "exit"
-              ? createShutdownChecklist(exitMode, shutdownStages, t)
+              ? createShutdownChecklist(shutdownStages, t)
               : undefined
           }
           title={
             shutdownMode === "restart"
               ? t("settings.restartTitle")
-              : exitMode === "app-and-hardware"
-                ? t("settings.hardwareShutdownTitle")
-                : t("settings.shutdownTitle")
+              : t("settings.hardwareShutdownTitle")
           }
           description={
             shutdownMode === "restart"
               ? t("settings.restartDescription")
-              : exitMode === "app-and-hardware"
-                ? t("settings.hardwareShutdownDescription")
-                : t("settings.shutdownDescription")
+              : t("settings.hardwareShutdownDescription")
           }
           retryLabel={t("settings.shutdownRetry")}
-          appOnlyLabel={t("settings.shutdownAppOnlyFallback")}
           cancelLabel={t("common.cancel")}
           onRetry={
             shutdownMode === "exit" && shutdownError
-              ? () => void executeExitApp(exitMode)
-              : undefined
-          }
-          onAppOnly={
-            shutdownMode === "exit" &&
-            shutdownError &&
-            exitMode === "app-and-hardware"
-              ? () => void executeExitApp("app-only")
+              ? () => void executeExitApp()
               : undefined
           }
           onCancel={
@@ -296,25 +248,21 @@ export function useDesktopLifecycle() {
 }
 
 function ShutdownOverlay({
-  appOnlyLabel,
   cancelLabel,
   checklist,
   description,
   detail,
   error,
-  onAppOnly,
   onCancel,
   onRetry,
   retryLabel,
   title,
 }: {
-  appOnlyLabel: string;
   cancelLabel: string;
   checklist?: ShutdownChecklistItem[];
   description: string;
   detail: string;
   error: string | null;
-  onAppOnly?: () => void;
   onCancel?: () => void;
   onRetry?: () => void;
   retryLabel: string;
@@ -363,11 +311,6 @@ function ShutdownOverlay({
             {onCancel ? (
               <Button type="button" variant="outline" onClick={onCancel}>
                 {cancelLabel}
-              </Button>
-            ) : null}
-            {onAppOnly ? (
-              <Button type="button" variant="outline" onClick={onAppOnly}>
-                {appOnlyLabel}
               </Button>
             ) : null}
             <Button type="button" onClick={onRetry}>
@@ -432,29 +375,25 @@ function formatShutdownStatus(
 }
 
 function createShutdownChecklist(
-  mode: DesktopExitMode,
   updates: Partial<Record<DesktopShutdownStageId, DesktopShutdownStageUpdate>>,
   t: (key: TranslationKey) => string,
 ): ShutdownChecklistItem[] {
   const definitions: Array<{
     id: DesktopShutdownStageId;
     label: TranslationKey;
-  }> =
-    mode === "app-and-hardware"
-      ? [
-          { id: "camera", label: "settings.shutdownStepCamera" },
-          {
-            id: "cameraOutputs",
-            label: "settings.shutdownStepCameraOutputs",
-          },
-          {
-            id: "remainingSignals",
-            label: "settings.shutdownStepSignals",
-          },
-          { id: "plc", label: "settings.shutdownStepPlc" },
-          { id: "app", label: "settings.shutdownStepApp" },
-        ]
-      : [{ id: "app", label: "settings.shutdownStepApp" }];
+  }> = [
+    { id: "camera", label: "settings.shutdownStepCamera" },
+    {
+      id: "cameraOutputs",
+      label: "settings.shutdownStepCameraOutputs",
+    },
+    {
+      id: "remainingSignals",
+      label: "settings.shutdownStepSignals",
+    },
+    { id: "plc", label: "settings.shutdownStepPlc" },
+    { id: "app", label: "settings.shutdownStepApp" },
+  ];
 
   return definitions
     .map(({ id, label }) => ({

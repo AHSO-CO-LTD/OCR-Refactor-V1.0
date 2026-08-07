@@ -194,6 +194,10 @@ export function OperatorRuntimePanel() {
   const [autoRunning, setAutoRunning] = useState(false);
   const [machineRuntimeState, setMachineRuntimeState] =
     useState<MachineRuntimeStatus["state"]>("inactive");
+  const [machineIdleReason, setMachineIdleReason] =
+    useState<MachineRuntimeStatus["idleReason"]>(null);
+  const [machineStopCountdownSeconds, setMachineStopCountdownSeconds] =
+    useState<number | null>(null);
   const [plcConnected, setPlcConnected] = useState(false);
   const [operationMode, setOperationMode] = useState<"manual" | "auto">(
     "auto",
@@ -240,6 +244,9 @@ export function OperatorRuntimePanel() {
     !["stopping", "idle_machine_stop", "idle_capture_timeout"].includes(
       machineRuntimeState,
     );
+  const machineStopActive =
+    machineIdleReason === "machine_stop" &&
+    ["stopping", "idle_machine_stop"].includes(machineRuntimeState);
 
   useEffect(() => {
     if (!keypadOpen) {
@@ -913,6 +920,8 @@ export function OperatorRuntimePanel() {
   }
 
   function applyRuntimeControls(status: MachineRuntimeStatus) {
+    setMachineIdleReason(status.idleReason);
+    setMachineStopCountdownSeconds(status.stopCountdownSeconds);
     if (status.operationMode === "manual" || status.operationMode === "auto") {
       setOperationMode(status.operationMode);
     }
@@ -1432,6 +1441,8 @@ export function OperatorRuntimePanel() {
               product={displayProduct}
               onChange={handleRoiChange}
               overlayResult={overlayResult}
+              machineStopCountdownSeconds={machineStopCountdownSeconds}
+              machineStopOverlay={machineStopActive}
               okCount={okCount}
               ngCount={ngCount}
               roiStatuses={roiStatuses}
@@ -1464,7 +1475,7 @@ export function OperatorRuntimePanel() {
                 />
               }
               connectionOverlay={
-                dataSource === "api" ? (
+                !machineStopActive && dataSource === "api" ? (
                   <CameraConnectionOverlay
                     status={livePreviewConnectionStatus}
                     deviceName={

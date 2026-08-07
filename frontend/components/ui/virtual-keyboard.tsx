@@ -317,7 +317,7 @@ function VirtualKeyboardPanel({
       : currentValue;
 
   return (
-    <div className="pointer-events-none fixed inset-0 z-[70]">
+    <div className="pointer-events-none fixed inset-0 z-[120]">
       <div
         ref={panelRef}
         data-virtual-keyboard-panel

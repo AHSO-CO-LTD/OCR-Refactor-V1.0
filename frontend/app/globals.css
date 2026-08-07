@@ -239,7 +239,8 @@ input[type="radio"]:not(:disabled) {
 }
 
 .operator-ok-overlay,
-.operator-ng-overlay {
+.operator-ng-overlay,
+.operator-stop-overlay {
   pointer-events: none;
   position: absolute;
   inset: 0;
@@ -260,6 +261,12 @@ input[type="radio"]:not(:disabled) {
   color: #ffffff;
   background: rgba(179, 25, 25, 0.8);
   animation: operator-ng-blink 1250ms ease-in-out both;
+}
+
+.operator-stop-overlay {
+  z-index: 60;
+  color: #ffffff;
+  background: rgba(234, 88, 12, 0.9);
 }
 
 @keyframes operator-roi-scan-line-move {

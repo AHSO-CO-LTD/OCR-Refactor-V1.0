@@ -1,7 +1,12 @@
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { InspectionStatus, LineResultSavePolicy } from '@prisma/client';
+import {
+  InspectionResult,
+  InspectionStatus,
+  LineResultSavePolicy,
+  TrainingImageSavePolicy,
+} from '@prisma/client';
 import { PrismaService } from '../database/prisma.service';
 import { DeviceToolService } from '../device-tool/device-tool.service';
 import { InspectionsService } from './inspections.service';
@@ -205,5 +210,53 @@ describe('InspectionsService PLC capture', () => {
       'No completed detection is available to latch',
     );
     expect(findFirst).not.toHaveBeenCalled();
+  });
+
+  it('only selects configured OK or NG training results and always skips UNKNOWN', () => {
+    const service = new InspectionsService(
+      {} as PrismaService,
+      {} as DeviceToolService,
+    );
+    const shouldSave = service['shouldSaveTrainingImage'].bind(service);
+
+    expect(shouldSave(TrainingImageSavePolicy.all, InspectionResult.OK)).toBe(
+      true,
+    );
+    expect(shouldSave(TrainingImageSavePolicy.all, InspectionResult.NG)).toBe(
+      true,
+    );
+    expect(
+      shouldSave(TrainingImageSavePolicy.all, InspectionResult.UNKNOWN),
+    ).toBe(false);
+    expect(shouldSave(TrainingImageSavePolicy.ok, InspectionResult.OK)).toBe(
+      true,
+    );
+    expect(shouldSave(TrainingImageSavePolicy.ok, InspectionResult.NG)).toBe(
+      false,
+    );
+    expect(shouldSave(TrainingImageSavePolicy.ng, InspectionResult.OK)).toBe(
+      false,
+    );
+    expect(shouldSave(TrainingImageSavePolicy.ng, InspectionResult.NG)).toBe(
+      true,
+    );
+  });
+
+  it('encodes ROI pixels as an uncompressed 24-bit BMP', () => {
+    const service = new InspectionsService(
+      {} as PrismaService,
+      {} as DeviceToolService,
+    );
+    const bitmap = service['toBitmap24'](
+      Buffer.from([0xff, 0x00, 0x00]),
+      1,
+      1,
+      3,
+    );
+
+    expect(bitmap.subarray(0, 2).toString('ascii')).toBe('BM');
+    expect(bitmap.readUInt32LE(10)).toBe(54);
+    expect(bitmap.readUInt16LE(28)).toBe(24);
+    expect(bitmap.subarray(54, 57)).toEqual(Buffer.from([0x00, 0x00, 0xff]));
   });
 });

@@ -4,7 +4,7 @@ contextBridge.exposeInMainWorld("ocrDesktop", {
   applyWindowSettings(settings: Record<string, unknown>) {
     return ipcRenderer.invoke("desktop:apply-window-settings", settings);
   },
-  exitApp(mode: "app-and-hardware" | "app-only" = "app-only") {
+  exitApp(mode: "app-and-hardware" | "app-only" = "app-and-hardware") {
     return ipcRenderer.invoke("desktop:exit-app", mode);
   },
   checkForUpdates(accessToken: string) {

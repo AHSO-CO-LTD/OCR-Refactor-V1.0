@@ -5,25 +5,33 @@ import { ChevronDown, LogOut, Power, RefreshCw, Settings, Usb } from "lucide-rea
 import { useEffect, useId, useRef, useState } from "react";
 import { LanguageToggle } from "@/components/language-toggle";
 import { Button } from "@/components/ui/button";
-import type { SessionUser } from "@/lib/api";
+import type { RoleWithPermissions, SessionUser } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
 type AccountMenuProps = {
   canManageDesktopSettings: boolean;
+  canPreviewRoles?: boolean;
   donglePresent: boolean;
   onExitApp: () => void | Promise<void>;
   onLogout: () => void | Promise<void>;
+  onRolePreviewChange?: (role: RoleWithPermissions) => void;
   onRestartApp: () => void | Promise<void>;
+  rolePreviewActive?: boolean;
+  rolePreviewRoles?: RoleWithPermissions[];
   user: SessionUser;
 };
 
 export function AccountMenu({
   canManageDesktopSettings,
+  canPreviewRoles = false,
   donglePresent,
   onExitApp,
   onLogout,
+  onRolePreviewChange,
   onRestartApp,
+  rolePreviewActive = false,
+  rolePreviewRoles = [],
   user,
 }: AccountMenuProps) {
   const { t } = useI18n();
@@ -89,7 +97,9 @@ export function AccountMenu({
             {user.username}
           </span>
           <span className="block truncate text-xs font-medium text-slate-500">
-            {roleLabel}
+            {rolePreviewActive
+              ? `${roleLabel} · ${t("devRolePreview.activeSuffix")}`
+              : roleLabel}
           </span>
         </span>
         <ChevronDown
@@ -105,7 +115,7 @@ export function AccountMenu({
           id={menuId}
           role="menu"
           aria-label={t("session.accountMenu")}
-          className="absolute inset-x-0 top-[calc(100%+0.5rem)] z-30 border border-slate-200 bg-white p-1 shadow-sm"
+          className="absolute inset-x-0 top-[calc(100%+0.5rem)] z-[110] border border-slate-200 bg-white p-1 shadow-sm"
         >
           <div className="border-b border-slate-200 px-3 py-3">
             <div className="text-xs font-medium text-slate-500">
@@ -113,6 +123,40 @@ export function AccountMenu({
             </div>
             <LanguageToggle className="mt-2" fullWidth />
           </div>
+
+          {canPreviewRoles && rolePreviewRoles.length > 0 ? (
+            <div className="border-b border-slate-200 px-3 py-3">
+              <div className="text-xs font-medium text-slate-500">
+                {t("devRolePreview.title")}
+              </div>
+              <div className="mt-2 grid grid-cols-2 gap-2" role="group">
+                {rolePreviewRoles.map((role) => {
+                  const selected = role.code === user.role;
+
+                  return (
+                    <button
+                      key={role.code}
+                      type="button"
+                      role="menuitemradio"
+                      aria-checked={selected}
+                      className={cn(
+                        "min-h-10 border px-2 text-sm font-semibold transition",
+                        selected
+                          ? "border-cyan-300 bg-cyan-50 text-cyan-900"
+                          : "border-slate-200 text-slate-700 hover:bg-slate-50",
+                      )}
+                      onClick={() => {
+                        setOpen(false);
+                        onRolePreviewChange?.(role);
+                      }}
+                    >
+                      {t(`role.${role.code}`)}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          ) : null}
 
           {canManageDesktopSettings ? (
             <Link

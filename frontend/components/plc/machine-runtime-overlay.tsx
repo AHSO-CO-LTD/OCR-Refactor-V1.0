@@ -21,7 +21,6 @@ import {
   type MachineRuntimeStatus,
   type MachineRuntimeStep,
 } from "@/lib/api";
-import type { RoleCode } from "@/lib/api";
 import { getDesktopBridge } from "@/lib/desktop";
 import { useI18n } from "@/lib/i18n";
 import { getAccessToken } from "@/lib/session";
@@ -30,12 +29,10 @@ const POLL_INTERVAL_MS = 500;
 
 type MachineRuntimeOverlayProps = {
   enabled: boolean;
-  role?: RoleCode;
 };
 
 export function MachineRuntimeOverlay({
   enabled,
-  role,
 }: MachineRuntimeOverlayProps) {
   const { apiError, t } = useI18n();
   const [status, setStatus] = useState<MachineRuntimeStatus | null>(null);
@@ -48,7 +45,14 @@ export function MachineRuntimeOverlay({
   );
   const pollingRef = useRef(false);
   const noticeKey = buildNoticeKey(status);
-  const canDismiss = canDismissNotice(status, role);
+  const canDismiss = canDismissNotice(status);
+  const machineStopOverlayActive =
+    status?.idleReason === "machine_stop" &&
+    ["stopping", "idle_machine_stop"].includes(status.state);
+  const machineStartTransitionActive =
+    status !== null &&
+    !status.plcOffline &&
+    ["resuming", "waiting_camera"].includes(status.state);
 
   const refresh = useCallback(async () => {
     if (!enabled || pollingRef.current) return;
@@ -174,6 +178,8 @@ export function MachineRuntimeOverlay({
   if (
     !enabled ||
     !status ||
+    machineStopOverlayActive ||
+    machineStartTransitionActive ||
     status.state === "inactive" ||
     (canDismiss &&
       noticeKey !== null &&
@@ -379,11 +385,9 @@ function buildNoticeKey(status: MachineRuntimeStatus | null) {
 
 function canDismissNotice(
   status: MachineRuntimeStatus | null,
-  role?: RoleCode,
 ) {
   if (!status) return false;
   if (status.plcOffline) return true;
-  if (status.state === "idle_machine_stop") return role !== "operator";
   return ["waiting_camera", "restart_required", "error"].includes(
     status.state,
   );

@@ -126,18 +126,30 @@ export class DeviceToolService {
   }
 
   async listCameraIdentities() {
+    const detectedIdentities = await this.discoverAndUpsertCameraIdentities();
+    return this.listCameraIdentitiesWithDetection(detectedIdentities);
+  }
+
+  private async listCameraIdentitiesWithDetection(
+    detectedIdentities: Array<{ serial: string }>,
+  ) {
     const identities = await this.prisma.cameraIdentity.findMany({
       orderBy: [{ active: 'desc' }, { displayName: 'asc' }, { serial: 'asc' }],
     });
+    const detectedSerials = new Set(
+      detectedIdentities.map((identity) => identity.serial),
+    );
 
     return {
-      data: identities.map((identity) => this.toCameraIdentity(identity)),
+      data: identities.map((identity) =>
+        this.toCameraIdentity(identity, detectedSerials.has(identity.serial)),
+      ),
     };
   }
 
   async syncCameraIdentities() {
-    await this.discoverAndUpsertCameraIdentities();
-    return this.listCameraIdentities();
+    const detectedIdentities = await this.discoverAndUpsertCameraIdentities();
+    return this.listCameraIdentitiesWithDetection(detectedIdentities);
   }
 
   async updateCameraIdentity(
@@ -1258,21 +1270,24 @@ export class DeviceToolService {
     };
   }
 
-  private toCameraIdentity(identity: {
-    active: boolean;
-    createdAt: Date;
-    displayName: string;
-    driver: string;
-    id: string;
-    identifiedAt: Date | null;
-    interfaceName: string | null;
-    lastSeenAt: Date | null;
-    modelName: string | null;
-    serial: string;
-    toolName: string | null;
-    updatedAt: Date;
-    vendor: string | null;
-  }) {
+  private toCameraIdentity(
+    identity: {
+      active: boolean;
+      createdAt: Date;
+      displayName: string;
+      driver: string;
+      id: string;
+      identifiedAt: Date | null;
+      interfaceName: string | null;
+      lastSeenAt: Date | null;
+      modelName: string | null;
+      serial: string;
+      toolName: string | null;
+      updatedAt: Date;
+      vendor: string | null;
+    },
+    detected = false,
+  ) {
     return {
       id: identity.id,
       serial: identity.serial,
@@ -1284,7 +1299,10 @@ export class DeviceToolService {
       toolName: identity.toolName,
       identified: Boolean(identity.identifiedAt),
       identifiedAt: identity.identifiedAt?.toISOString() ?? null,
-      connectable: Boolean(identity.identifiedAt && identity.active),
+      detected,
+      connectable: Boolean(
+        detected && identity.identifiedAt && identity.active,
+      ),
       status: this.getCameraIdentityStatus(identity),
       active: identity.active,
       lastSeenAt: identity.lastSeenAt?.toISOString() ?? null,

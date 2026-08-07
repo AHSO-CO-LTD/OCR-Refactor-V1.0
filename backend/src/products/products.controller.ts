@@ -26,6 +26,8 @@ import { CurrentUser } from '../auth/current-user.decorator';
 import { PERMISSIONS } from '../common/constants/permissions';
 import type { AuthenticatedRequest } from '../common/types/authenticated-request';
 import { ApplyProductProfileDto } from './dto/apply-product-profile.dto';
+import { ApplyCameraSettingsToAllProductsDto } from './dto/apply-camera-settings-to-all-products.dto';
+import { ApplyRoiRegionsToAllProductsDto } from './dto/apply-roi-regions-to-all-products.dto';
 import { BulkUpdateProductAiSettingsDto } from './dto/bulk-update-product-ai-settings.dto';
 import { BulkUpdateProductOcrTestSettingsDto } from './dto/bulk-update-product-ocr-test-settings.dto';
 import { CreateProductProfileDto } from './dto/product-profile.dto';
@@ -111,6 +113,13 @@ export class ProductsController {
     return this.productsService.updateProductRoiRegions(id, dto.roiRegions);
   }
 
+  @ApiOperation({ summary: 'Apply ROI regions to all product profiles' })
+  @Patch('roi-regions/apply-all')
+  @RequirePermissions(PERMISSIONS.ROI_EDIT)
+  applyRoiRegionsToAllProducts(@Body() dto: ApplyRoiRegionsToAllProductsDto) {
+    return this.productsService.applyRoiRegionsToAllProducts(dto);
+  }
+
   @ApiOperation({ summary: 'Update product batch size for runtime' })
   @Patch(':id/batch-size')
   @RequireAnyPermission(
@@ -123,6 +132,15 @@ export class ProductsController {
     @Body() dto: UpdateProductBatchSizeDto,
   ) {
     return this.productsService.updateProductBatchSize(id, dto);
+  }
+
+  @ApiOperation({ summary: 'Apply camera settings to all product profiles' })
+  @Patch('camera-settings/apply-all')
+  @RequirePermissions(PERMISSIONS.PRODUCT_MANAGE)
+  applyCameraSettingsToAllProducts(
+    @Body() dto: ApplyCameraSettingsToAllProductsDto,
+  ) {
+    return this.productsService.applyCameraSettingsToAllProducts(dto);
   }
 
   @ApiOperation({
