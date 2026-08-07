@@ -21,11 +21,11 @@ const presetOptions: Array<{
   width: number;
   height: number;
 }> = [
-  { value: "factory", labelKey: "settings.presetFactory", width: 1280, height: 1080 },
+  { value: "factory", labelKey: "settings.presetFactory", width: 1280, height: 1024 },
   { value: "hd", labelKey: "settings.presetHd", width: 1366, height: 768 },
   { value: "fullHd", labelKey: "settings.presetFullHd", width: 1920, height: 1080 },
   { value: "fourThree", labelKey: "settings.presetFourThree", width: 1280, height: 960 },
-  { value: "custom", labelKey: "settings.presetCustom", width: 1280, height: 1080 },
+  { value: "custom", labelKey: "settings.presetCustom", width: 1280, height: 1024 },
 ];
 
 export function DesktopSettingsPanel() {

@@ -14,6 +14,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import {
   ApiError,
+  disconnectPlc,
   getMachineRuntimeStatus,
   reconnectMachinePlc,
   resumeMachineOperation,
@@ -26,19 +27,32 @@ import { getAccessToken } from "@/lib/session";
 
 const POLL_INTERVAL_MS = 500;
 
-export function MachineRuntimeOverlay({ enabled }: { enabled: boolean }) {
+type MachineRuntimeOverlayProps = {
+  enabled: boolean;
+};
+
+export function MachineRuntimeOverlay({
+  enabled,
+}: MachineRuntimeOverlayProps) {
   const { apiError, t } = useI18n();
   const [status, setStatus] = useState<MachineRuntimeStatus | null>(null);
   const [resuming, setResuming] = useState(false);
   const [restarting, setRestarting] = useState(false);
   const [reconnectingPlc, setReconnectingPlc] = useState(false);
+  const [disconnectingPlc, setDisconnectingPlc] = useState(false);
   const [dismissedNoticeKey, setDismissedNoticeKey] = useState<string | null>(
     null,
   );
   const pollingRef = useRef(false);
-  const plcNoticeKey = status?.plcOffline
-    ? (status.plcErrorMessage ?? "offline")
-    : null;
+  const noticeKey = buildNoticeKey(status);
+  const canDismiss = canDismissNotice(status);
+  const machineStopOverlayActive =
+    status?.idleReason === "machine_stop" &&
+    ["stopping", "idle_machine_stop"].includes(status.state);
+  const machineStartTransitionActive =
+    status !== null &&
+    !status.plcOffline &&
+    ["resuming", "waiting_camera"].includes(status.state);
 
   const refresh = useCallback(async () => {
     if (!enabled || pollingRef.current) return;
@@ -132,16 +146,44 @@ export function MachineRuntimeOverlay({ enabled }: { enabled: boolean }) {
     }
   }
 
+  async function handleDisconnectPlc() {
+    const accessToken = getAccessToken();
+    if (!accessToken) {
+      toast.error(t("users.missingSession"));
+      return;
+    }
+
+    setDisconnectingPlc(true);
+    const toastId = toast.loading(t("plc.disconnecting"));
+    try {
+      await disconnectPlc(accessToken);
+      await refresh();
+      toast.success(t("plc.disconnectSuccess"), { id: toastId });
+    } catch (cause) {
+      const message =
+        cause instanceof ApiError
+          ? apiError(cause.message, "plc.disconnectError")
+          : t("plc.disconnectError");
+      toast.error(message, { id: toastId });
+    } finally {
+      setDisconnectingPlc(false);
+    }
+  }
+
   function handleDismiss() {
-    setDismissedNoticeKey(plcNoticeKey);
+    setDismissedNoticeKey(noticeKey);
     toast.info(t("machine.noticeDismissed"));
   }
 
   if (
     !enabled ||
     !status ||
+    machineStopOverlayActive ||
+    machineStartTransitionActive ||
     status.state === "inactive" ||
-    (plcNoticeKey !== null && dismissedNoticeKey === plcNoticeKey) ||
+    (canDismiss &&
+      noticeKey !== null &&
+      dismissedNoticeKey === noticeKey) ||
     (status.state === "running" && !status.plcOffline)
   ) {
     return null;
@@ -188,7 +230,7 @@ export function MachineRuntimeOverlay({ enabled }: { enabled: boolean }) {
               {overlayDescription(status, t)}
             </p>
           </div>
-          {plcOffline ? (
+          {canDismiss ? (
             <Button
               type="button"
               variant="ghost"
@@ -256,16 +298,23 @@ export function MachineRuntimeOverlay({ enabled }: { enabled: boolean }) {
               <Button
                 type="button"
                 variant="outline"
-                className="h-12 min-w-40"
-                onClick={handleDismiss}
+                className="h-12 min-w-44"
+                onClick={() => void handleDisconnectPlc()}
+                disabled={disconnectingPlc || reconnectingPlc}
               >
-                {t("machine.closeNotice")}
+                <XCircle
+                  className={
+                    disconnectingPlc ? "h-4 w-4 animate-pulse" : "h-4 w-4"
+                  }
+                  aria-hidden="true"
+                />
+                {t("plc.disconnect")}
               </Button>
               <Button
                 type="button"
                 className="h-12 min-w-52"
                 onClick={() => void handleReconnectPlc()}
-                disabled={reconnectingPlc}
+                disabled={reconnectingPlc || disconnectingPlc}
               >
                 <RefreshCcw
                   className={
@@ -276,6 +325,16 @@ export function MachineRuntimeOverlay({ enabled }: { enabled: boolean }) {
                 {t("machine.reconnectPlc")}
               </Button>
             </>
+          ) : null}
+          {canDismiss && !plcOffline ? (
+            <Button
+              type="button"
+              variant="outline"
+              className="h-12 min-w-40"
+              onClick={handleDismiss}
+            >
+              {t("machine.closeNotice")}
+            </Button>
           ) : null}
           {waitingForManualResume ? (
             <Button
@@ -308,6 +367,29 @@ export function MachineRuntimeOverlay({ enabled }: { enabled: boolean }) {
         </footer>
       </section>
     </div>
+  );
+}
+
+function buildNoticeKey(status: MachineRuntimeStatus | null) {
+  if (!status) return null;
+  if (status.plcOffline) {
+    return `plc:${status.plcErrorMessage ?? status.message ?? "offline"}`;
+  }
+  const transitionStartedAt =
+    status.steps.find((step) => step.id === "signal")?.at ??
+    status.steps.find((step) => step.id === "running")?.at ??
+    status.steps[0]?.at ??
+    status.updatedAt;
+  return `${status.idleReason ?? "runtime"}:${transitionStartedAt}`;
+}
+
+function canDismissNotice(
+  status: MachineRuntimeStatus | null,
+) {
+  if (!status) return false;
+  if (status.plcOffline) return true;
+  return ["waiting_camera", "restart_required", "error"].includes(
+    status.state,
   );
 }
 

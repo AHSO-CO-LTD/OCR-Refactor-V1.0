@@ -8,7 +8,7 @@ The frontend should prioritize:
 - sonner for toast notifications
 - Recharts for charts
 - shadcn chart patterns for chart wrappers and dashboard visualization
-- responsive layouts that are optimized first for the factory machine screen size: 1280x1080
+- responsive layouts that are optimized first for the factory machine screen size: 1280x1024
 - single-screen touchscreen workflows with virtual-keyboard-friendly inputs and large touch targets
 
 ## Current Setup
@@ -49,7 +49,7 @@ Current frontend status:
 - Settings includes an admin/dev-only Inactivity tab. It controls the persisted automatic pause toggle and timeout, while global throttled user interaction keeps an active operation awake. The PLC configuration form no longer duplicates the timeout field.
 - AppShell warms up camera status/device discovery in the background for users with camera or inspection permissions.
 - Factory deployment assumptions now include a single touchscreen display, so setup/runtime screens must avoid hover-only interaction and support on-screen keyboard entry.
-- Responsive hardening is still being finalized, with 1280x1080 as the primary validation viewport.
+- Responsive hardening is still being finalized, with 1280x1024 as the primary validation viewport.
 
 ## Rules
 
@@ -59,18 +59,18 @@ Current frontend status:
 - Keep charts operational and readable, not decorative.
 - Keep Vietnamese UI copy accented.
 - Every user-facing page, modal, error screen, validation message, empty state, and notification must use the i18n layer and follow the user's previously selected language.
-- Treat 1280x1080 as the primary validation viewport for admin and operator screens.
-- At 1280x1080, the application must avoid page-level horizontal scrolling. Wide tables may scroll inside their own bordered container.
+- Treat 1280x1024 as the primary validation viewport for admin and operator screens.
+- At 1280x1024, the application must avoid page-level horizontal scrolling. Wide tables may scroll inside their own bordered container.
 - Header, sidebar, and navbar must stay fixed as application chrome. Only the current page/tab content area should scroll.
 - Use responsive grids with `minmax(0, 1fr)`, `overflow-x-auto` for dense tables, and controlled widths for sidebars/forms.
-- Do not rely only on `xl`/large desktop layouts. Check mobile, tablet, laptop, 1280x1080 factory screen, and wider desktop behavior.
-- Keep action buttons reachable and readable at 1280x1080; avoid layouts where forms and dense tables compete side by side unless enough content width remains.
+- Do not rely only on `xl`/large desktop layouts. Check mobile, tablet, laptop, 1280x1024 factory screen, and wider desktop behavior.
+- Keep action buttons reachable and readable at 1280x1024; avoid layouts where forms and dense tables compete side by side unless enough content width remains.
 - Role/admin screens must not expose protected `admin/dev` permission editing to normal admin users. Frontend hiding is required for UX, but backend authorization remains mandatory.
 - Treat factory setup and runtime screens as touch-first. Important actions must have clear visible buttons, touch targets should be comfortably large, and numeric/text entry should work cleanly with the Windows on-screen keyboard.
 
 ## Immediate Frontend Next Step
 
-1. Validate dashboard, roles, users, and products at 1280x1080.
+1. Validate dashboard, roles, users, and products at 1280x1024.
 2. Fix any page-level horizontal overflow; keep table overflow inside table containers.
 3. Re-check mobile, tablet, 1024x768, 1366x768, 1536x864, and 1920x1080.
 4. Finish Product module UI hardening and persisted save/load verification.
@@ -81,7 +81,7 @@ Current frontend status:
 Primary target:
 
 ```text
-1280x1080
+1280x1024
 ```
 
 Secondary validation sizes:
@@ -95,4 +95,4 @@ Secondary validation sizes:
 1920x1080  full HD desktop
 ```
 
-All future UI work should be implemented so the 1280x1080 factory viewport feels intentionally designed, not merely "not broken".
+All future UI work should be implemented so the 1280x1024 factory viewport feels intentionally designed, not merely "not broken".

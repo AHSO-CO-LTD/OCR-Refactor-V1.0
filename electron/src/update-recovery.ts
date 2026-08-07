@@ -35,6 +35,7 @@ export type UpdateRecoveryNotice = {
 type UpdateRecoveryManagerOptions = {
   onLog: (message: string) => void;
   programDataRoot: string;
+  runtimeRoot: string;
   userDataRoot: string;
 };
 
@@ -63,6 +64,7 @@ export class UpdateRecoveryManager {
     );
     await fs.mkdir(backupDirectory, { recursive: true });
 
+    await this.ensureCanonicalRuntimeEnv();
     this.options.onLog("[update] Backing up runtime configuration...");
     const backedUpFiles = await this.backupConfiguration(backupDirectory);
     const databaseBackupPath = join(backupDirectory, "database.dump");
@@ -243,6 +245,22 @@ export class UpdateRecoveryManager {
       throw new Error("Runtime .env was not found; update cannot create a safe checkpoint.");
     }
     return backedUpFiles;
+  }
+
+  private async ensureCanonicalRuntimeEnv() {
+    const canonicalEnvPath = join(this.options.programDataRoot, ".env");
+    if (existsSync(canonicalEnvPath)) return;
+
+    const legacyCandidates = [
+      join(this.options.runtimeRoot, ".env"),
+      join(this.options.runtimeRoot, "backend", ".env"),
+    ];
+    const legacyEnvPath = legacyCandidates.find((candidate) => existsSync(candidate));
+    if (!legacyEnvPath) return;
+
+    await fs.mkdir(this.options.programDataRoot, { recursive: true });
+    await fs.copyFile(legacyEnvPath, canonicalEnvPath);
+    this.options.onLog("[update] Migrated runtime .env to ProgramData.");
   }
 
   private async restoreConfiguration(files: BackedUpFile[]) {

@@ -175,6 +175,12 @@ function cameraDeviceValue(device: CameraDevice) {
   return device.identityId ?? device.identity_id ?? device.friendly_name;
 }
 
+function isSelectableCameraDevice(device: CameraDevice) {
+  return Boolean(
+    device.connectable && (device.identityId ?? device.identity_id),
+  );
+}
+
 function regionFromClientPoint(
   point: Point,
   element: HTMLDivElement | null,
@@ -805,6 +811,18 @@ export function ProductProfileForm({
 
     if (draft.batchSize < 1) {
       messages.push(t("products.validationBatchSize"));
+    }
+
+    if (
+      !hideCameraAndRoi &&
+      draft.camera.sourceType === "usb" &&
+      !cameraDevices.some(
+        (device) =>
+          isSelectableCameraDevice(device) &&
+          cameraDeviceValue(device) === draft.camera.cameraIdentityId,
+      )
+    ) {
+      messages.push(t("products.cameraSelectionRequired"));
     }
 
     if (draft.roiRegions.length > maxRoiRegions) {
@@ -1823,11 +1841,10 @@ export function ProductProfileForm({
                           ? t("products.cameraDevicesLoading")
                           : t("products.selectCameraDevice")}
                       </option>
-                      {cameraDevices.map((device) => (
+                      {cameraDevices.filter(isSelectableCameraDevice).map((device) => (
                         <option
                           key={`${device.index}-${device.serial_number ?? device.friendly_name}`}
                           value={cameraDeviceValue(device)}
-                          disabled={!device.connectable}
                         >
                           #{device.index} {device.friendly_name}
                           {device.serial_number ? ` · ${device.serial_number}` : ""}
@@ -1836,21 +1853,15 @@ export function ProductProfileForm({
                             : ""}
                         </option>
                       ))}
-                      {draft.camera.deviceName &&
-                      !cameraDevices.some(
-                        (device) =>
-                          cameraDeviceValue(device) ===
-                          (draft.camera.cameraIdentityId ??
-                            draft.camera.deviceName),
-                      ) ? (
-                        <option value={draft.camera.deviceName}>
-                          {draft.camera.deviceName}
-                        </option>
-                      ) : null}
                     </Select>
+                    {cameraDevices.filter(isSelectableCameraDevice).length === 0 ? (
+                      <div className="mt-2 border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                        {t("products.noAvailableCamera")}
+                      </div>
+                    ) : null}
                     {cameraDeviceError ? (
                       <div className="mt-2 border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-                        {t("products.cameraManualFallback")}
+                        {t("products.cameraDevicesLoadError")}
                       </div>
                     ) : null}
                   </label>
@@ -1866,22 +1877,6 @@ export function ProductProfileForm({
                     }
                   />
                 )}
-                {draft.camera.sourceType === "usb" && cameraDeviceError ? (
-                  <TextField
-                    label={t("products.manualDeviceName")}
-                    value={draft.camera.deviceName ?? ""}
-                    onChange={(value) =>
-                      setDraft((current) => ({
-                        ...current,
-                        camera: {
-                          ...current.camera,
-                          cameraIdentityId: undefined,
-                          deviceName: value,
-                        },
-                      }))
-                    }
-                  />
-                ) : null}
                 {draft.camera.sourceType !== "usb" ? null : (
                   <div className="hidden min-[900px]:block" />
                 )}

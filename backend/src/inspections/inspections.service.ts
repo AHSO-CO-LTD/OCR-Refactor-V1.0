@@ -2,6 +2,7 @@ import {
   BadRequestException,
   ConflictException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { randomUUID } from 'crypto';
@@ -13,7 +14,9 @@ import {
   LineResultSavePolicy,
   LineSessionEndReason,
   Prisma,
+  TrainingImageSavePolicy,
 } from '@prisma/client';
+import sharp from 'sharp';
 import { PrismaService } from '../database/prisma.service';
 import { DeviceToolService } from '../device-tool/device-tool.service';
 import { CameraProfileDto } from '../products/dto/product-profile.dto';
@@ -33,6 +36,8 @@ const productInclude = {
 };
 
 const LINE_RESULT_SETTINGS_ID = 'default';
+const STARTUP_CAMERA_RETRY_WINDOW_MS = 60_000;
+const STARTUP_CAMERA_RETRY_INTERVAL_MS = 2_000;
 
 type ProductWithProfile = Prisma.ProductGetPayload<{
   include: typeof productInclude;
@@ -40,8 +45,22 @@ type ProductWithProfile = Prisma.ProductGetPayload<{
 
 type InspectionJobWithLogs = Prisma.InspectionJobGetPayload<{
   include: {
+    endedBy: {
+      select: {
+        fullName: true;
+        id: true;
+        username: true;
+      };
+    };
     logs: {
       orderBy: { capturedAt: 'desc' };
+    };
+    operator: {
+      select: {
+        fullName: true;
+        id: true;
+        username: true;
+      };
     };
   };
 }>;
@@ -70,6 +89,7 @@ type RunningCameraFrame = {
 
 @Injectable()
 export class InspectionsService {
+  private readonly logger = new Logger(InspectionsService.name);
   private latestCompletedLineDetection: CompletedLineDetection | null = null;
 
   constructor(
@@ -103,11 +123,7 @@ export class InspectionsService {
       orderBy: { createdAt: 'desc' },
     });
 
-    if (
-      existingRunningJob &&
-      (existingRunningJob.productId !== product.id ||
-        existingRunningJob.operatorId !== user.id)
-    ) {
+    if (existingRunningJob && existingRunningJob.productId !== product.id) {
       throw new ConflictException('Another inspection job is already running');
     }
 
@@ -243,11 +259,7 @@ export class InspectionsService {
       where: { status: InspectionStatus.running },
       orderBy: { createdAt: 'desc' },
     });
-    if (
-      existingRunningJob &&
-      (existingRunningJob.productId !== product.id ||
-        existingRunningJob.operatorId !== user.id)
-    ) {
+    if (existingRunningJob && existingRunningJob.productId !== product.id) {
       throw new ConflictException('Another inspection job is already running');
     }
 
@@ -359,6 +371,12 @@ export class InspectionsService {
         imagePath,
         capturedAt,
       });
+      await this.saveTrainingRoiImages({
+        capturedAt,
+        imageBase64: completedDetection.imageBase64,
+        product: completedDetection.product,
+        scan: completedDetection.scan,
+      });
     } catch (error) {
       if (signal?.aborted && imagePath) {
         await unlink(imagePath).catch(() => undefined);
@@ -444,7 +462,7 @@ export class InspectionsService {
     } satisfies RunningCameraFrame;
   }
 
-  async verifyRunningInspectionCameraFrame() {
+  async verifyRunningInspectionCameraFrame(signal?: AbortSignal) {
     const job = await this.prisma.inspectionJob.findFirst({
       where: { status: InspectionStatus.running },
       orderBy: { createdAt: 'desc' },
@@ -467,11 +485,15 @@ export class InspectionsService {
 
     await this.deviceToolService.ensureCameraReady(
       this.toCameraProfile(product),
+      signal,
     );
-    const frame = await this.deviceToolService.grabCameraFrame({
-      encodeFormat: '.jpg',
-      jpegQuality: 70,
-    });
+    const frame = await this.deviceToolService.grabCameraFrame(
+      {
+        encodeFormat: '.jpg',
+        jpegQuality: 70,
+      },
+      signal,
+    );
 
     if (!frame.image_base64) {
       throw new BadRequestException('Camera connected but returned no frame');
@@ -510,28 +532,47 @@ export class InspectionsService {
       );
     }
 
-    await this.deviceToolService.ensureCameraReady(
-      this.toCameraProfile(product),
-    );
-    const frame = await this.deviceToolService.grabCameraFrame({
-      encodeFormat: '.jpg',
-      jpegQuality: 70,
-    });
+    const deadline = Date.now() + STARTUP_CAMERA_RETRY_WINDOW_MS;
+    let lastError: unknown = new Error('Camera startup verification failed');
 
-    if (!frame.image_base64) {
-      throw new BadRequestException(
-        'Camera connected during startup but returned no frame',
-      );
+    while (Date.now() < deadline) {
+      try {
+        await this.deviceToolService.ensureCameraReady(
+          this.toCameraProfile(product),
+        );
+        const frame = await this.deviceToolService.grabCameraFrame({
+          encodeFormat: '.jpg',
+          jpegQuality: 70,
+        });
+
+        if (!frame.image_base64) {
+          throw new Error(
+            'Camera connected during startup but returned no frame',
+          );
+        }
+
+        return {
+          data: {
+            productId: product.id,
+            productCode: product.code,
+            width: frame.width,
+            height: frame.height,
+          },
+        };
+      } catch (error) {
+        lastError = error;
+        const remainingMs = deadline - Date.now();
+        if (remainingMs <= 0) break;
+        await new Promise((resolveDelay) =>
+          setTimeout(
+            resolveDelay,
+            Math.min(STARTUP_CAMERA_RETRY_INTERVAL_MS, remainingMs),
+          ),
+        );
+      }
     }
 
-    return {
-      data: {
-        productId: product.id,
-        productCode: product.code,
-        width: frame.width,
-        height: frame.height,
-      },
-    };
+    throw lastError;
   }
 
   async testImage(dto: TestInspectionImageDto) {
@@ -968,10 +1009,26 @@ export class InspectionsService {
       ? dto.saveFolderPath?.trim() || null
       : currentSettings.saveFolderPath;
     const savePolicy = dto.savePolicy ?? currentSettings.savePolicy;
+    const hasTrainingFolderPath = Object.prototype.hasOwnProperty.call(
+      dto,
+      'trainingImageSaveFolderPath',
+    );
+    const trainingImageSaveFolderPath = hasTrainingFolderPath
+      ? dto.trainingImageSaveFolderPath?.trim() || null
+      : currentSettings.trainingImageSaveFolderPath;
+    const trainingImageEnabled =
+      dto.trainingImageEnabled ?? currentSettings.trainingImageEnabled;
+    const trainingImageSavePolicy =
+      dto.trainingImageSavePolicy ?? currentSettings.trainingImageSavePolicy;
 
     if (savePolicy !== LineResultSavePolicy.none && !saveFolderPath) {
       throw new BadRequestException(
         'Line result save folder is required unless saving is disabled',
+      );
+    }
+    if (trainingImageEnabled && !trainingImageSaveFolderPath) {
+      throw new BadRequestException(
+        'Training image save folder is required when training capture is enabled',
       );
     }
 
@@ -988,6 +1045,9 @@ export class InspectionsService {
           currentSettings.newSessionOnProductChange,
         showNgRecognizedText:
           dto.showNgRecognizedText ?? currentSettings.showNgRecognizedText,
+        trainingImageEnabled,
+        trainingImageSaveFolderPath,
+        trainingImageSavePolicy,
       },
     });
 
@@ -997,10 +1057,17 @@ export class InspectionsService {
   async stopInspection(
     jobId: string,
     endReason: LineSessionEndReason = LineSessionEndReason.line_stop,
+    endedBy?: { id: string },
   ) {
     const job = await this.prisma.inspectionJob.findUnique({
       where: { id: jobId },
-      select: { id: true, status: true },
+      select: {
+        endedById: true,
+        endedByInferred: true,
+        id: true,
+        operatorId: true,
+        status: true,
+      },
     });
 
     if (!job) {
@@ -1011,10 +1078,14 @@ export class InspectionsService {
       job.status === InspectionStatus.failed
         ? InspectionStatus.failed
         : InspectionStatus.completed;
+    const endedById = job.endedById ?? endedBy?.id ?? job.operatorId;
+    const endedByInferred = job.endedById ? job.endedByInferred : !endedBy;
 
     await this.prisma.inspectionJob.update({
       where: { id: jobId },
       data: {
+        endedById,
+        endedByInferred,
         status: nextStatus,
         stoppedAt: new Date(),
         endReason,
@@ -1155,6 +1226,229 @@ export class InspectionsService {
     }
   }
 
+  private async saveTrainingRoiImages({
+    capturedAt,
+    imageBase64,
+    product,
+    scan,
+  }: {
+    capturedAt: Date;
+    imageBase64: string;
+    product: ProductWithProfile;
+    scan: ProductFrameScan;
+  }) {
+    try {
+      const settings = await this.ensureLineResultSettings();
+      if (
+        !settings.trainingImageEnabled ||
+        !settings.trainingImageSaveFolderPath
+      ) {
+        return;
+      }
+
+      const imageBuffer = Buffer.from(
+        imageBase64.replace(/^data:[^;]+;base64,/i, ''),
+        'base64',
+      );
+      const metadata = await sharp(imageBuffer).metadata();
+      if (!metadata.width || !metadata.height) {
+        throw new Error('Training source image has no dimensions');
+      }
+
+      const trainingDay = this.formatTrainingDay(capturedAt);
+      const targetDirectory = this.resolveInsideDirectory(
+        settings.trainingImageSaveFolderPath,
+        join(this.sanitizePathSegment(product.code), trainingDay),
+      );
+      await mkdir(targetDirectory, { recursive: true });
+
+      const expectedText = product.code.trim().toUpperCase();
+      const timestamp = capturedAt
+        .toISOString()
+        .replaceAll(':', '-')
+        .replace('T', '_')
+        .replace('Z', '');
+      const configuredWidth =
+        product.cameraConfig?.imageWidth ?? metadata.width;
+      const configuredHeight =
+        product.cameraConfig?.imageHeight ?? metadata.height;
+
+      for (const [scanIndex, region] of product.roiRegions.entries()) {
+        const slotResult = scan.results[scanIndex];
+        const evaluation = evaluateInspectionSlot({
+          rawText: slotResult?.text,
+          rows: slotResult?.rows,
+          errorMessage: slotResult?.error,
+          expectedText,
+        });
+        if (
+          !this.shouldSaveTrainingImage(
+            settings.trainingImageSavePolicy,
+            evaluation.result,
+          )
+        ) {
+          continue;
+        }
+
+        try {
+          const bitmap = await this.cropTrainingRoiAsBitmap({
+            configuredHeight,
+            configuredWidth,
+            imageBuffer,
+            imageHeight: metadata.height,
+            imageWidth: metadata.width,
+            region,
+            rotateImageClockwise: product.rotateTestImageClockwise,
+          });
+          const fileName = [
+            `ROI-${String(region.index).padStart(2, '0')}`,
+            evaluation.result,
+            timestamp,
+            randomUUID().slice(0, 8),
+          ].join('_');
+          await writeFile(join(targetDirectory, `${fileName}.bmp`), bitmap);
+        } catch (error) {
+          this.logger.error(
+            `Could not save training ROI ${region.index} for ${product.code}: ${this.getErrorMessage(error)}`,
+          );
+        }
+      }
+    } catch (error) {
+      this.logger.error(
+        `Could not save training images for ${product.code}: ${this.getErrorMessage(error)}`,
+      );
+    }
+  }
+
+  private async cropTrainingRoiAsBitmap({
+    configuredHeight,
+    configuredWidth,
+    imageBuffer,
+    imageHeight,
+    imageWidth,
+    region,
+    rotateImageClockwise,
+  }: {
+    configuredHeight: number;
+    configuredWidth: number;
+    imageBuffer: Buffer;
+    imageHeight: number;
+    imageWidth: number;
+    region: ProductWithProfile['roiRegions'][number];
+    rotateImageClockwise: boolean;
+  }) {
+    const containScale = Math.min(
+      configuredWidth / imageWidth,
+      configuredHeight / imageHeight,
+    );
+    const displayedWidth = imageWidth * containScale;
+    const displayedHeight = imageHeight * containScale;
+    const offsetX = (configuredWidth - displayedWidth) / 2;
+    const offsetY = (configuredHeight - displayedHeight) / 2;
+    const centerX = (region.x - offsetX) * (imageWidth / displayedWidth);
+    const centerY = (region.y - offsetY) * (imageHeight / displayedHeight);
+    const targetWidth = Math.max(
+      1,
+      Math.round(region.width * (imageWidth / displayedWidth)),
+    );
+    const targetHeight = Math.max(
+      1,
+      Math.round(region.height * (imageHeight / displayedHeight)),
+    );
+    const left = Math.max(
+      0,
+      Math.min(imageWidth - 1, Math.round(centerX - targetWidth / 2)),
+    );
+    const top = Math.max(
+      0,
+      Math.min(imageHeight - 1, Math.round(centerY - targetHeight / 2)),
+    );
+    const width = Math.max(1, Math.min(targetWidth, imageWidth - left));
+    const height = Math.max(1, Math.min(targetHeight, imageHeight - top));
+    const normalizedRotation = ((Number(region.rotation) % 360) + 360) % 360;
+    const rotation = rotateImageClockwise
+      ? 90
+      : (Math.round(normalizedRotation / 90) * 90) % 360;
+
+    let pipeline = sharp(imageBuffer).extract({ left, top, width, height });
+    if (rotation !== 0) pipeline = pipeline.rotate(rotation);
+    const raw = await pipeline
+      .resize(targetWidth, targetHeight, {
+        fit: 'contain',
+        background: { r: 0, g: 0, b: 0, alpha: 1 },
+      })
+      .removeAlpha()
+      .raw()
+      .toBuffer({ resolveWithObject: true });
+
+    return this.toBitmap24(
+      raw.data,
+      raw.info.width,
+      raw.info.height,
+      raw.info.channels,
+    );
+  }
+
+  private toBitmap24(
+    data: Buffer,
+    width: number,
+    height: number,
+    channels: number,
+  ) {
+    const bytesPerPixel = Math.max(3, channels);
+    const rowSize = Math.ceil((width * 3) / 4) * 4;
+    const pixelDataSize = rowSize * height;
+    const output = Buffer.alloc(54 + pixelDataSize);
+    output.write('BM', 0, 'ascii');
+    output.writeUInt32LE(output.length, 2);
+    output.writeUInt32LE(54, 10);
+    output.writeUInt32LE(40, 14);
+    output.writeInt32LE(width, 18);
+    output.writeInt32LE(height, 22);
+    output.writeUInt16LE(1, 26);
+    output.writeUInt16LE(24, 28);
+    output.writeUInt32LE(pixelDataSize, 34);
+
+    for (let outputRow = 0; outputRow < height; outputRow += 1) {
+      const sourceRow = height - outputRow - 1;
+      for (let column = 0; column < width; column += 1) {
+        const sourceOffset = (sourceRow * width + column) * bytesPerPixel;
+        const targetOffset = 54 + outputRow * rowSize + column * 3;
+        output[targetOffset] = data[sourceOffset + 2] ?? 0;
+        output[targetOffset + 1] = data[sourceOffset + 1] ?? 0;
+        output[targetOffset + 2] = data[sourceOffset] ?? 0;
+      }
+    }
+
+    return output;
+  }
+
+  private shouldSaveTrainingImage(
+    savePolicy: TrainingImageSavePolicy,
+    result: InspectionResult,
+  ) {
+    if (result === InspectionResult.UNKNOWN) return false;
+    if (savePolicy === TrainingImageSavePolicy.ok) {
+      return result === InspectionResult.OK;
+    }
+    if (savePolicy === TrainingImageSavePolicy.ng) {
+      return result === InspectionResult.NG;
+    }
+    return result === InspectionResult.OK || result === InspectionResult.NG;
+  }
+
+  private formatTrainingDay(value: Date) {
+    const parts = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Asia/Ho_Chi_Minh',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).formatToParts(value);
+    const part = (type: Intl.DateTimeFormatPartTypes) =>
+      parts.find((item) => item.type === type)?.value ?? '';
+    return `${part('year')}-${part('month')}-${part('day')}`;
+  }
+
   private async ensureLineResultSettings() {
     return this.prisma.lineResultSettings.upsert({
       where: { id: LINE_RESULT_SETTINGS_ID },
@@ -1165,6 +1459,8 @@ export class InspectionsService {
         newSessionOnLineStop: true,
         newSessionOnProductChange: true,
         showNgRecognizedText: true,
+        trainingImageEnabled: false,
+        trainingImageSavePolicy: TrainingImageSavePolicy.all,
       },
       update: {},
     });
@@ -1178,6 +1474,9 @@ export class InspectionsService {
     newSessionOnLineStop: boolean;
     newSessionOnProductChange: boolean;
     showNgRecognizedText: boolean;
+    trainingImageEnabled: boolean;
+    trainingImageSaveFolderPath: string | null;
+    trainingImageSavePolicy: TrainingImageSavePolicy;
     createdAt: Date;
     updatedAt: Date;
   }) {
@@ -1189,6 +1488,9 @@ export class InspectionsService {
       newSessionOnLineStop: settings.newSessionOnLineStop,
       newSessionOnProductChange: settings.newSessionOnProductChange,
       showNgRecognizedText: settings.showNgRecognizedText,
+      trainingImageEnabled: settings.trainingImageEnabled,
+      trainingImageSaveFolderPath: settings.trainingImageSaveFolderPath,
+      trainingImageSavePolicy: settings.trainingImageSavePolicy,
       createdAt: settings.createdAt.toISOString(),
       updatedAt: settings.updatedAt.toISOString(),
     };
@@ -1202,6 +1504,13 @@ export class InspectionsService {
           orderBy: [{ capturedAt: 'asc' }, { slotIndex: 'asc' }],
         },
         operator: {
+          select: {
+            id: true,
+            username: true,
+            fullName: true,
+          },
+        },
+        endedBy: {
           select: {
             id: true,
             username: true,
@@ -1278,6 +1587,10 @@ export class InspectionsService {
             operatorId: job.operatorId,
             operatorUsername: job.operator.username,
             operatorFullName: job.operator.fullName,
+            endedById: job.endedById,
+            endedByUsername: job.endedBy?.username ?? null,
+            endedByFullName: job.endedBy?.fullName ?? null,
+            endedByInferred: job.endedByInferred,
             savePolicy,
             saveBySession: settings.saveBySession,
             endReason: job.endReason ?? null,
@@ -1679,8 +1992,22 @@ export class InspectionsService {
     const job = await this.prisma.inspectionJob.findUnique({
       where: { id: jobId },
       include: {
+        endedBy: {
+          select: {
+            fullName: true,
+            id: true,
+            username: true,
+          },
+        },
         logs: {
           orderBy: [{ capturedAt: 'desc' }, { slotIndex: 'asc' }],
+        },
+        operator: {
+          select: {
+            fullName: true,
+            id: true,
+            username: true,
+          },
         },
       },
     });
@@ -1744,6 +2071,10 @@ export class InspectionsService {
       productId: product.id,
       productCode: product.code,
       operatorId: job.operatorId,
+      startedBy: job.operator,
+      endedById: job.endedById,
+      endedBy: job.endedBy,
+      endedByInferred: job.endedByInferred,
       startedAt: job.startedAt?.toISOString() ?? null,
       stoppedAt: job.stoppedAt?.toISOString() ?? null,
       endReason: job.endReason ?? null,

@@ -4,6 +4,8 @@ const electronPath = require("electron");
 const env = { ...process.env };
 delete env.ELECTRON_RUN_AS_NODE;
 env.AHSO_ELECTRON_SKIP_ADMIN_RELAUNCH ??= "1";
+env.BACKEND_PORT ??= "3979";
+env.FRONTEND_PORT ??= "3969";
 
 const child = spawn(electronPath, ["."], {
   cwd: require("node:path").resolve(__dirname, ".."),

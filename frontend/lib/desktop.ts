@@ -203,7 +203,7 @@ export const defaultDesktopWindowSettings: DesktopWindowSettings = {
   zoomFactor: 1,
   windowPreset: "factory",
   width: 1280,
-  height: 1080,
+  height: 1024,
 };
 
 export const defaultDesktopTestStorageSettings: DesktopTestStorageSettings = {

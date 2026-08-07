@@ -18,7 +18,8 @@ const copy = {
     exporting: "Saving startup log...",
     exitCancel: "Cancel",
     exitConfirm: "Exit app",
-    exitDescription: "Are you sure you want to exit the app?",
+    exitDescription:
+      "Exiting will safely turn off the camera, PLC, and local services before closing the app.",
     exitFailed: "Cannot close the local app cleanly.",
     exitTitle: "Confirm exit",
     exiting: "Closing local services...",
@@ -92,7 +93,8 @@ const copy = {
     exporting: "Đang lưu nhật ký khởi động...",
     exitCancel: "Hủy",
     exitConfirm: "Thoát app",
-    exitDescription: "Bạn có chắc chắn muốn thoát app không?",
+    exitDescription:
+      "Thoát app sẽ tắt an toàn camera, PLC và dịch vụ local trước khi đóng ứng dụng.",
     exitFailed: "Không thể đóng app local sạch sẽ.",
     exitTitle: "Xác nhận thoát app",
     exiting: "Đang đóng các dịch vụ local...",
@@ -387,25 +389,6 @@ export function createStartupDocument(snapshot: StartupSnapshot) {
             <p id="close-description"></p>
           </div>
         </div>
-        <div class="close-dialog__content">
-          <fieldset>
-            <legend id="close-mode-title"></legend>
-            <div class="close-options">
-              <label class="close-option">
-                <input id="close-mode-app" type="radio" name="close-mode" value="app-only" checked>
-                <span><strong id="close-mode-app-label"></strong><small id="close-mode-app-description"></small></span>
-              </label>
-              <label class="close-option">
-                <input id="close-mode-hardware" type="radio" name="close-mode" value="app-and-hardware">
-                <span><strong id="close-mode-hardware-label"></strong><small id="close-mode-hardware-description"></small></span>
-              </label>
-            </div>
-          </fieldset>
-          <div>
-            <h3 id="close-checklist-title" class="close-checklist-title"></h3>
-            <ol id="close-checklist" class="close-checklist"></ol>
-          </div>
-        </div>
         <div class="close-dialog__actions">
           <button id="close-cancel" class="button" type="button"></button>
           <button id="close-confirm" class="button close-dialog__confirm" type="button"></button>
@@ -415,62 +398,16 @@ export function createStartupDocument(snapshot: StartupSnapshot) {
     <script>
       const copies = ${serializedCopy};
       let startupSnapshot = ${serializedSnapshot};
-      let closeMode = "app-only";
-      let closeShutdownStages = {};
       const stageIds = ${serializeForScript([...systemStageIds, ...machineStageIds])};
 
       function getText() { return copies[startupSnapshot.language]; }
       function setText(id, value) { const element = document.getElementById(id); if (element) element.textContent = value; }
-      function getCloseStageIds() {
-        return closeMode === "app-and-hardware"
-          ? ["camera", "cameraOutputs", "remainingSignals", "plc", "app"]
-          : ["app"];
-      }
-      function renderCloseChecklist() {
-        const text = getText();
-        const checklist = document.getElementById("close-checklist");
-        checklist.replaceChildren();
-        getCloseStageIds().forEach((id) => {
-          const stage = closeShutdownStages[id] || { status: "pending" };
-          if (stage.status === "skipped") return;
-          const item = document.createElement("li");
-          item.dataset.status = stage.status;
-          const icon = document.createElement("span");
-          icon.className = "close-checklist__icon";
-          icon.textContent =
-            stage.status === "done"
-              ? "\u2713"
-              : stage.status === "failed"
-                ? "!"
-                : stage.status === "running"
-                  ? "\u21bb"
-                  : "\u00b7";
-          const label = document.createElement("span");
-          label.textContent = text.shutdownSteps[id];
-          item.append(icon, label);
-          checklist.append(item);
-        });
-      }
       function renderCloseDialog() {
         const text = getText();
         setText("close-title", text.exitTitle);
         setText("close-description", text.exitDescription);
-        setText("close-mode-title", text.exitModeTitle);
-        setText("close-mode-app-label", text.exitAppOnly);
-        setText("close-mode-app-description", text.exitAppOnlyDescription);
-        setText("close-mode-hardware-label", text.exitHardware);
-        setText("close-mode-hardware-description", text.exitHardwareDescription);
-        setText("close-checklist-title", text.shutdownChecklist);
         setText("close-cancel", text.exitCancel);
-        setText(
-          "close-confirm",
-          closeMode === "app-and-hardware"
-            ? text.exitHardwareConfirm
-            : text.exitConfirm,
-        );
-        document.getElementById("close-mode-app").checked = closeMode === "app-only";
-        document.getElementById("close-mode-hardware").checked = closeMode === "app-and-hardware";
-        renderCloseChecklist();
+        setText("close-confirm", text.exitHardwareConfirm);
       }
       function symbolFor(status) {
         if (status === "done") return "✓";
@@ -583,13 +520,8 @@ export function createStartupDocument(snapshot: StartupSnapshot) {
         document.getElementById("startup-shell").removeAttribute("aria-hidden");
       }
       function showCloseConfirmation() {
-        closeMode = "app-only";
-        closeShutdownStages = {};
         closeCancel.disabled = false;
         closeConfirm.disabled = false;
-        document
-          .querySelectorAll('input[name="close-mode"]')
-          .forEach((input) => { input.disabled = false; });
         document.getElementById("close-dialog").removeAttribute("aria-busy");
         renderCloseDialog();
         closeBackdrop.hidden = false;
@@ -597,16 +529,6 @@ export function createStartupDocument(snapshot: StartupSnapshot) {
         closeConfirm.focus();
       }
       closeCancel.addEventListener("click", hideCloseConfirmation);
-      document.getElementById("close-mode-app").addEventListener("change", () => {
-        closeMode = "app-only";
-        closeShutdownStages = {};
-        renderCloseDialog();
-      });
-      document.getElementById("close-mode-hardware").addEventListener("change", () => {
-        closeMode = "app-and-hardware";
-        closeShutdownStages = {};
-        renderCloseDialog();
-      });
       closeBackdrop.addEventListener("mousedown", (event) => {
         if (
           event.target === closeBackdrop &&
@@ -618,18 +540,15 @@ export function createStartupDocument(snapshot: StartupSnapshot) {
       });
       closeConfirm.addEventListener("click", async () => {
         const text = getText();
-        const closeModeInputs = document.querySelectorAll('input[name="close-mode"]');
         closeCancel.disabled = true;
         closeConfirm.disabled = true;
-        closeModeInputs.forEach((input) => { input.disabled = true; });
         setText("close-description", text.exiting);
         document.getElementById("close-dialog").setAttribute("aria-busy", "true");
         try {
-          await window.ocrDesktop.exitApp(closeMode);
+          await window.ocrDesktop.exitApp("app-and-hardware");
         } catch {
           closeCancel.disabled = false;
           closeConfirm.disabled = false;
-          closeModeInputs.forEach((input) => { input.disabled = false; });
           setText("close-description", text.exitFailed);
           document.getElementById("close-dialog").removeAttribute("aria-busy");
         }
@@ -645,10 +564,6 @@ export function createStartupDocument(snapshot: StartupSnapshot) {
         }
       });
       window.ocrDesktop.onCloseRequested(showCloseConfirmation);
-      window.ocrDesktop.onShutdownStage((stage) => {
-        closeShutdownStages[stage.id] = stage;
-        renderCloseChecklist();
-      });
       window.ocrDesktop.setCloseConfirmationReady(true);
       window.ocrDesktop.getStartupSnapshot().then(render);
       window.ocrDesktop.onStartupSnapshot(render);

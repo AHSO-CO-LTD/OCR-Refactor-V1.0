@@ -1,5 +1,10 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
-import { InspectionResult } from '@prisma/client';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
+import { readFile } from 'fs/promises';
+import { InspectionResult, Prisma } from '@prisma/client';
 import ExcelJS from 'exceljs';
 import { PrismaService } from '../database/prisma.service';
 
@@ -27,6 +32,144 @@ export class LineOperationReportService {
         groups: data.groups,
       },
     };
+  }
+
+  async listResultSessions(limit = 5, page = 1) {
+    const safeLimit = Math.max(1, Math.min(20, Math.trunc(limit) || 5));
+    const safePage = Math.max(1, Math.trunc(page) || 1);
+    const where = {
+      logs: { some: { plcCaptureId: { not: null } } },
+    };
+    const [total, jobs, resultStates] = await Promise.all([
+      this.prisma.inspectionJob.count({ where }),
+      this.prisma.inspectionJob.findMany({
+        where,
+        orderBy: { updatedAt: 'desc' },
+        skip: (safePage - 1) * safeLimit,
+        take: safeLimit,
+        include: {
+          logs: {
+            where: { plcCaptureId: { not: null } },
+            orderBy: [{ capturedAt: 'desc' }, { slotIndex: 'asc' }],
+          },
+          operator: { select: { fullName: true, username: true } },
+          endedBy: { select: { fullName: true, username: true } },
+        },
+      }),
+      this.prisma.inspectionLog.groupBy({
+        by: ['plcCaptureId', 'result'],
+        where: { plcCaptureId: { not: null } },
+      }),
+    ]);
+    const productIds = [...new Set(jobs.map((job) => job.productId))];
+    const products = productIds.length
+      ? await this.prisma.product.findMany({
+          where: { id: { in: productIds } },
+          select: { code: true, id: true },
+        })
+      : [];
+    const productCodes = new Map(
+      products.map((product) => [product.id, product.code]),
+    );
+
+    const resultByCaptureId = new Map<string, InspectionResult[]>();
+    for (const resultState of resultStates) {
+      if (!resultState.plcCaptureId) continue;
+      const current = resultByCaptureId.get(resultState.plcCaptureId) ?? [];
+      current.push(resultState.result);
+      resultByCaptureId.set(resultState.plcCaptureId, current);
+    }
+    const allResults = [...resultByCaptureId.values()].map((results) =>
+      this.aggregateResult(results),
+    );
+
+    return {
+      data: jobs.map((job) => {
+        const captures = new Map<string, typeof job.logs>();
+        for (const log of job.logs) {
+          if (!log.plcCaptureId) continue;
+          const current = captures.get(log.plcCaptureId) ?? [];
+          current.push(log);
+          captures.set(log.plcCaptureId, current);
+        }
+        const results = [...captures.entries()].map(([captureId, logs]) => {
+          const first = logs[0];
+          return {
+            captureId,
+            capturedAt: first.capturedAt.toISOString(),
+            imageAvailable: logs.some((log) => Boolean(log.imagePath)),
+            result: this.aggregateResult(logs.map((log) => log.result)),
+            slots: logs.map((log) => ({
+              errorMessage: log.errorMessage,
+              expectedText: log.expectedText,
+              rawText: log.text,
+              result: log.result,
+              rows: this.normalizeRows(log.rows),
+              slotIndex: log.slotIndex,
+              slotLabel: log.slotLabel,
+            })),
+          };
+        });
+
+        return {
+          id: job.id,
+          productCode: productCodes.get(job.productId) ?? job.productId,
+          productId: job.productId,
+          startedAt:
+            job.startedAt?.toISOString() ?? job.createdAt.toISOString(),
+          startedBy: job.operator.fullName || job.operator.username,
+          stoppedAt: job.stoppedAt?.toISOString() ?? null,
+          endedBy:
+            job.endedBy?.fullName ||
+            job.endedBy?.username ||
+            job.operator.fullName ||
+            job.operator.username,
+          results,
+          totalResults: results.length,
+          okResults: results.filter((result) => result.result === 'OK').length,
+          ngResults: results.filter((result) => result.result === 'NG').length,
+          unknownResults: results.filter(
+            (result) => result.result === 'UNKNOWN',
+          ).length,
+        };
+      }),
+      meta: {
+        limit: safeLimit,
+        page: safePage,
+        total,
+        totalPages: Math.max(1, Math.ceil(total / safeLimit)),
+      },
+      summary: {
+        sessions: total,
+        results: allResults.length,
+        ok: allResults.filter((result) => result === 'OK').length,
+        ng: allResults.filter((result) => result === 'NG').length,
+        unknown: allResults.filter((result) => result === 'UNKNOWN').length,
+      },
+    };
+  }
+
+  async getResultCaptureImage(captureId: string) {
+    const log = await this.prisma.inspectionLog.findFirst({
+      where: { imagePath: { not: null }, plcCaptureId: captureId },
+      select: { imagePath: true },
+    });
+    if (!log?.imagePath) {
+      throw new NotFoundException(
+        'No saved image is available for this result',
+      );
+    }
+
+    try {
+      const image = await readFile(log.imagePath);
+      return {
+        data: {
+          imageBase64: `data:image/jpeg;base64,${image.toString('base64')}`,
+        },
+      };
+    } catch {
+      throw new NotFoundException('Saved result image is no longer available');
+    }
   }
 
   async exportWorkbook(from?: string, to?: string, groupBy?: string) {
@@ -68,7 +211,9 @@ export class LineOperationReportService {
       { header: 'Capture ID', key: 'captureId', width: 38 },
       { header: 'Session ID', key: 'jobId', width: 30 },
       { header: 'Product code', key: 'productCode', width: 22 },
-      { header: 'Operator', key: 'operator', width: 22 },
+      { header: 'Started by', key: 'startedBy', width: 22 },
+      { header: 'Ended by', key: 'endedBy', width: 22 },
+      { header: 'End operator inferred', key: 'endedByInferred', width: 22 },
       { header: 'Captured at', key: 'capturedAt', width: 26 },
       { header: 'Result', key: 'result', width: 14 },
       { header: 'Detected text', key: 'text', width: 50 },
@@ -135,6 +280,7 @@ export class LineOperationReportService {
       include: {
         job: {
           include: {
+            endedBy: { select: { username: true, fullName: true } },
             operator: { select: { username: true, fullName: true } },
           },
         },
@@ -166,7 +312,13 @@ export class LineOperationReportService {
         jobId: first.jobId,
         productCode:
           productCodes.get(first.job.productId) ?? first.job.productId,
-        operator: first.job.operator.fullName || first.job.operator.username,
+        startedBy: first.job.operator.fullName || first.job.operator.username,
+        endedBy:
+          first.job.endedBy?.fullName ||
+          first.job.endedBy?.username ||
+          first.job.operator.fullName ||
+          first.job.operator.username,
+        endedByInferred: first.job.endedByInferred ? 'Yes' : 'No',
         capturedAt: first.capturedAt.toISOString(),
         result,
         text: group
@@ -247,6 +399,12 @@ export class LineOperationReportService {
     if (results.includes(InspectionResult.NG)) return 'NG' as const;
     if (results.includes(InspectionResult.OK)) return 'OK' as const;
     return 'UNKNOWN' as const;
+  }
+
+  private normalizeRows(value: Prisma.JsonValue | null) {
+    return Array.isArray(value)
+      ? value.filter((item): item is string => typeof item === 'string')
+      : [];
   }
 
   private periodKey(value: Date, groupBy: LineReportGroupBy) {

@@ -65,6 +65,7 @@ Mỗi key có tên, address, trạng thái bật/tắt và một trong ba thao t
 - `GET/PUT /api/plc/config`: đọc/lưu cấu hình toàn máy.
 - `GET /api/plc/status`: trạng thái kết nối và sự kiện PLC gần nhất.
 - `POST /api/plc/connect` và `POST /api/plc/disconnect`.
+- `POST /api/plc/simulator/enable`, `/heartbeat`, `/disable` và `/signal`: PLC giả lập trong RAM, backend chỉ cho role `dev`.
 - `PUT /api/plc/outputs/camera-power`.
 - `PUT /api/plc/outputs/camera-light`.
 - `POST /api/plc/outputs/ok-pulse`.
@@ -106,7 +107,7 @@ Mỗi key có tên, address, trạng thái bật/tắt và một trong ba thao t
 
 - Thiếu cấu hình hoặc mất kết nối PLC không khóa ứng dụng và không chặn thao tác camera/OCR bằng tay.
 - Nếu camera nhận được frame, trạng thái máy vẫn chuyển sang `running`; backend đồng thời giữ cờ PLC ngoại tuyến và lý do lỗi.
-- Giao diện hiển thị thông báo có thể đóng và nút **Kết nối lại PLC**. Đóng thông báo chỉ ẩn modal, không giả lập trạng thái PLC đã kết nối.
+- Giao diện hiển thị thông báo có thể đóng, nút **Kết nối lại PLC** và **Ngắt kết nối PLC**. Ngắt kết nối là chủ động nên dừng auto-retry; đóng thông báo chỉ ẩn modal, không giả lập trạng thái PLC đã kết nối.
 - Khi lưu cấu hình PLC, backend tạm ngắt kết nối cũ rồi tự kết nối lại bằng cấu hình mới. Cảnh báo ngoại tuyến tự biến mất ngay khi nhận trạng thái `connected`; nếu lần kết nối đầu thất bại, backend tiếp tục thử lại định kỳ.
 - Khi kết nối lại thành công trong lúc đang vận hành, backend ghi `cameraPower=true` và `cameraLight=true`, sau đó xóa trạng thái PLC ngoại tuyến.
 - Mỗi flow tự động chỉ sử dụng signal đã được gán address. Signal để trống được bỏ qua độc lập, không làm hỏng các chức năng còn lại.
@@ -121,12 +122,28 @@ Mỗi key có tên, address, trạng thái bật/tắt và một trong ba thao t
 
 ## Flow dừng máy
 
-1. Nhận `stopTrigger` từ PLC và kết thúc session Line với lý do `plc_stop`.
+1. Nhận `stopTrigger` từ PLC và giữ nguyên session Line hiện tại.
 2. Dừng OCR, ngắt kết nối camera.
 3. Tắt đèn trạng thái, ghi `cameraLight=false`, sau đó `cameraPower=false`.
-4. Hiển thị modal toàn ứng dụng và chờ `startTrigger`; người dùng không thể tự resume flow này.
-5. Khi nhận `startTrigger`: khôi phục `Auto + Live camera + Realtime AI`, mở session mới cho cùng sản phẩm/người vận hành, bật nguồn camera, bật đèn, thử kết nối và yêu cầu frame thực tế trong tối đa 60 giây.
-6. Có frame thì tự tiếp tục vận hành và bật đèn vàng; quá hạn thì yêu cầu restart ứng dụng Electron.
+4. Hiển thị modal toàn ứng dụng và chờ `startTrigger`. Role `operator` bị khóa và không thể đóng modal; `dev`, `admin`, `engineer` có thể đóng thông báo để tiếp tục cấu hình ứng dụng nhưng không tự resume flow máy.
+5. Khi nhận `startTrigger`: khôi phục `Auto + Live camera + Realtime AI`, giữ nguyên `jobId` và bộ đếm, bật nguồn camera, bật đèn, kết nối lại và yêu cầu frame thực tế.
+6. Có một frame thật thì tự tiếp tục vận hành và bật đèn vàng. Trong lúc camera chưa sẵn sàng, modal có thể đóng để người dùng thử **Kết nối lại** trên Live View; backend vẫn tự động thử lại cho đến khi thành công hoặc nhận tín hiệu dừng/shutdown.
+
+## Ngắt kết nối camera thủ công
+
+- Nút **Ngắt kết nối camera** chỉ có trên giao diện quản lý sản phẩm và camera; nút **Tắt Live** chỉ dừng stream, không ngắt camera vật lý.
+- Sau khi ngắt thủ công, cờ chặn auto-connect được giữ trong backend nên chuyển sang trang khác không làm camera tự kết nối lại.
+- Live View vẫn hiển thị **Kết nối lại**. Chỉ thao tác này xóa cờ ngắt thủ công; trạng thái sẵn sàng chỉ được xác nhận sau khi nhận frame thật.
+- Các lần ngắt camera nội bộ do PLC Stop, timeout hoặc shutdown không đặt cờ ngắt thủ công, nên flow máy vẫn có thể tự phục hồi.
+
+## PLC giả lập cho dev
+
+- Floating button chỉ hiển thị với role `dev`. Client ID, trạng thái bật và trạng thái mở panel được giữ trong `sessionStorage`, nên chuyển trang không tạo lại hoặc làm tắt simulator.
+- Simulator chỉ tự tắt khi rời tài khoản `dev`, khi người dùng bấm tắt giả lập hoặc khi backend/app kết thúc; chuyển trang không làm thay đổi kết nối giả lập.
+- Bật simulator sẽ ngắt PLC vật lý và chặn auto-reconnect trong thời gian giả lập. Trạng thái machine runtime hiện tại được giữ nguyên để dev có thể kiểm thử tín hiệu ngay trong luồng đang vận hành.
+- Nhóm **PLC → Ứng dụng** phát cạnh lên/xuống qua đúng event bus runtime cho `startTrigger`, `stopTrigger`, `captureTrigger` và custom watch key.
+- Nhóm **Ứng dụng → PLC** hiển thị trạng thái nguồn camera, đèn camera, đèn chờ và timeline output; backend không gọi Device Tool PLC cho các lệnh mô phỏng.
+- API simulator kiểm tra role `dev` ở backend, không chỉ ẩn nút trên frontend.
 
 ## Flow không có tín hiệu chốt 5 phút
 
@@ -149,19 +166,22 @@ OK từ `captureTrigger` phát `okResult` một lần. NG chỉ phát `errorPuls
 
 ## Khởi động, khôi phục và lưu ảnh
 
-1. Khi người dùng bắt đầu vận hành: kết nối PLC, cấp nguồn camera, bật đèn soi, kết nối camera và chờ frame thật tối đa 60 giây rồi mới chuyển sang `running`.
+1. Khi người dùng bắt đầu vận hành: kết nối PLC, cấp nguồn camera, bật đèn soi, kết nối camera và chỉ chuyển sang `running` sau khi nhận được một frame thật; 60 giây là mốc cảnh báo, không phải mốc dừng retry.
 2. Khi backend khởi động lại và tìm thấy `InspectionJob` còn `running`, backend tự chạy lại toàn bộ chuỗi trên và tiếp tục phiên đã lưu trong database.
 3. Trong lúc `running`, backend chỉ lấy frame và OCR liên tục khi camera live và AI cùng bật. Chỉ kết quả đã hoàn tất mới thay thế bộ đệm live và được hiển thị theo từng ROI trên Line.
 4. Trong Auto + live bật + AI bật, `captureTrigger` không khởi động detect và không chờ detect đang chạy; nó chốt snapshot hoàn tất gần nhất. Trong Auto + live tắt + AI bật, tín hiệu chạy tuần tự chụp -> kiểm tra -> chốt. Khi AI tắt, tín hiệu chỉ chụp nếu live tắt và tuyệt đối không tạo log/counter/xung.
 5. `stopTrigger` có ưu tiên cao hơn detect/chốt. Detect hoặc thao tác lưu đang chạy bị hủy trước flow stop.
 6. Log database luôn được lưu ở mỗi lần PLC chốt và các ROI của cùng một lần chốt dùng chung `plcCaptureId`. Ảnh chỉ được lưu khi chính sách và thư mục lưu ảnh hợp lệ; lỗi/thiếu thư mục ảnh không được phép làm mất log kết quả.
 7. ROI có kết quả `UNKNOWN` không hiển thị trên overlay của Line hoặc Line Test.
+8. Khi đổi tài khoản, session đang `running` của cùng sản phẩm được giữ nguyên `jobId`, bộ đếm và người bắt đầu. Tài khoản mới gắn lại vào session và chỉ được ghi là người kết thúc khi chính tài khoản đó dừng session.
+9. `operatorId` là người bắt đầu session; `endedById` là người kết thúc. Session lịch sử được backfill người kết thúc bằng người bắt đầu và đánh dấu `endedByInferred=true`.
+10. Sau tín hiệu dừng máy, runtime cấp nguồn/kết nối lại camera và tiếp tục thử tự động kể cả sau mốc cảnh báo 60 giây. Chỉ cần nhận thành công một frame thật thì trạng thái chuyển sang `running`; tín hiệu dừng mới hoặc shutdown sẽ hủy việc chờ frame.
 
 ## Vòng đời session Line
 
 - Đổi mã sản phẩm: kết thúc session hiện tại với `product_change`, sau đó mở session mới.
 - Nút dừng Line: kết thúc session với `line_stop`.
-- PLC dừng máy: kết thúc session với `plc_stop`; PLC Start mở session mới.
+- PLC dừng máy: tạm nghỉ nhưng giữ nguyên session; PLC Start tiếp tục cùng `jobId` sau khi camera trả được một frame thật.
 - Đóng ứng dụng: kết thúc session với `app_shutdown` trước khi tắt đầu ra PLC.
 
 ## Đóng ứng dụng

@@ -1,5 +1,5 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import { LineResultSavePolicy } from '@prisma/client';
+import { LineResultSavePolicy, TrainingImageSavePolicy } from '@prisma/client';
 import {
   IsBoolean,
   IsEnum,
@@ -45,4 +45,26 @@ export class UpdateLineResultSettingsDto {
   @IsOptional()
   @IsBoolean()
   showNgRecognizedText?: boolean;
+
+  @ApiPropertyOptional({ example: false })
+  @IsOptional()
+  @IsBoolean()
+  trainingImageEnabled?: boolean;
+
+  @ApiPropertyOptional({
+    example: 'C:\\OCR\\TrainingImages',
+    nullable: true,
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  trainingImageSaveFolderPath?: string | null;
+
+  @ApiPropertyOptional({
+    enum: TrainingImageSavePolicy,
+    example: TrainingImageSavePolicy.all,
+  })
+  @IsOptional()
+  @IsEnum(TrainingImageSavePolicy)
+  trainingImageSavePolicy?: TrainingImageSavePolicy;
 }

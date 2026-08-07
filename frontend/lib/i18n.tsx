@@ -77,6 +77,12 @@ const translations = {
       "Only dev can update line OCR rotation settings.",
     "apiError.Only dev can update line OCR rotation settings":
       "Only dev can update line OCR rotation settings.",
+    "apiError.PLC simulator session is not active":
+      "The PLC simulator session expired. Start the simulator again.",
+    "apiError.PLC simulator input is not configured":
+      "This PLC input is not configured.",
+    "apiError.PLC simulator is available to dev only":
+      "The PLC simulator is available to dev only.",
     "apiError.Only admin or dev can manage machine inactivity settings":
       "Only admin or developer accounts can change inactivity settings.",
     "apiError.Only admin or dev can manage NG text visibility":
@@ -242,6 +248,8 @@ const translations = {
     "nav.settings": "Settings",
     "nav.configuration": "Configuration",
     "configuration.tabsLabel": "Configuration sections",
+    "configuration.quickProduct": "Product",
+    "configuration.quickProductSelect": "Quickly select product",
     "configuration.switchingCamera": "Switching to camera {camera}...",
     "configuration.roiHint":
       "ROI changes are shown immediately on the live view. Save to update the selected profile.",
@@ -250,6 +258,18 @@ const translations = {
     "configuration.resetRoi": "Reset ROI",
     "configuration.roiResetApplied":
       "ROI restored to the latest saved profile data.",
+    "configuration.saveRoi": "Save ROI",
+    "configuration.saveRoiToAll": "Apply ROI to all products",
+    "configuration.confirmSaveRoiTitle": "Save ROI?",
+    "configuration.confirmSaveRoiDescription":
+      "Confirm saving the ROI configuration for product {code}?",
+    "configuration.confirmApplyRoiAllTitle": "Apply ROI to all products?",
+    "configuration.confirmApplyRoiAllDescription":
+      "Do you want to use this ROI configuration for all product codes?",
+    "configuration.applyRoiToAll": "Apply ROI to all",
+    "configuration.roiApplyingToAll": "Applying ROI to all products...",
+    "configuration.roiAppliedToAll":
+      "ROI configuration was applied to {count} product profiles.",
     "configuration.roiCreated": "A fixed-size ROI was created.",
     "configuration.roiInteractionHint":
       "Drag an ROI to move it, use its rotate control to rotate, or drag on empty live view space to select multiple ROIs.",
@@ -375,6 +395,7 @@ const translations = {
     "plc.disconnect": "Disconnect",
     "plc.connectSuccess": "PLC connected.",
     "plc.disconnectSuccess": "PLC disconnected.",
+    "plc.disconnecting": "Disconnecting PLC...",
     "plc.connectError": "Unable to connect to PLC.",
     "plc.disconnectError": "Unable to disconnect PLC.",
     "plc.saveBeforeConnect":
@@ -387,6 +408,27 @@ const translations = {
     "plc.executeError": "Unable to send PLC command.",
     "plc.recentSignals": "Recent signals",
     "plc.noSignals": "No PLC signal received yet.",
+    "plcSimulator.title": "PLC simulator",
+    "plcSimulator.open": "Open PLC simulator",
+    "plcSimulator.active": "Simulated PLC connected",
+    "plcSimulator.inactive": "Simulator disconnected",
+    "plcSimulator.enable": "Start simulator",
+    "plcSimulator.enabling": "Starting PLC simulator...",
+    "plcSimulator.enabled": "PLC simulator started.",
+    "plcSimulator.enableError": "Unable to start PLC simulator.",
+    "plcSimulator.disable": "Stop simulator",
+    "plcSimulator.disabling": "Stopping PLC simulator...",
+    "plcSimulator.disabled": "PLC simulator stopped.",
+    "plcSimulator.disableError": "Unable to stop PLC simulator.",
+    "plcSimulator.configRequired":
+      "Save a valid PLC configuration before starting the simulator.",
+    "plcSimulator.plcToApp": "PLC → App",
+    "plcSimulator.appToPlc": "App → PLC",
+    "plcSimulator.timeline": "Signal timeline",
+    "plcSimulator.clear": "Clear",
+    "plcSimulator.noEvents": "No simulated signal yet.",
+    "plcSimulator.signalSent": "Sent simulated signal: {signal}.",
+    "plcSimulator.signalError": "Unable to send the simulated PLC signal.",
     "machine.stopTitle": "Machine stop signal received",
     "machine.timeoutTitle": "Temporary idle",
     "machine.transitionTitle": "Applying machine state",
@@ -396,6 +438,7 @@ const translations = {
       "No PLC latch signal was received for {seconds} seconds. Camera power remains on.",
     "machine.resuming": "Restoring camera operation...",
     "machine.cameraCountdown": "Waiting for a real camera frame: {seconds}s",
+    "machine.stopCountdown": "The software will stop in {seconds} seconds.",
     "machine.resume": "Resume operation",
     "machine.resumeSuccess": "Camera operation restored.",
     "machine.plcOfflineTitle": "PLC is not connected",
@@ -440,6 +483,10 @@ const translations = {
     "session.accountMenu": "Account menu",
     "session.hiddenDev": "hidden dev",
     "session.logout": "Logout",
+    "devRolePreview.title": "Role preview",
+    "devRolePreview.note": "UI only. API permissions remain Developer.",
+    "devRolePreview.activeSuffix": "Preview",
+    "devRolePreview.changed": "Role preview updated.",
     "session.licenseLost":
       "License dongle disconnected. You have been signed out.",
     "dashboard.title": "Dashboard",
@@ -488,9 +535,16 @@ const translations = {
     "settings.description":
       "Configure the local desktop window and station display.",
     "settings.backToOperation": "Back to operation",
+    "settings.tabGeneral": "General",
+    "settings.tabOperation": "Operation",
+    "settings.tabDeveloper": "DEV",
+    "settings.tabTraining": "Training",
+    "settings.developerDescription":
+      "Developer-only tools for OCR setup, runtime simulation, and service diagnostics.",
     "settings.tabDesktop": "Desktop",
     "settings.tabLanguage": "Language",
     "settings.tabInactivity": "Inactivity",
+    "settings.tabStopDelay": "PLC stop",
     "settings.tabVolume": "Volume",
     "settings.tabUpdate": "Update",
     "settings.inactivityTitle": "Automatic inactivity pause",
@@ -510,6 +564,23 @@ const translations = {
       "Inactivity time must be a whole number from 1 to 86400 seconds.",
     "settings.inactivityPlcRequired":
       "Configure the PLC before saving inactivity settings.",
+    "settings.stopDelayTitle": "PLC stop delay",
+    "settings.stopDelayDescription":
+      "After a PLC STOP signal, the line keeps operating for this period before the camera and PLC outputs are stopped. Default: 5 seconds.",
+    "settings.stopDelaySeconds": "Delay after STOP signal (seconds)",
+    "settings.stopDelayHint": "Allowed range: 0 to 300 seconds. Set 0 to stop immediately.",
+    "settings.stopDelaySave": "Save stop delay",
+    "settings.stopDelaySaving": "Saving PLC stop delay...",
+    "settings.stopDelaySaved": "PLC stop delay saved.",
+    "settings.stopDelayLoadError": "Cannot load PLC stop delay.",
+    "settings.stopDelaySaveError": "Cannot save PLC stop delay.",
+    "settings.stopDelayValidation":
+      "Stop delay must be a whole number from 0 to 300 seconds.",
+    "settings.stopDelayPlcRequired":
+      "Configure the PLC before saving this setting.",
+    "settings.stopPowerOption": "Turn off camera power after PLC STOP",
+    "settings.stopPowerHint":
+      "When enabled, the app disconnects the camera, waits 5 seconds, then turns off its power. When disabled, camera power remains on.",
     "common.close": "Close",
     "update.title": "Application update",
     "update.currentVersion": "Current version",
@@ -585,7 +656,7 @@ const translations = {
     "settings.alwaysOnTop": "Always on top",
     "settings.alwaysOnTopHint": "Keep this app above other windows.",
     "settings.screenPreset": "Screen ratio",
-    "settings.presetFactory": "Factory 1280 x 1080",
+    "settings.presetFactory": "Factory 1280 x 1024",
     "settings.presetHd": "HD 1366 x 768",
     "settings.presetFullHd": "Full HD 1920 x 1080",
     "settings.presetFourThree": "4:3 1280 x 960",
@@ -611,7 +682,8 @@ const translations = {
     "settings.exiting": "Closing local app...",
     "settings.exitError": "Cannot close the local app cleanly.",
     "settings.exitConfirmTitle": "Confirm exit",
-    "settings.exitConfirmDescription": "Are you sure you want to exit the app?",
+    "settings.exitConfirmDescription":
+      "Exiting will safely turn off the camera, PLC, and local services before closing the app.",
     "settings.exitConfirm": "Exit app",
     "settings.exitModeTitle": "Choose how to shut down",
     "settings.exitModeAppOnly": "App only",
@@ -686,6 +758,16 @@ const translations = {
     "operationReports.title": "Operation reports",
     "operationReports.description":
       "Review and export results recorded during actual Line operation.",
+    "operationReports.summary": "Quick summary",
+    "operationReports.sessions": "Saved Line sessions",
+    "operationReports.sessionsLoading": "Loading actual Line operation results...",
+    "operationReports.sessionsEmpty": "No actual Line operation result was found.",
+    "operationReports.sessionsLoadError": "Cannot load actual Line operation results.",
+    "operationReports.sessionMeta": "Operated by {actor} at {createdAt}",
+    "operationReports.sessionId": "Session: {sessionId}",
+    "operationReports.totalResults": "Latched results",
+    "operationReports.captureMeta": "Captured at {capturedAt}",
+    "operationReports.imageUnavailable": "No saved camera image is available for this result.",
     "reports.testSessions": "Saved test sessions",
     "reports.testSessionsLoading": "Loading saved test sessions...",
     "reports.testSessionsEmpty": "No saved test session found.",
@@ -816,7 +898,15 @@ const translations = {
     "cameraIdentity.serial": "Serial",
     "cameraIdentity.hardware": "Hardware",
     "cameraIdentity.lastSeen": "Last seen",
+    "cameraIdentity.detected": "Detected now",
+    "cameraIdentity.detectedNow": "Detected",
+    "cameraIdentity.notDetectedNow": "Not detected",
     "cameraIdentity.status": "Status",
+    "cameraIdentity.connection": "Connection",
+    "cameraIdentity.connection.ready": "Ready to connect",
+    "cameraIdentity.connection.notDetected": "Not detected",
+    "cameraIdentity.connection.notIdentified": "Needs identification",
+    "cameraIdentity.connection.disabled": "Disabled",
     "cameraIdentity.active": "Active",
     "cameraIdentity.inactive": "Inactive",
     "cameraIdentity.status.identified": "Identified",
@@ -884,6 +974,11 @@ const translations = {
     "camera.connecting": "Connecting...",
     "camera.connected": "Connected",
     "camera.disconnected": "Disconnected",
+    "camera.disconnect": "Disconnect camera",
+    "camera.disconnecting": "Disconnecting camera...",
+    "camera.disconnectSuccess":
+      "Camera disconnected. Automatic reconnect is paused.",
+    "camera.disconnectError": "Cannot disconnect the camera.",
     "camera.connectedWrongDevice": "Wrong camera connected",
     "camera.devices": "Detected devices",
     "camera.refreshDevices": "Refresh cameras",
@@ -952,6 +1047,7 @@ const translations = {
     "camera.settings": "Camera settings",
     "camera.settingsHint": "Tune and save the selected product camera profile.",
     "camera.saveSettings": "Save camera settings",
+    "camera.saveSettingsToAll": "Apply to all products",
     "camera.savingSettings": "Saving camera settings...",
     "camera.settingsSaved": "Camera settings saved.",
     "camera.settingsSaveError": "Cannot save camera settings.",
@@ -959,9 +1055,19 @@ const translations = {
     "camera.confirmRestartDescription":
       "The camera will restart to apply these changes. Live view will pause briefly and resume automatically if it is currently running.",
     "camera.restartAndApply": "Restart and apply",
+    "camera.confirmApplyProductTitle": "Save camera settings?",
+    "camera.confirmApplyProductDescription":
+      "Confirm saving these camera settings for product {code}? The camera will restart to apply the changes.",
+    "camera.confirmApplyAllTitle": "Apply camera settings to all products?",
+    "camera.confirmApplyAllDescription":
+      "Do you want to use these camera settings for all product codes? The active camera will restart to apply the changes.",
+    "camera.restartAndApplyAll": "Apply to all and restart",
     "camera.applyingSettings": "Applying camera settings...",
+    "camera.applyingSettingsToAll": "Applying camera settings to all products...",
     "camera.applyingSettingsLive": "Applying changes and restarting camera...",
     "camera.settingsApplied": "Camera settings applied successfully.",
+    "camera.settingsAppliedToAll":
+      "Camera settings were applied to {count} product profiles.",
     "camera.settingsRestartError":
       "Settings were saved, but the camera could not restart with the new configuration.",
     "camera.aiRestartError": "Camera restarted, but AI could not resume.",
@@ -1144,6 +1250,10 @@ const translations = {
     "products.cameraDevicesLoading": "Loading cameras...",
     "products.cameraDevicesLoaded": "Camera list refreshed.",
     "products.cameraDevicesLoadError": "Cannot load camera devices.",
+    "products.noAvailableCamera":
+      "No identified camera is currently ready to connect.",
+    "products.cameraSelectionRequired":
+      "Select an identified camera that is currently ready to connect.",
     "products.cameraManualFallback":
       "Cannot load detected cameras. You can still enter the device name manually.",
     "products.cameraSelectHint":
@@ -1407,6 +1517,12 @@ const translations = {
       "Chỉ dev mới có thể cập nhật setting xoay crop OCR cho line.",
     "apiError.Only dev can update line OCR rotation settings":
       "Chỉ dev mới có thể cập nhật setting xoay crop OCR cho line.",
+    "apiError.PLC simulator session is not active":
+      "Phiên PLC giả lập đã hết hạn. Hãy bật lại giả lập.",
+    "apiError.PLC simulator input is not configured":
+      "Tín hiệu PLC này chưa được cấu hình.",
+    "apiError.PLC simulator is available to dev only":
+      "PLC giả lập chỉ dành cho role dev.",
     "apiError.Only admin or dev can manage machine inactivity settings":
       "Chỉ tài khoản admin hoặc dev được thay đổi thiết lập tạm nghỉ.",
     "apiError.Only admin or dev can manage NG text visibility":
@@ -1555,6 +1671,8 @@ const translations = {
     "nav.settings": "Cài đặt",
     "nav.configuration": "Cấu hình",
     "configuration.tabsLabel": "Các mục cấu hình",
+    "configuration.quickProduct": "Mã hàng",
+    "configuration.quickProductSelect": "Chọn nhanh mã hàng",
     "configuration.switchingCamera": "Đang chuyển sang camera {camera}...",
     "configuration.roiHint":
       "Thay đổi ROI được hiển thị ngay trên Live view. Nhấn Lưu để cập nhật profile đang chọn.",
@@ -1563,6 +1681,19 @@ const translations = {
     "configuration.resetRoi": "Reset ROI",
     "configuration.roiResetApplied":
       "Đã khôi phục ROI về dữ liệu lưu gần nhất của profile.",
+    "configuration.saveRoi": "Lưu ROI",
+    "configuration.saveRoiToAll": "Áp dụng ROI cho toàn bộ mã hàng",
+    "configuration.confirmSaveRoiTitle": "Lưu ROI?",
+    "configuration.confirmSaveRoiDescription":
+      "Bạn có xác nhận lưu cấu hình ROI cho mã hàng {code} này không?",
+    "configuration.confirmApplyRoiAllTitle": "Áp dụng ROI cho toàn bộ mã hàng?",
+    "configuration.confirmApplyRoiAllDescription":
+      "Bạn có muốn sử dụng cấu hình ROI này với toàn bộ mã hàng không?",
+    "configuration.applyRoiToAll": "Áp dụng ROI toàn bộ",
+    "configuration.roiApplyingToAll":
+      "Đang áp dụng ROI cho toàn bộ mã hàng...",
+    "configuration.roiAppliedToAll":
+      "Đã áp dụng cấu hình ROI cho {count} mã hàng.",
     "configuration.roiCreated": "Đã tạo ROI với kích thước cố định.",
     "configuration.roiInteractionHint":
       "Kéo ROI để đổi vị trí, dùng nút xoay để xoay hoặc kéo trên vùng trống của Live view để chọn nhiều ROI.",
@@ -1691,6 +1822,7 @@ const translations = {
     "plc.disconnect": "Ngắt kết nối",
     "plc.connectSuccess": "Đã kết nối PLC.",
     "plc.disconnectSuccess": "Đã ngắt kết nối PLC.",
+    "plc.disconnecting": "Đang ngắt kết nối PLC...",
     "plc.connectError": "Không thể kết nối PLC.",
     "plc.disconnectError": "Không thể ngắt kết nối PLC.",
     "plc.saveBeforeConnect": "Hãy lưu cấu hình PLC hợp lệ trước khi kết nối.",
@@ -1702,6 +1834,27 @@ const translations = {
     "plc.executeError": "Không thể gửi lệnh PLC.",
     "plc.recentSignals": "Tín hiệu gần đây",
     "plc.noSignals": "Chưa nhận tín hiệu PLC.",
+    "plcSimulator.title": "PLC giả lập",
+    "plcSimulator.open": "Mở PLC giả lập",
+    "plcSimulator.active": "PLC giả lập đã kết nối",
+    "plcSimulator.inactive": "PLC giả lập chưa kết nối",
+    "plcSimulator.enable": "Bật giả lập",
+    "plcSimulator.enabling": "Đang bật PLC giả lập...",
+    "plcSimulator.enabled": "Đã bật PLC giả lập.",
+    "plcSimulator.enableError": "Không thể bật PLC giả lập.",
+    "plcSimulator.disable": "Tắt giả lập",
+    "plcSimulator.disabling": "Đang tắt PLC giả lập...",
+    "plcSimulator.disabled": "Đã tắt PLC giả lập.",
+    "plcSimulator.disableError": "Không thể tắt PLC giả lập.",
+    "plcSimulator.configRequired":
+      "Hãy lưu cấu hình PLC hợp lệ trước khi bật giả lập.",
+    "plcSimulator.plcToApp": "PLC → Ứng dụng",
+    "plcSimulator.appToPlc": "Ứng dụng → PLC",
+    "plcSimulator.timeline": "Dòng thời gian tín hiệu",
+    "plcSimulator.clear": "Xóa",
+    "plcSimulator.noEvents": "Chưa có tín hiệu giả lập.",
+    "plcSimulator.signalSent": "Đã gửi tín hiệu giả lập: {signal}.",
+    "plcSimulator.signalError": "Không thể gửi tín hiệu PLC giả lập.",
     "machine.stopTitle": "Đã nhận tín hiệu dừng máy",
     "machine.timeoutTitle": "Tạm nghỉ vận hành",
     "machine.transitionTitle": "Đang thực thi trạng thái máy",
@@ -1712,6 +1865,7 @@ const translations = {
     "machine.resuming": "Đang khôi phục vận hành camera...",
     "machine.cameraCountdown":
       "Đang chờ frame thực tế từ camera: {seconds} giây",
+    "machine.stopCountdown": "Phần mềm sẽ dừng sau {seconds} giây.",
     "machine.resume": "Tiếp tục vận hành",
     "machine.resumeSuccess": "Đã khôi phục vận hành camera.",
     "machine.plcOfflineTitle": "PLC chưa kết nối",
@@ -1756,6 +1910,10 @@ const translations = {
     "session.accountMenu": "Menu tài khoản",
     "session.hiddenDev": "dev ẩn",
     "session.logout": "Đăng xuất",
+    "devRolePreview.title": "Xem thử giao diện theo vai trò",
+    "devRolePreview.note": "Chỉ đổi giao diện. Quyền API vẫn là Developer.",
+    "devRolePreview.activeSuffix": "Đang xem thử",
+    "devRolePreview.changed": "Đã đổi giao diện theo vai trò.",
     "session.licenseLost":
       "Dongle bản quyền đã mất kết nối. Hệ thống đã đăng xuất.",
     "dashboard.title": "Tổng quan",
@@ -1795,9 +1953,16 @@ const translations = {
     "settings.description":
       "Cấu hình cửa sổ desktop local và màn hình hiển thị của trạm.",
     "settings.backToOperation": "Quay lại Vận hành",
+    "settings.tabGeneral": "Chung",
+    "settings.tabOperation": "Vận hành",
+    "settings.tabDeveloper": "DEV",
+    "settings.tabTraining": "Training",
+    "settings.developerDescription":
+      "Công cụ riêng cho developer: cấu hình OCR, giả lập runtime và chẩn đoán dịch vụ.",
     "settings.tabDesktop": "Desktop",
     "settings.tabLanguage": "Ngôn ngữ",
     "settings.tabInactivity": "Tạm nghỉ",
+    "settings.tabStopDelay": "Dừng PLC",
     "settings.tabVolume": "Âm lượng",
     "settings.inactivityTitle": "Tự động tạm nghỉ vận hành",
     "settings.inactivityDescription":
@@ -1816,6 +1981,23 @@ const translations = {
       "Thời gian tạm nghỉ phải là số nguyên từ 1 đến 86400 giây.",
     "settings.inactivityPlcRequired":
       "Hãy cấu hình PLC trước khi lưu thiết lập tạm nghỉ.",
+    "settings.stopDelayTitle": "Thời gian chờ dừng từ PLC",
+    "settings.stopDelayDescription":
+      "Sau khi nhận tín hiệu STOP từ PLC, line vẫn vận hành trong thời gian này rồi mới dừng camera và các ngõ ra PLC. Mặc định: 5 giây.",
+    "settings.stopDelaySeconds": "Thời gian chờ sau tín hiệu STOP (giây)",
+    "settings.stopDelayHint": "Cho phép từ 0 đến 300 giây. Chọn 0 để dừng ngay.",
+    "settings.stopDelaySave": "Lưu thời gian chờ dừng",
+    "settings.stopDelaySaving": "Đang lưu thời gian chờ dừng PLC...",
+    "settings.stopDelaySaved": "Đã lưu thời gian chờ dừng PLC.",
+    "settings.stopDelayLoadError": "Không thể tải thời gian chờ dừng PLC.",
+    "settings.stopDelaySaveError": "Không thể lưu thời gian chờ dừng PLC.",
+    "settings.stopDelayValidation":
+      "Thời gian chờ dừng phải là số nguyên từ 0 đến 300 giây.",
+    "settings.stopDelayPlcRequired":
+      "Hãy cấu hình PLC trước khi lưu thiết lập này.",
+    "settings.stopPowerOption": "Tắt nguồn camera sau tín hiệu STOP",
+    "settings.stopPowerHint":
+      "Khi bật, ứng dụng sẽ ngắt kết nối camera, chờ 5 giây rồi tắt nguồn. Khi tắt, nguồn camera vẫn được giữ bật.",
     "settings.windowMode": "Chế độ cửa sổ",
     "settings.fullscreen": "Toàn màn hình",
     "settings.fullscreenHint": "Dùng toàn bộ màn hình máy vận hành.",
@@ -1824,7 +2006,7 @@ const translations = {
     "settings.alwaysOnTop": "Luôn nổi trên cùng",
     "settings.alwaysOnTopHint": "Giữ app nằm trên các cửa sổ khác.",
     "settings.screenPreset": "Tỉ lệ màn hình",
-    "settings.presetFactory": "Máy vận hành 1280 x 1080",
+    "settings.presetFactory": "Máy vận hành 1280 x 1024",
     "settings.presetHd": "HD 1366 x 768",
     "settings.presetFullHd": "Full HD 1920 x 1080",
     "settings.presetFourThree": "4:3 1280 x 960",
@@ -1849,7 +2031,8 @@ const translations = {
     "settings.exiting": "Đang đóng app local...",
     "settings.exitError": "Không thể đóng app local sạch sẽ.",
     "settings.exitConfirmTitle": "Xác nhận thoát app",
-    "settings.exitConfirmDescription": "Bạn có chắc chắn muốn thoát app không?",
+    "settings.exitConfirmDescription":
+      "Thoát app sẽ tắt an toàn camera, PLC và dịch vụ local trước khi đóng ứng dụng.",
     "settings.exitConfirm": "Thoát app",
     "settings.exitModeTitle": "Chọn cách tắt",
     "settings.exitModeAppOnly": "Chỉ tắt ứng dụng",
@@ -1923,6 +2106,16 @@ const translations = {
     "operationReports.title": "Báo cáo vận hành",
     "operationReports.description":
       "Xem và xuất các kết quả được ghi nhận trong quá trình vận hành Line thực tế.",
+    "operationReports.summary": "Tổng kết nhanh",
+    "operationReports.sessions": "Session vận hành đã lưu",
+    "operationReports.sessionsLoading": "Đang tải kết quả vận hành thực tế...",
+    "operationReports.sessionsEmpty": "Chưa có kết quả vận hành thực tế nào.",
+    "operationReports.sessionsLoadError": "Không thể tải kết quả vận hành thực tế.",
+    "operationReports.sessionMeta": "Người vận hành {actor} lúc {createdAt}",
+    "operationReports.sessionId": "Session: {sessionId}",
+    "operationReports.totalResults": "Lần chốt kết quả",
+    "operationReports.captureMeta": "Chốt lúc {capturedAt}",
+    "operationReports.imageUnavailable": "Không có ảnh camera đã lưu cho kết quả này.",
     "reports.testSessions": "Session test đã lưu",
     "reports.testSessionsLoading": "Đang tải session test đã lưu...",
     "reports.testSessionsEmpty": "Chưa có session test nào được lưu.",
@@ -2040,7 +2233,15 @@ const translations = {
     "cameraIdentity.serial": "Serial",
     "cameraIdentity.hardware": "Phần cứng",
     "cameraIdentity.lastSeen": "Lần thấy cuối",
+    "cameraIdentity.detected": "Phát hiện hiện tại",
+    "cameraIdentity.detectedNow": "Đang phát hiện",
+    "cameraIdentity.notDetectedNow": "Không phát hiện",
     "cameraIdentity.status": "Trạng thái",
+    "cameraIdentity.connection": "Kết nối",
+    "cameraIdentity.connection.ready": "Sẵn sàng kết nối",
+    "cameraIdentity.connection.notDetected": "Không phát hiện",
+    "cameraIdentity.connection.notIdentified": "Cần định danh",
+    "cameraIdentity.connection.disabled": "Đã tắt",
     "cameraIdentity.active": "Đang bật",
     "cameraIdentity.inactive": "Đã tắt",
     "cameraIdentity.status.identified": "Đã định danh",
@@ -2075,6 +2276,11 @@ const translations = {
     "camera.connecting": "Đang kết nối...",
     "camera.connected": "Đã kết nối",
     "camera.disconnected": "Chưa kết nối",
+    "camera.disconnect": "Ngắt kết nối camera",
+    "camera.disconnecting": "Đang ngắt kết nối camera...",
+    "camera.disconnectSuccess":
+      "Đã ngắt camera. Hệ thống sẽ không tự kết nối lại.",
+    "camera.disconnectError": "Không thể ngắt kết nối camera.",
     "camera.connectedWrongDevice": "Kết nối sai camera",
     "camera.devices": "Thiết bị phát hiện",
     "camera.refreshDevices": "Làm mới camera",
@@ -2125,6 +2331,7 @@ const translations = {
     "camera.settingsHint":
       "Chỉnh và lưu cấu hình camera cho product đang chọn.",
     "camera.saveSettings": "Lưu thông số camera",
+    "camera.saveSettingsToAll": "Áp dụng cho toàn bộ mã hàng",
     "camera.savingSettings": "Đang lưu thông số camera...",
     "camera.settingsSaved": "Đã lưu thông số camera.",
     "camera.settingsSaveError": "Không thể lưu thông số camera.",
@@ -2132,10 +2339,21 @@ const translations = {
     "camera.confirmRestartDescription":
       "Camera sẽ được khởi động lại để áp dụng thay đổi. Live view sẽ tạm dừng và tự chạy lại nếu đang hoạt động.",
     "camera.restartAndApply": "Khởi động lại và áp dụng",
+    "camera.confirmApplyProductTitle": "Lưu thông số camera?",
+    "camera.confirmApplyProductDescription":
+      "Bạn có xác nhận lưu thông số camera cho mã hàng {code} này không? Camera sẽ được khởi động lại để áp dụng thay đổi.",
+    "camera.confirmApplyAllTitle": "Áp dụng thông số cho toàn bộ mã hàng?",
+    "camera.confirmApplyAllDescription":
+      "Bạn có muốn sử dụng thông số camera này với toàn bộ mã hàng không? Camera đang chọn sẽ được khởi động lại để áp dụng thay đổi.",
+    "camera.restartAndApplyAll": "Áp dụng toàn bộ và khởi động lại",
     "camera.applyingSettings": "Đang áp dụng thông số camera...",
+    "camera.applyingSettingsToAll":
+      "Đang áp dụng thông số camera cho toàn bộ mã hàng...",
     "camera.applyingSettingsLive":
       "Đang áp dụng thay đổi và khởi động lại camera...",
     "camera.settingsApplied": "Đã áp dụng thông số camera.",
+    "camera.settingsAppliedToAll":
+      "Đã áp dụng thông số camera cho {count} mã hàng.",
     "camera.settingsRestartError":
       "Đã lưu thông số nhưng không thể khởi động lại camera với cấu hình mới.",
     "camera.aiRestartError":
@@ -2585,6 +2803,31 @@ const translationOverrides: Record<Language, Record<string, string>> = {
       "NG ROIs show the recognized OCR text during checking and in the final result.",
     "settings.ngTextHiddenHint":
       "NG ROIs only show the NG state and color. The recognized OCR text stays hidden.",
+    "settings.trainingImagesTitle": "Training ROI images",
+    "settings.trainingImagesDescription":
+      "Save each selected ROI crop as an uncompressed BMP file in a separate training folder.",
+    "settings.trainingImagesCapture": "Training image capture",
+    "settings.trainingImagesEnabled": "Training capture on",
+    "settings.trainingImagesDisabled": "Training capture off",
+    "settings.trainingImagesStatus": "Training image capture",
+    "settings.trainingImagesSavePolicy": "Training save policy",
+    "settings.trainingImagesPolicyAll": "Save OK and NG",
+    "settings.trainingImagesPolicyOk": "Save OK only",
+    "settings.trainingImagesPolicyNg": "Save NG only",
+    "settings.trainingImagesPolicyValue.all": "OK and NG",
+    "settings.trainingImagesPolicyValue.ok": "OK only",
+    "settings.trainingImagesPolicyValue.ng": "NG only",
+    "settings.trainingImagesUnknownExcluded": "UNKNOWN results are never saved.",
+    "settings.trainingImagesFolder": "Training folder",
+    "settings.trainingImagesFolderHint":
+      "Files are saved as BMP in <product code>\\<YYYY-MM-DD>.",
+    "settings.trainingImagesFolderRequired":
+      "Choose a training folder before enabling training capture.",
+    "settings.trainingImagesFolderPickError": "Cannot choose the training folder.",
+    "settings.trainingImagesSave": "Save training settings",
+    "settings.trainingImagesSaving": "Saving training settings...",
+    "settings.trainingImagesSaved": "Training settings saved.",
+    "settings.trainingImagesSaveError": "Cannot save training settings.",
     "settings.ngTextLoadFallback":
       "Cannot load NG display settings. Current display behavior is being used.",
     "operator.productChangedSessionRestarted":
@@ -3039,6 +3282,32 @@ const translationOverrides: Record<Language, Record<string, string>> = {
       "ROI NG vẫn hiển thị chuỗi OCR nhận diện trong lúc kiểm tra và khi có kết quả.",
     "settings.ngTextHiddenHint":
       "ROI NG chỉ hiển thị trạng thái và màu NG, không hiển thị chuỗi OCR đã nhận diện.",
+    "settings.trainingImagesTitle": "Ảnh ROI training",
+    "settings.trainingImagesDescription":
+      "Lưu từng ROI có kết quả hợp lệ thành ảnh BMP không nén tại thư mục training riêng.",
+    "settings.trainingImagesCapture": "Lưu ảnh training",
+    "settings.trainingImagesEnabled": "Đang bật lưu training",
+    "settings.trainingImagesDisabled": "Đang tắt lưu training",
+    "settings.trainingImagesStatus": "Lưu ảnh training",
+    "settings.trainingImagesSavePolicy": "Chế độ lưu training",
+    "settings.trainingImagesPolicyAll": "Lưu OK và NG",
+    "settings.trainingImagesPolicyOk": "Chỉ lưu OK",
+    "settings.trainingImagesPolicyNg": "Chỉ lưu NG",
+    "settings.trainingImagesPolicyValue.all": "OK và NG",
+    "settings.trainingImagesPolicyValue.ok": "Chỉ OK",
+    "settings.trainingImagesPolicyValue.ng": "Chỉ NG",
+    "settings.trainingImagesUnknownExcluded": "Kết quả UNKNOWN sẽ không bao giờ được lưu.",
+    "settings.trainingImagesFolder": "Thư mục training",
+    "settings.trainingImagesFolderHint":
+      "Ảnh BMP được lưu theo <mã hàng>\\<YYYY-MM-DD>.",
+    "settings.trainingImagesFolderRequired":
+      "Vui lòng chọn thư mục training trước khi bật lưu ảnh training.",
+    "settings.trainingImagesFolderPickError":
+      "Không thể chọn thư mục training.",
+    "settings.trainingImagesSave": "Lưu cài đặt training",
+    "settings.trainingImagesSaving": "Đang lưu cài đặt training...",
+    "settings.trainingImagesSaved": "Đã lưu cài đặt training.",
+    "settings.trainingImagesSaveError": "Không thể lưu cài đặt training.",
     "settings.ngTextLoadFallback":
       "Không thể tải cài đặt hiển thị NG. Ứng dụng đang dùng cách hiển thị hiện tại.",
     "operator.productChangedSessionRestarted":
@@ -3615,6 +3884,10 @@ const translationOverrides: Record<Language, Record<string, string>> = {
       "\u0110\u00e3 l\u00e0m m\u1edbi danh s\u00e1ch camera.",
     "products.cameraDevicesLoadError":
       "Kh\u00f4ng th\u1ec3 t\u1ea3i danh s\u00e1ch camera.",
+    "products.noAvailableCamera":
+      "Hi\u1ec7n kh\u00f4ng c\u00f3 camera \u0111\u00e3 \u0111\u1ecbnh danh s\u1eb5n s\u00e0ng k\u1ebft n\u1ed1i.",
+    "products.cameraSelectionRequired":
+      "H\u00e3y ch\u1ecdn camera \u0111\u00e3 \u0111\u1ecbnh danh v\u00e0 \u0111ang s\u1eb5n s\u00e0ng k\u1ebft n\u1ed1i.",
     "products.cameraManualFallback":
       "Kh\u00f4ng th\u1ec3 t\u1ea3i camera ph\u00e1t hi\u1ec7n. V\u1eabn c\u00f3 th\u1ec3 nh\u1eadp t\u00ean thi\u1ebft b\u1ecb th\u1ee7 c\u00f4ng.",
     "products.cameraSelectHint":

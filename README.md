@@ -67,7 +67,7 @@ Current implemented foundation:
 - User management supports create/edit/delete/status flows with shared confirmation UI.
 - Normal admin cannot manage protected `admin/dev` role permissions; only `dev` can.
 - i18n, Sonner notifications, and error/not-found screens are wired for English/Vietnamese.
-- App shell is being standardized around fixed chrome and the 1280x1080 factory-machine viewport.
+- App shell is being standardized around fixed chrome and the 1280x1024 factory-machine viewport.
 - App shell now warms up camera status/device discovery in the background for camera or inspection users.
 - Product profile management exists with model path, camera config, ROI editor, template apply flow, and simulated preview background.
 - `/dashboard` already hosts an operator runtime foundation with product selector, ROI preview, persisted batch-size save, and OK/NG counters.

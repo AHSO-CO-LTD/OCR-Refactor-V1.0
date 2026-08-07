@@ -30,11 +30,13 @@ describe('MachineRuntimeService', () => {
     subscribe: jest.Mock;
     ensureConnected: jest.Mock;
     getMachineInactivitySettings: jest.Mock;
+    getMachineStopSettings: jest.Mock;
     getRuntimeStatus: jest.Mock;
     pulseError: jest.Mock;
     pulseOkResult: jest.Mock;
     setFixedOutput: jest.Mock;
     updateMachineInactivitySettings: jest.Mock;
+    updateMachineStopSettings: jest.Mock;
   };
 
   beforeEach(() => {
@@ -81,11 +83,25 @@ describe('MachineRuntimeService', () => {
       getMachineInactivitySettings: jest.fn().mockResolvedValue({
         data: { enabled: true, timeoutSeconds: 300, configured: true },
       }),
+      getMachineStopSettings: jest.fn().mockResolvedValue({
+        data: {
+          delaySeconds: 0,
+          powerOffCameraOnStop: false,
+          configured: true,
+        },
+      }),
       pulseError: jest.fn().mockResolvedValue({ data: {} }),
       pulseOkResult: jest.fn().mockResolvedValue({ data: {} }),
       setFixedOutput: jest.fn().mockResolvedValue({ data: {} }),
       updateMachineInactivitySettings: jest.fn().mockResolvedValue({
         data: { enabled: true, timeoutSeconds: 300, configured: true },
+      }),
+      updateMachineStopSettings: jest.fn().mockResolvedValue({
+        data: {
+          delaySeconds: 5,
+          powerOffCameraOnStop: false,
+          configured: true,
+        },
       }),
     };
     const moduleRef = {
@@ -479,6 +495,33 @@ describe('MachineRuntimeService', () => {
     });
   });
 
+  it('continues operation after the first real frame succeeds during reconnect', async () => {
+    inspections.verifyRunningInspectionCameraFrame
+      .mockRejectedValueOnce(new Error('Camera is still starting'))
+      .mockResolvedValueOnce({ success: true });
+    jest
+      .spyOn(
+        service as unknown as {
+          delay: (milliseconds: number) => Promise<void>;
+        },
+        'delay',
+      )
+      .mockResolvedValue(undefined);
+
+    await service.startOperation();
+
+    expect(
+      inspections.verifyRunningInspectionCameraFrame,
+    ).toHaveBeenCalledTimes(2);
+    expect(
+      inspections.verifyRunningInspectionCameraFrame,
+    ).toHaveBeenLastCalledWith(expect.any(AbortSignal));
+    expect(service.getStatus().data).toMatchObject({
+      state: 'running',
+      restartRequired: false,
+    });
+  });
+
   it('exposes but does not execute PLC capture triggers in manual mode', async () => {
     emitPlcEvent(signal('captureTrigger'));
     await settleAsyncWork();
@@ -569,10 +612,7 @@ describe('MachineRuntimeService', () => {
     ]);
   });
 
-  it('turns off camera resources on PLC stop and restores them on PLC start', async () => {
-    inspections.stopCurrentInspection.mockResolvedValueOnce({
-      data: { productId: 'product-1', operatorId: 'operator-1' },
-    });
+  it('keeps the Line session while camera resources stop and resume with PLC', async () => {
     await service.startOperation();
     service.updateControls({
       mode: MachineOperationModeDto.manual,
@@ -598,38 +638,24 @@ describe('MachineRuntimeService', () => {
       'cameraLight',
       false,
     );
-    expect(plcRuntime.setFixedOutput).toHaveBeenNthCalledWith(
-      3,
-      'cameraPower',
-      false,
-    );
-    expect(inspections.stopCurrentInspection).toHaveBeenCalledWith(
-      LineSessionEndReason.plc_stop,
-    );
+    expect(plcRuntime.setFixedOutput).toHaveBeenCalledTimes(2);
+    expect(inspections.stopCurrentInspection).not.toHaveBeenCalled();
     expect(service.getStatus().data.state).toBe('idle_machine_stop');
 
     emitPlcEvent(signal('startTrigger'));
     await settleAsyncWork();
 
     expect(plcRuntime.setFixedOutput).toHaveBeenNthCalledWith(
-      4,
-      'cameraPower',
-      true,
-    );
-    expect(plcRuntime.setFixedOutput).toHaveBeenNthCalledWith(
-      5,
+      3,
       'cameraLight',
       true,
     );
     expect(plcRuntime.setFixedOutput).toHaveBeenNthCalledWith(
-      6,
+      4,
       'waitingChecking',
       true,
     );
-    expect(inspections.beginInspectionSession).toHaveBeenCalledWith(
-      { productId: 'product-1' },
-      { id: 'operator-1', username: 'plc-resume', role: 'operator' },
-    );
+    expect(inspections.beginInspectionSession).not.toHaveBeenCalled();
     expect(inspections.verifyRunningInspectionCameraFrame).toHaveBeenCalled();
     expect(service.getStatus().data).toMatchObject({
       state: 'running',
@@ -637,6 +663,90 @@ describe('MachineRuntimeService', () => {
       liveCameraEnabled: true,
       realtimeAiEnabled: true,
     });
+  });
+
+  it('waits for the configured PLC stop delay before stopping the line', async () => {
+    jest.useFakeTimers();
+    plcRuntime.getMachineStopSettings.mockResolvedValue({
+      data: {
+        delaySeconds: 5,
+        powerOffCameraOnStop: false,
+        configured: true,
+      },
+    });
+    try {
+      await service.startOperation();
+      deviceTool.disconnectCamera.mockClear();
+
+      emitPlcEvent(signal('stopTrigger'));
+      await service['plcEventQueue'];
+
+      expect(deviceTool.disconnectCamera).not.toHaveBeenCalled();
+      expect(service.getStatus().data).toMatchObject({
+        state: 'running',
+        stopCountdownSeconds: 5,
+      });
+
+      await jest.advanceTimersByTimeAsync(1000);
+      expect(service.getStatus().data.stopCountdownSeconds).toBe(4);
+
+      await jest.advanceTimersByTimeAsync(3999);
+      expect(deviceTool.disconnectCamera).not.toHaveBeenCalled();
+
+      await jest.advanceTimersByTimeAsync(1);
+      await service['plcEventQueue'];
+
+      expect(deviceTool.disconnectCamera).toHaveBeenCalledTimes(1);
+      expect(service.getStatus().data.state).toBe('idle_machine_stop');
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('waits five seconds after disconnecting before turning off camera power', async () => {
+    jest.useFakeTimers();
+    plcRuntime.getMachineStopSettings.mockResolvedValue({
+      data: {
+        delaySeconds: 0,
+        powerOffCameraOnStop: true,
+        configured: true,
+      },
+    });
+    try {
+      await service.startOperation();
+      deviceTool.disconnectCamera.mockClear();
+      plcRuntime.setFixedOutput.mockClear();
+
+      emitPlcEvent(signal('stopTrigger'));
+      await jest.advanceTimersByTimeAsync(0);
+
+      expect(deviceTool.disconnectCamera).toHaveBeenCalledTimes(1);
+      expect(plcRuntime.setFixedOutput).not.toHaveBeenCalled();
+
+      await jest.advanceTimersByTimeAsync(4_999);
+      expect(plcRuntime.setFixedOutput).not.toHaveBeenCalled();
+
+      await jest.advanceTimersByTimeAsync(1);
+      await service['plcEventQueue'];
+
+      expect(plcRuntime.setFixedOutput).toHaveBeenNthCalledWith(
+        1,
+        'waitingChecking',
+        false,
+      );
+      expect(plcRuntime.setFixedOutput).toHaveBeenNthCalledWith(
+        2,
+        'cameraLight',
+        false,
+      );
+      expect(plcRuntime.setFixedOutput).toHaveBeenNthCalledWith(
+        3,
+        'cameraPower',
+        false,
+      );
+    } finally {
+      jest.useRealTimers();
+    }
   });
 
   it('restores automatic live AI controls after capture-timeout resume', async () => {

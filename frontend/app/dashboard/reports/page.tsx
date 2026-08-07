@@ -1,7 +1,7 @@
 "use client";
 
 import { AppShell } from "@/components/app-shell";
-import { LineOperationReportsPanel } from "@/components/reports/line-operation-reports-panel";
+import { LineOperationResultReportsPanel } from "@/components/reports/line-operation-result-reports-panel";
 
 export default function ReportsPage() {
   return (
@@ -9,7 +9,7 @@ export default function ReportsPage() {
       titleKey="operationReports.title"
       descriptionKey="operationReports.description"
     >
-      <LineOperationReportsPanel />
+      <LineOperationResultReportsPanel />
     </AppShell>
   );
 }

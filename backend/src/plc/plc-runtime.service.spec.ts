@@ -22,6 +22,8 @@ describe('PlcRuntimeService', () => {
     okPulseDurationMs: 750,
     inactivityTimeoutEnabled: true,
     sleepTimeSeconds: 300,
+    stopDelaySeconds: 5,
+    powerOffCameraOnStop: true,
     createdAt: new Date(),
     updatedAt: new Date(),
     customKeys: [
@@ -37,6 +39,71 @@ describe('PlcRuntimeService', () => {
       },
     ],
   };
+
+  it('simulates PLC input and output without writing to physical hardware', async () => {
+    jest.useFakeTimers();
+    const prisma = {
+      plcConfig: { findUnique: jest.fn().mockResolvedValue(config) },
+    } as unknown as PrismaService;
+    const disconnect = jest.fn().mockResolvedValue(null);
+    const writeBoolean = jest.fn();
+    const toolClient = {
+      disconnect,
+      writeBoolean,
+    } as unknown as PlcToolClient;
+    const service = new PlcRuntimeService(prisma, toolClient);
+    const events: Array<{
+      id?: string;
+      type: string;
+      key?: string;
+      value?: boolean;
+    }> = [];
+    service.subscribe((event) => events.push(event));
+
+    await expect(service.enableSimulator('dev-client')).resolves.toMatchObject({
+      data: {
+        connected: true,
+        host: 'PLC-SIMULATOR',
+        simulatorActive: true,
+      },
+    });
+    await service.setFixedOutput('cameraPower', true);
+    await service.setFixedOutput('waitingChecking', true);
+    await service.setFixedOutput('waitingChecking', false);
+    await service.emitSimulatorSignal('dev-client', 'startTrigger');
+    await jest.advanceTimersByTimeAsync(50);
+
+    expect(writeBoolean).not.toHaveBeenCalled();
+    const eventIds = events.map((event) => event.id);
+    expect(eventIds.every(Boolean)).toBe(true);
+    expect(new Set(eventIds).size).toBe(eventIds.length);
+    expect(events).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: 'output',
+          key: 'cameraPower',
+          value: true,
+        }),
+        expect.objectContaining({
+          type: 'signal',
+          key: 'startTrigger',
+          value: true,
+        }),
+        expect.objectContaining({
+          type: 'signal',
+          key: 'startTrigger',
+          value: false,
+        }),
+      ]),
+    );
+    await jest.advanceTimersByTimeAsync(60 * 60 * 1000);
+    await expect(service.getRuntimeStatus()).resolves.toMatchObject({
+      data: { simulatorActive: true, state: 'connected' },
+    });
+
+    await service.disableSimulator('dev-client');
+    jest.useRealTimers();
+  });
 
   it('maps logical M outputs and clears outputs before disconnecting on shutdown', async () => {
     const prisma = {

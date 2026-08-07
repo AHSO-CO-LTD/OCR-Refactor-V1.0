@@ -50,6 +50,7 @@ const STARTUP_TIMEOUT_MS = 120_000;
 const EXISTING_SERVICE_TIMEOUT_MS = 10_000;
 const HEALTH_POLL_MS = 500;
 const SHUTDOWN_TIMEOUT_MS = 45_000;
+const CAMERA_DISCONNECT_POWER_DELAY_MS = 5_000;
 const WATCHDOG_INTERVAL_MS = 5_000;
 const WATCHDOG_FAILURE_THRESHOLD = 3;
 const WATCHDOG_RESTART_COOLDOWN_MS = 20_000;
@@ -336,6 +337,22 @@ export class ServiceManager {
   }
 
   async shutdownHardware(onStage: (stage: ShutdownStageUpdate) => void) {
+    const backendPort = this.getServicePort("backend");
+    const backendReady = await isHealthOk(
+      `http://127.0.0.1:${backendPort}/api/health`,
+    );
+
+    if (!backendReady) {
+      (["camera", "cameraOutputs", "remainingSignals", "plc"] as const).forEach(
+        (id) => onStage({ id, status: "skipped" }),
+      );
+      this.emitLog(
+        "backend",
+        "hardware shutdown skipped because backend is not available",
+      );
+      return;
+    }
+
     const plcConnected = await this.getPlcConnectionForHardwareShutdown();
     const stages: Array<{ id: ShutdownStageId; path: string }> = [
       { id: "camera", path: "shutdown/camera" },
@@ -353,12 +370,30 @@ export class ServiceManager {
     }
 
     const failures: string[] = [];
+    let cameraDisconnected = false;
 
     for (const stage of stages) {
+      if (stage.id === "cameraOutputs" && !cameraDisconnected) {
+        onStage({ id: stage.id, status: "skipped" });
+        this.emitLog(
+          "backend",
+          "camera power shutdown skipped because camera disconnect did not complete",
+        );
+        continue;
+      }
+
       onStage({ id: stage.id, status: "running" });
 
       try {
         await this.requestBackendHardwareShutdownStage(stage.path);
+        if (stage.id === "camera") {
+          cameraDisconnected = true;
+          this.emitLog(
+            "backend",
+            "camera disconnected; waiting 5 seconds before turning off camera power",
+          );
+          await delay(CAMERA_DISCONNECT_POWER_DELAY_MS);
+        }
         onStage({ id: stage.id, status: "done" });
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
@@ -945,6 +980,7 @@ export class ServiceManager {
 
     const command = resolveNpmCommand([
       "exec",
+      "--offline",
       "--",
       "prisma",
       "migrate",
@@ -1134,6 +1170,7 @@ export class ServiceManager {
     path: string,
     body?: Record<string, string>,
   ) {
+    const timeoutMs = path === "startup/camera" ? 70_000 : 25_000;
     const response = await fetch(
       `http://127.0.0.1:${this.getServicePort("backend")}/api/internal/plc-runtime/${path}`,
       {
@@ -1143,7 +1180,7 @@ export class ServiceManager {
           "x-desktop-internal-token": this.desktopInternalToken,
         },
         body: JSON.stringify(body ?? {}),
-        signal: AbortSignal.timeout(25_000),
+        signal: AbortSignal.timeout(timeoutMs),
       },
     );
     if (!response.ok) {
@@ -1344,6 +1381,15 @@ function resolveToolPython(repoRoot: string) {
 
   if (configured && canRunToolPython(configured, [])) {
     return { command: configured, args: [] };
+  }
+
+  const embeddedPython =
+    process.platform === "win32"
+      ? join(repoRoot, "tool", "python-embed", "python.exe")
+      : join(repoRoot, "tool", "python-embed", "bin", "python");
+
+  if (existsSync(embeddedPython) && canRunToolPython(embeddedPython, [])) {
+    return { command: embeddedPython, args: [] };
   }
 
   const venvPython =

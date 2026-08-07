@@ -123,6 +123,26 @@ export class InspectionsController {
     return this.lineOperationReportService.getSummary(from, to, groupBy);
   }
 
+  @ApiOperation({ summary: 'List detailed PLC-latched Line operation results' })
+  @Get('line-reports/results')
+  @RequirePermissions(PERMISSIONS.REPORT_VIEW)
+  listLineReportResults(
+    @Query('limit') limit?: string,
+    @Query('page') page?: string,
+  ) {
+    return this.lineOperationReportService.listResultSessions(
+      Number(limit) || 5,
+      Number(page) || 1,
+    );
+  }
+
+  @ApiOperation({ summary: 'Get the saved camera image for a Line result' })
+  @Get('line-reports/results/:captureId/image')
+  @RequirePermissions(PERMISSIONS.REPORT_VIEW)
+  getLineReportResultImage(@Param('captureId') captureId: string) {
+    return this.lineOperationReportService.getResultCaptureImage(captureId);
+  }
+
   @ApiOperation({ summary: 'Export latched Line results as XLSX' })
   @Get('line-reports/export')
   @RequirePermissions(PERMISSIONS.REPORT_VIEW)
@@ -168,12 +188,15 @@ export class InspectionsController {
     @CurrentUser() user: AuthenticatedRequest['user'],
   ) {
     if (
-      dto.showNgRecognizedText !== undefined &&
+      (dto.showNgRecognizedText !== undefined ||
+        dto.trainingImageEnabled !== undefined ||
+        dto.trainingImageSaveFolderPath !== undefined ||
+        dto.trainingImageSavePolicy !== undefined) &&
       user.role !== 'admin' &&
       user.role !== 'dev'
     ) {
       throw new ForbiddenException(
-        'Only admin or dev can manage NG text visibility',
+        'Only admin or dev can manage protected Line result settings',
       );
     }
 
@@ -196,8 +219,9 @@ export class InspectionsController {
   @RequirePermissions(PERMISSIONS.INSPECTION_STOP)
   stopInspection(
     @Param('jobId') jobId: string,
+    @CurrentUser() user: { id: string; username: string; role: string },
     @Body() dto?: StopInspectionDto,
   ) {
-    return this.inspectionsService.stopInspection(jobId, dto?.endReason);
+    return this.inspectionsService.stopInspection(jobId, dto?.endReason, user);
   }
 }

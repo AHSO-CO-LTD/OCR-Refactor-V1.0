@@ -27,10 +27,15 @@ import {
 import {
   PulseMachineTestResultDto,
   UpdateMachineInactivitySettingsDto,
+  UpdateMachineStopSettingsDto,
   UpdateMachineRuntimeControlsDto,
   UpdateMachineTestModeDto,
   UpdateMachineTestOutputDto,
 } from './dto/machine-runtime.dto';
+import {
+  PlcSimulatorSessionDto,
+  PlcSimulatorSignalDto,
+} from './dto/plc-simulator.dto';
 import { PlcRuntimeService } from './plc-runtime.service';
 import { MachineRuntimeService } from './machine-runtime.service';
 
@@ -74,6 +79,46 @@ export class PlcController {
   @RequireAnyPermission(PERMISSIONS.PLC_MANAGE, PERMISSIONS.PLC_OPERATE)
   disconnect() {
     return this.plcRuntime.disconnect();
+  }
+
+  @Post('simulator/enable')
+  @ApiOperation({ summary: 'Enable the in-memory PLC simulator for dev only' })
+  async enableSimulator(
+    @Body() dto: PlcSimulatorSessionDto,
+    @CurrentUser() user: AuthenticatedRequest['user'],
+  ) {
+    this.assertDev(user);
+    return this.plcRuntime.enableSimulator(dto.clientId);
+  }
+
+  @Post('simulator/heartbeat')
+  @ApiOperation({ summary: 'Refresh the active dev PLC simulator lease' })
+  heartbeatSimulator(
+    @Body() dto: PlcSimulatorSessionDto,
+    @CurrentUser() user: AuthenticatedRequest['user'],
+  ) {
+    this.assertDev(user);
+    return this.plcRuntime.heartbeatSimulator(dto.clientId);
+  }
+
+  @Post('simulator/disable')
+  @ApiOperation({ summary: 'Disable the active dev PLC simulator' })
+  disableSimulator(
+    @Body() dto: PlcSimulatorSessionDto,
+    @CurrentUser() user: AuthenticatedRequest['user'],
+  ) {
+    this.assertDev(user);
+    return this.plcRuntime.disableSimulator(dto.clientId);
+  }
+
+  @Post('simulator/signal')
+  @ApiOperation({ summary: 'Emit a PLC-to-app signal from the dev simulator' })
+  emitSimulatorSignal(
+    @Body() dto: PlcSimulatorSignalDto,
+    @CurrentUser() user: AuthenticatedRequest['user'],
+  ) {
+    this.assertDev(user);
+    return this.plcRuntime.emitSimulatorSignal(dto.clientId, dto.key);
   }
 
   @Put('outputs/camera-power')
@@ -145,6 +190,23 @@ export class PlcController {
   ) {
     this.assertCanManageInactivitySettings(user);
     return this.machineRuntime.updateInactivitySettings(dto);
+  }
+
+  @Get('machine/stop-settings')
+  @ApiOperation({ summary: 'Get PLC stop delay settings' })
+  getMachineStopSettings(@CurrentUser() user: AuthenticatedRequest['user']) {
+    this.assertCanManageMachineStopSettings(user);
+    return this.machineRuntime.getStopSettings();
+  }
+
+  @Put('machine/stop-settings')
+  @ApiOperation({ summary: 'Update PLC stop delay settings' })
+  updateMachineStopSettings(
+    @Body() dto: UpdateMachineStopSettingsDto,
+    @CurrentUser() user: AuthenticatedRequest['user'],
+  ) {
+    this.assertCanManageMachineStopSettings(user);
+    return this.machineRuntime.updateStopSettings(dto);
   }
 
   @Post('machine/activity')
@@ -261,12 +323,28 @@ export class PlcController {
     return this.machineRuntime.reconnectPlc();
   }
 
+  private assertDev(user: AuthenticatedRequest['user']) {
+    if (user.role !== 'dev') {
+      throw new ForbiddenException('PLC simulator is available to dev only');
+    }
+  }
+
   private assertCanManageInactivitySettings(
     user: AuthenticatedRequest['user'],
   ) {
     if (user.role !== 'admin' && user.role !== 'dev') {
       throw new ForbiddenException(
         'Only admin or dev can manage machine inactivity settings',
+      );
+    }
+  }
+
+  private assertCanManageMachineStopSettings(
+    user: AuthenticatedRequest['user'],
+  ) {
+    if (user.role !== 'admin' && user.role !== 'dev') {
+      throw new ForbiddenException(
+        'Only admin or dev can manage PLC stop delay settings',
       );
     }
   }

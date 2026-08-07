@@ -7,6 +7,8 @@ import {
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../database/prisma.service';
 import { ApplyProductProfileDto } from './dto/apply-product-profile.dto';
+import { ApplyCameraSettingsToAllProductsDto } from './dto/apply-camera-settings-to-all-products.dto';
+import { ApplyRoiRegionsToAllProductsDto } from './dto/apply-roi-regions-to-all-products.dto';
 import { BulkUpdateProductAiSettingsDto } from './dto/bulk-update-product-ai-settings.dto';
 import { BulkUpdateProductOcrTestSettingsDto } from './dto/bulk-update-product-ocr-test-settings.dto';
 import {
@@ -197,6 +199,41 @@ export class ProductsService {
     return { data: this.toProductProfile(product) };
   }
 
+  async applyRoiRegionsToAllProducts(dto: ApplyRoiRegionsToAllProductsDto) {
+    this.ensureValidRoiRegions(dto.roiRegions);
+    if (
+      dto.roiRegions.some(
+        (region) => region.width !== 300 || region.height !== 440,
+      )
+    ) {
+      throw new BadRequestException('ROI size must be exactly 300 x 440');
+    }
+
+    const targetProducts = await this.prisma.product.findMany({
+      select: { id: true },
+    });
+    if (targetProducts.length === 0) {
+      throw new BadRequestException('No target products found');
+    }
+
+    const targetProductIds = targetProducts.map((product) => product.id);
+    const roiData = dto.roiRegions.map((region) => this.toRoiData(region));
+    await this.prisma.$transaction(async (tx) => {
+      await tx.roiRegion.deleteMany({
+        where: { productId: { in: targetProductIds } },
+      });
+      if (roiData.length > 0) {
+        await tx.roiRegion.createMany({
+          data: targetProductIds.flatMap((productId) =>
+            roiData.map((region) => ({ productId, ...region })),
+          ),
+        });
+      }
+    });
+
+    return { data: { updatedCount: targetProducts.length } };
+  }
+
   async updateProductBatchSize(id: string, dto: UpdateProductBatchSizeDto) {
     const existingProduct = await this.prisma.product.findUnique({
       where: { id },
@@ -375,6 +412,31 @@ export class ProductsService {
             productId: target.id,
             ...region,
           })),
+        });
+      }
+    });
+
+    return { data: { updatedCount: targetProducts.length } };
+  }
+
+  async applyCameraSettingsToAllProducts(
+    dto: ApplyCameraSettingsToAllProductsDto,
+  ) {
+    const targetProducts = await this.prisma.product.findMany({
+      select: { id: true },
+    });
+
+    if (targetProducts.length === 0) {
+      throw new BadRequestException('No target products found');
+    }
+
+    const cameraData = this.toCameraData(dto.camera);
+    await this.prisma.$transaction(async (tx) => {
+      for (const product of targetProducts) {
+        await tx.cameraConfig.upsert({
+          where: { productId: product.id },
+          update: cameraData,
+          create: { productId: product.id, ...cameraData },
         });
       }
     });

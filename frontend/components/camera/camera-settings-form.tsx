@@ -22,6 +22,7 @@ type CameraSettingsFormProps = {
   disabled?: boolean;
   onDirtyChange?: (dirty: boolean) => void;
   onApply: (camera: CameraProfile) => Promise<ProductProfile>;
+  onApplyToAll: (camera: CameraProfile) => Promise<ProductProfile>;
 };
 
 export function CameraSettingsForm({
@@ -31,13 +32,16 @@ export function CameraSettingsForm({
   disabled = false,
   onDirtyChange,
   onApply,
+  onApplyToAll,
 }: CameraSettingsFormProps) {
   const { t } = useI18n();
   const [draft, setDraft] = useState<CameraProfile | null>(() =>
     product ? normalizeCamera(product.camera) : null,
   );
   const [saving, setSaving] = useState(false);
-  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [saveScope, setSaveScope] = useState<"product" | "all" | null>(
+    null,
+  );
   const dirty = Boolean(
     product &&
       draft &&
@@ -60,12 +64,23 @@ export function CameraSettingsForm({
     );
   }
 
-  function requestSave() {
+  function requestSave(scope: "product" | "all") {
     if (!product || !draft) {
       toast.warning(t("camera.selectProductFirst"));
       return;
     }
-    setConfirmOpen(true);
+    if (
+      draft.sourceType === "usb" &&
+      !devices.some(
+        (device) =>
+          isSelectableCameraDevice(device) &&
+          cameraDeviceValue(device) === draft.cameraIdentityId,
+      )
+    ) {
+      toast.warning(t("products.cameraSelectionRequired"));
+      return;
+    }
+    setSaveScope(scope);
   }
 
   async function handleApply() {
@@ -76,9 +91,10 @@ export function CameraSettingsForm({
 
     setSaving(true);
     try {
-      const savedProduct = await onApply(draft);
+      const savedProduct =
+        saveScope === "all" ? await onApplyToAll(draft) : await onApply(draft);
       setDraft(normalizeCamera(savedProduct.camera));
-      setConfirmOpen(false);
+      setSaveScope(null);
     } catch {
       // The parent operation reports the concrete save/restart error via Sonner.
     } finally {
@@ -128,7 +144,17 @@ export function CameraSettingsForm({
         <div className="flex shrink-0 flex-wrap gap-2">
           <Button
             type="button"
-            onClick={requestSave}
+            variant="outline"
+            onClick={() => requestSave("all")}
+            disabled={formDisabled}
+            className="h-10 px-4"
+          >
+            <Save className="h-4 w-4" />
+            {t("camera.saveSettingsToAll")}
+          </Button>
+          <Button
+            type="button"
+            onClick={() => requestSave("product")}
             disabled={formDisabled}
             className="h-10 px-4"
           >
@@ -178,25 +204,20 @@ export function CameraSettingsForm({
                   disabled={formDisabled}
                 >
                   <option value="">{t("products.selectCameraDevice")}</option>
-                  {devices.map((device) => (
+                  {devices.filter(isSelectableCameraDevice).map((device) => (
                     <option
                       key={`${device.index}-${device.serial_number ?? device.friendly_name}`}
                       value={cameraDeviceValue(device)}
-                      disabled={!device.connectable}
                     >
                       #{device.index} {device.friendly_name}
-                      {!device.connectable
-                        ? ` - ${t("cameraIdentity.notConnectable")}`
-                        : ""}
                     </option>
                   ))}
-                  {draft.deviceName &&
-                  !devices.some(
-                    (device) => cameraDeviceValue(device) === draft.deviceName,
-                  ) ? (
-                    <option value={draft.deviceName}>{draft.deviceName}</option>
-                  ) : null}
                 </Select>
+                {devices.filter(isSelectableCameraDevice).length === 0 ? (
+                  <span className="text-xs text-amber-700">
+                    {t("products.noAvailableCamera")}
+                  </span>
+                ) : null}
               </label>
             )}
           </div>
@@ -261,14 +282,31 @@ export function CameraSettingsForm({
 
     </div>
     <ConfirmModal
-      open={confirmOpen}
-      title={t("camera.confirmRestartTitle")}
-      description={t("camera.confirmRestartDescription")}
-      confirmLabel={t("camera.restartAndApply")}
+      open={saveScope !== null}
+      title={
+        saveScope === "all"
+          ? t("camera.confirmApplyAllTitle")
+          : t("camera.confirmApplyProductTitle")
+      }
+      description={
+        saveScope === "all"
+          ? t("camera.confirmApplyAllDescription")
+          : t("camera.confirmApplyProductDescription").replace(
+              "{code}",
+              product.code,
+            )
+      }
+      confirmLabel={
+        saving
+          ? t("camera.savingSettings")
+          : saveScope === "all"
+            ? t("camera.restartAndApplyAll")
+            : t("camera.restartAndApply")
+      }
       cancelLabel={t("common.cancel")}
       loading={saving}
       onConfirm={() => void handleApply()}
-      onCancel={() => setConfirmOpen(false)}
+      onCancel={() => setSaveScope(null)}
     />
     </>
   );
@@ -400,4 +438,10 @@ function normalizeCamera(camera: CameraProfile): CameraProfile {
 
 function cameraDeviceValue(device: CameraDevice) {
   return device.identityId ?? device.identity_id ?? device.friendly_name;
+}
+
+function isSelectableCameraDevice(device: CameraDevice) {
+  return Boolean(
+    device.connectable && (device.identityId ?? device.identity_id),
+  );
 }

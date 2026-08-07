@@ -8,6 +8,7 @@ import {
   ScanEye,
   ScanLine,
   SlidersHorizontal,
+  Unplug,
   Wrench,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -23,7 +24,6 @@ import {
 } from "@/components/camera/camera-image-viewer";
 import { CameraSettingsForm } from "@/components/camera/camera-settings-form";
 import { CameraDebugPanel } from "@/components/camera/camera-debug-panel";
-import { CameraConnectionTestPanel } from "@/components/camera/camera-connection-test-panel";
 import {
   ConfigurationInspectionTestPanel,
   type ConfigurationTestPreview,
@@ -57,6 +57,8 @@ import {
   listProductProfiles,
   startCameraAi,
   stopCameraAi,
+  applyCameraSettingsToAllProducts,
+  applyRoiRegionsToAllProducts,
   updateProductProfile,
   type CameraDevice,
   type CameraFrame,
@@ -291,6 +293,36 @@ export function CameraLiveViewPanel({ configurationMode = false }: CameraLiveVie
     handleSavedProduct(normalizedProduct);
   }
 
+  async function handleApplyRoiRegionsToAll(roiRegions: ProductProfile["roiRegions"]) {
+    const accessToken = getAccessToken();
+    if (!accessToken) {
+      toast.error(t("users.missingSession"));
+      throw new Error("Missing session");
+    }
+    if (!selectedProduct) {
+      toast.warning(t("camera.selectProductFirst"));
+      throw new Error("Product profile is required");
+    }
+
+    const applyResponse = await applyRoiRegionsToAllProducts(accessToken, {
+      roiRegions,
+    });
+    const productResponse = await listProductProfiles(accessToken);
+    const refreshedProducts = prepareProducts(productResponse.data);
+    const refreshedSelectedProduct = refreshedProducts.find(
+      (product) => product.id === selectedProduct.id,
+    );
+    if (!refreshedSelectedProduct) {
+      throw new Error("Selected product was not found after applying ROI settings");
+    }
+
+    handleProductsChanged(refreshedProducts);
+    return {
+      product: refreshedSelectedProduct,
+      updatedCount: applyResponse.data.updatedCount,
+    };
+  }
+
   function handleConfigurationTabChange(tab: ConfigurationTab) {
     setVisitedTabs((current) =>
       current.has(tab) ? current : new Set(current).add(tab),
@@ -380,34 +412,6 @@ export function CameraLiveViewPanel({ configurationMode = false }: CameraLiveVie
     };
   }, [apiError, configurationMode, prepareProducts, t]);
 
-  async function refreshCameraRuntime(showFeedback = true) {
-    const accessToken = getAccessToken();
-
-    if (!accessToken) {
-      toast.error(t("users.missingSession"));
-      return;
-    }
-
-    const toastId = showFeedback
-      ? toast.loading(t("camera.refreshingDevices"))
-      : undefined;
-
-    try {
-      const cameraRuntime = await loadCameraRuntime(accessToken);
-      setStatus(cameraRuntime.statusResponse);
-      setDevices(cameraRuntime.devices);
-      setHardwareRanges(cameraRuntime.rangesResponse);
-      if (showFeedback) {
-        toast.success(t("camera.devicesRefreshed"), { id: toastId });
-      }
-    } catch (cause) {
-      toast.error(
-        formatCameraApiError(cause, apiError, t, "camera.devicesRefreshError"),
-        toastId ? { id: toastId } : undefined,
-      );
-    }
-  }
-
   useEffect(() => {
     return () => {
       streamSocketRef.current?.close();
@@ -459,7 +463,9 @@ export function CameraLiveViewPanel({ configurationMode = false }: CameraLiveVie
 
     try {
       await disconnectCamera(accessToken).catch(() => undefined);
-      const response = await connectCamera(accessToken, product.camera);
+      const response = await connectCamera(accessToken, product.camera, {
+        manualReconnect: true,
+      });
       const cameraRuntime = await loadCameraRuntime(accessToken);
       setStatus(response);
       setDevices(cameraRuntime.devices);
@@ -513,6 +519,37 @@ export function CameraLiveViewPanel({ configurationMode = false }: CameraLiveVie
     }
 
     await startLiveStream();
+  }
+
+  async function handleDisconnectCamera() {
+    const accessToken = getAccessToken();
+
+    if (!accessToken) {
+      toast.error(t("users.missingSession"));
+      return;
+    }
+
+    setConnecting(true);
+    const toastId = toast.loading(t("camera.disconnecting"));
+    closeAiResults();
+    closeLiveStream({ silent: true });
+
+    try {
+      await stopCameraAi(accessToken).catch(() => undefined);
+      const response = await disconnectCamera(accessToken, {
+        manualDisconnect: true,
+      });
+      setStatus(response);
+      setFrame(null);
+      toast.success(t("camera.disconnectSuccess"), { id: toastId });
+    } catch (cause) {
+      toast.error(
+        formatCameraApiError(cause, apiError, t, "camera.disconnectError"),
+        { id: toastId },
+      );
+    } finally {
+      setConnecting(false);
+    }
   }
 
   async function handleToggleAi() {
@@ -604,7 +641,11 @@ export function CameraLiveViewPanel({ configurationMode = false }: CameraLiveVie
     const toastId = toast.loading(t("camera.connecting"));
 
     try {
-      const response = await connectCamera(accessToken, selectedProduct.camera);
+      const response = await connectCamera(
+        accessToken,
+        selectedProduct.camera,
+        { manualReconnect: true },
+      );
       const cameraRuntime = await loadCameraRuntime(accessToken);
       setStatus(response);
       setDevices(cameraRuntime.devices);
@@ -823,6 +864,64 @@ export function CameraLiveViewPanel({ configurationMode = false }: CameraLiveVie
     setViewerTransform(toViewerTransform(nextProduct.camera));
   }
 
+  async function restartCameraAfterSettingsSaved(
+    accessToken: string,
+    savedProduct: ProductProfile,
+    wasLive: boolean,
+    wasAiRunning: boolean,
+    toastId: string | number,
+    successMessage: string,
+  ) {
+    closeLiveStream({ silent: true });
+    setFrame(null);
+    if (wasAiRunning) {
+      closeAiResults();
+      await stopCameraAi(accessToken).catch(() => undefined);
+    }
+
+    try {
+      await disconnectCamera(accessToken).catch(() => undefined);
+      const runtimeStatus = await connectCamera(
+        accessToken,
+        savedProduct.camera,
+        { manualReconnect: true },
+      );
+      const cameraRuntime = await loadCameraRuntime(accessToken);
+      setStatus(runtimeStatus);
+      setDevices(cameraRuntime.devices);
+      setHardwareRanges(cameraRuntime.rangesResponse);
+
+      if (wasAiRunning) {
+        try {
+          await startCameraAi(accessToken, savedProduct.id);
+          openAiResultsSocket(accessToken);
+          setAiRunning(true);
+        } catch (cause) {
+          toast.warning(
+            formatCameraApiError(cause, apiError, t, "camera.aiRestartError"),
+          );
+        }
+      }
+
+      if (wasLive) {
+        openStreamSocket(accessToken, toastId, {
+          onSettled: () => setApplyingCameraSettings(false),
+          successMessage,
+        });
+      } else {
+        setApplyingCameraSettings(false);
+        toast.success(successMessage, { id: toastId });
+      }
+    } catch (cause) {
+      setApplyingCameraSettings(false);
+      toast.error(
+        formatCameraApiError(cause, apiError, t, "camera.settingsRestartError"),
+        { id: toastId },
+      );
+      throw cause;
+    }
+  }
+
   async function handleApplyCameraSettings(camera: CameraProfile) {
     const accessToken = getAccessToken();
 
@@ -858,52 +957,73 @@ export function CameraLiveViewPanel({ configurationMode = false }: CameraLiveVie
       throw cause;
     }
 
-    closeLiveStream({ silent: true });
-    setFrame(null);
-    if (wasAiRunning) {
-      closeAiResults();
-      await stopCameraAi(accessToken).catch(() => undefined);
+    await restartCameraAfterSettingsSaved(
+      accessToken,
+      savedProduct,
+      wasLive,
+      wasAiRunning,
+      toastId,
+      t("camera.settingsApplied"),
+    );
+    return savedProduct;
+  }
+
+  async function handleApplyCameraSettingsToAll(camera: CameraProfile) {
+    const accessToken = getAccessToken();
+
+    if (!accessToken) {
+      toast.error(t("users.missingSession"));
+      throw new Error("Missing session");
+    }
+    if (!selectedProduct) {
+      toast.warning(t("camera.selectProductFirst"));
+      throw new Error("Product profile is required");
     }
 
+    const wasLive = live;
+    const wasAiRunning = aiRunning;
+    setApplyingCameraSettings(true);
+    const toastId = toast.loading(t("camera.applyingSettingsToAll"));
+    let savedProduct: ProductProfile;
+    let updatedCount = 0;
+
     try {
-      await disconnectCamera(accessToken).catch(() => undefined);
-      const runtimeStatus = await connectCamera(accessToken, savedProduct.camera);
-      const cameraRuntime = await loadCameraRuntime(accessToken);
-      setStatus(runtimeStatus);
-      setDevices(cameraRuntime.devices);
-      setHardwareRanges(cameraRuntime.rangesResponse);
-
-      if (wasAiRunning) {
-        try {
-          await startCameraAi(accessToken, savedProduct.id);
-          openAiResultsSocket(accessToken);
-          setAiRunning(true);
-        } catch (cause) {
-          toast.warning(
-            formatCameraApiError(cause, apiError, t, "camera.aiRestartError"),
-          );
-        }
+      const applyResponse = await applyCameraSettingsToAllProducts(accessToken, {
+        camera,
+      });
+      updatedCount = applyResponse.data.updatedCount;
+      const productResponse = await listProductProfiles(accessToken);
+      const refreshedProducts = prepareProducts(productResponse.data);
+      const refreshedSelectedProduct = refreshedProducts.find(
+        (product) => product.id === selectedProduct.id,
+      );
+      if (!refreshedSelectedProduct) {
+        throw new Error("Selected product was not found after applying camera settings");
       }
-
-      if (wasLive) {
-        openStreamSocket(accessToken, toastId, {
-          onSettled: () => setApplyingCameraSettings(false),
-          successMessage: t("camera.settingsApplied"),
-        });
-      } else {
-        setApplyingCameraSettings(false);
-        toast.success(t("camera.settingsApplied"), { id: toastId });
-      }
-
-      return savedProduct;
+      savedProduct = refreshedSelectedProduct;
+      handleProductsChanged(refreshedProducts);
+      handleSavedProduct(savedProduct);
     } catch (cause) {
       setApplyingCameraSettings(false);
       toast.error(
-        formatCameraApiError(cause, apiError, t, "camera.settingsRestartError"),
+        formatCameraApiError(cause, apiError, t, "camera.settingsSaveError"),
         { id: toastId },
       );
       throw cause;
     }
+
+    await restartCameraAfterSettingsSaved(
+      accessToken,
+      savedProduct,
+      wasLive,
+      wasAiRunning,
+      toastId,
+      t("camera.settingsAppliedToAll").replace(
+        "{count}",
+        String(updatedCount),
+      ),
+    );
+    return savedProduct;
   }
 
   async function handleSaveView() {
@@ -1021,6 +1141,17 @@ export function CameraLiveViewPanel({ configurationMode = false }: CameraLiveVie
               <Camera className="h-4 w-4" />
               {live ? t("camera.stopLive") : t("camera.startLive")}
             </Button>
+            {configurationMode && canManageCamera && connected ? (
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => void handleDisconnectCamera()}
+                disabled={loading || connecting || applyingCameraSettings}
+              >
+                <Unplug className="h-4 w-4" />
+                {t("camera.disconnect")}
+              </Button>
+            ) : null}
             {canRunCameraAi && !configurationMode ? (
               <Button
                 type="button"
@@ -1170,15 +1301,35 @@ export function CameraLiveViewPanel({ configurationMode = false }: CameraLiveVie
               {t(tab.labelKey)}
             </button>
           ))}
+          <div className="ml-auto flex min-h-11 min-w-[236px] items-center gap-2 border-l border-slate-200 pl-2">
+            <span className="shrink-0 text-sm font-semibold text-slate-700">
+              {t("configuration.quickProduct")}
+            </span>
+            <ListboxSelect
+              value={selectedProductId}
+              onChange={(productId) => void handleSelectProduct(productId)}
+              ariaLabel={t("configuration.quickProductSelect")}
+              disabled={
+                loading ||
+                switchingCamera ||
+                applyingCameraSettings ||
+                products.length === 0
+              }
+              emptyLabel={t("products.emptyTitle")}
+              containerClassName="min-w-0 flex-1"
+              triggerClassName="h-10 font-semibold"
+              options={products.map((product) => ({
+                value: product.id,
+                label: product.code,
+                description: product.camera.deviceName || product.name,
+              }))}
+            />
+          </div>
         </nav>
       ) : null}
 
       <div hidden={configurationMode && activeTab !== "camera"}>
       <div className="grid gap-5">
-        <CameraConnectionTestPanel
-          disabled={live || connecting || switchingCamera || applyingCameraSettings}
-          onTestComplete={() => void refreshCameraRuntime(false)}
-        />
         <CameraSettingsForm
           key={buildSettingsFormKey(selectedProduct)}
           product={selectedProduct}
@@ -1187,6 +1338,7 @@ export function CameraLiveViewPanel({ configurationMode = false }: CameraLiveVie
           disabled={loading || switchingCamera || applyingCameraSettings}
           onDirtyChange={setCameraSettingsDirty}
           onApply={handleApplyCameraSettings}
+          onApplyToAll={handleApplyCameraSettingsToAll}
         />
       </div>
       </div>
@@ -1224,6 +1376,7 @@ export function CameraLiveViewPanel({ configurationMode = false }: CameraLiveVie
           onRedo={redoRoiChange}
           onReset={resetRoiChanges}
           onSaved={handleSavedRoiProduct}
+          onApplyToAll={handleApplyRoiRegionsToAll}
           onUndo={undoRoiChange}
           overlappingIndexes={overlappingRoiIndexes}
         />

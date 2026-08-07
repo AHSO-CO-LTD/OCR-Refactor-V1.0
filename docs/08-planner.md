@@ -54,7 +54,7 @@ Completed:
 
 In progress:
 
-- Final responsive hardening for dashboard, roles, users, and products at the 1280x1080 factory-machine viewport.
+- Final responsive hardening for dashboard, roles, users, and products at the 1280x1024 factory-machine viewport.
 - Role-based layout verification: `dev/admin` sidebar, `engineer/operator` navbar.
 - Product module persisted save/load verification and Camera/ROI integration with product profiles.
 - Dedicated Camera page verification with a real running Device Tool and connected hardware.

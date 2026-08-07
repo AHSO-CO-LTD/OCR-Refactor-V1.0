@@ -114,6 +114,7 @@ type DeviceToolImageInspectionRequest = Omit<
 @Injectable()
 export class DeviceToolService {
   private activeCameraSerial: string | null = null;
+  private cameraAutoConnectSuppressed = false;
 
   constructor(
     private readonly configService: ConfigService,
@@ -125,18 +126,30 @@ export class DeviceToolService {
   }
 
   async listCameraIdentities() {
+    const detectedIdentities = await this.discoverAndUpsertCameraIdentities();
+    return this.listCameraIdentitiesWithDetection(detectedIdentities);
+  }
+
+  private async listCameraIdentitiesWithDetection(
+    detectedIdentities: Array<{ serial: string }>,
+  ) {
     const identities = await this.prisma.cameraIdentity.findMany({
       orderBy: [{ active: 'desc' }, { displayName: 'asc' }, { serial: 'asc' }],
     });
+    const detectedSerials = new Set(
+      detectedIdentities.map((identity) => identity.serial),
+    );
 
     return {
-      data: identities.map((identity) => this.toCameraIdentity(identity)),
+      data: identities.map((identity) =>
+        this.toCameraIdentity(identity, detectedSerials.has(identity.serial)),
+      ),
     };
   }
 
   async syncCameraIdentities() {
-    await this.discoverAndUpsertCameraIdentities();
-    return this.listCameraIdentities();
+    const detectedIdentities = await this.discoverAndUpsertCameraIdentities();
+    return this.listCameraIdentitiesWithDetection(detectedIdentities);
   }
 
   async updateCameraIdentity(
@@ -237,6 +250,8 @@ export class DeviceToolService {
           is_grabbing: false,
           device_name: null,
           serial_number: null,
+          auto_connect_suppressed: this.cameraAutoConnectSuppressed,
+          intentional_disconnect: this.cameraAutoConnectSuppressed,
         },
       };
     }
@@ -245,16 +260,34 @@ export class DeviceToolService {
 
     return {
       success: true,
-      data: this.toRuntimeStatusData(session, identity),
+      data: {
+        ...this.toRuntimeStatusData(session, identity),
+        auto_connect_suppressed: this.cameraAutoConnectSuppressed,
+        intentional_disconnect: this.cameraAutoConnectSuppressed,
+      },
     };
   }
 
   async ensureCameraReady(camera: CameraProfileDto, signal?: AbortSignal) {
+    this.assertCameraAutoConnectAllowed();
     return this.ensureCameraConnected(camera, signal);
   }
 
-  async ensureCameraPreviewReady(camera: CameraProfileDto) {
+  async ensureCameraPreviewReady(
+    camera: CameraProfileDto,
+    options: { manualReconnect?: boolean } = {},
+  ) {
+    if (options.manualReconnect) {
+      this.cameraAutoConnectSuppressed = false;
+    } else {
+      this.assertCameraAutoConnectAllowed();
+    }
     return this.ensureCameraConnected(camera);
+  }
+
+  async disconnectCameraByUser(signal?: AbortSignal) {
+    this.cameraAutoConnectSuppressed = true;
+    return this.disconnectCamera(signal);
   }
 
   async disconnectCamera(signal?: AbortSignal) {
@@ -543,6 +576,14 @@ export class DeviceToolService {
 
   getActiveCameraSerialSync() {
     return this.activeCameraSerial;
+  }
+
+  private assertCameraAutoConnectAllowed() {
+    if (this.cameraAutoConnectSuppressed) {
+      throw new ServiceUnavailableException(
+        'Camera was intentionally disconnected. Reconnect it from Live View.',
+      );
+    }
   }
 
   async requireActiveCameraSerial(action: string, signal?: AbortSignal) {
@@ -1229,21 +1270,24 @@ export class DeviceToolService {
     };
   }
 
-  private toCameraIdentity(identity: {
-    active: boolean;
-    createdAt: Date;
-    displayName: string;
-    driver: string;
-    id: string;
-    identifiedAt: Date | null;
-    interfaceName: string | null;
-    lastSeenAt: Date | null;
-    modelName: string | null;
-    serial: string;
-    toolName: string | null;
-    updatedAt: Date;
-    vendor: string | null;
-  }) {
+  private toCameraIdentity(
+    identity: {
+      active: boolean;
+      createdAt: Date;
+      displayName: string;
+      driver: string;
+      id: string;
+      identifiedAt: Date | null;
+      interfaceName: string | null;
+      lastSeenAt: Date | null;
+      modelName: string | null;
+      serial: string;
+      toolName: string | null;
+      updatedAt: Date;
+      vendor: string | null;
+    },
+    detected = false,
+  ) {
     return {
       id: identity.id,
       serial: identity.serial,
@@ -1255,7 +1299,10 @@ export class DeviceToolService {
       toolName: identity.toolName,
       identified: Boolean(identity.identifiedAt),
       identifiedAt: identity.identifiedAt?.toISOString() ?? null,
-      connectable: Boolean(identity.identifiedAt && identity.active),
+      detected,
+      connectable: Boolean(
+        detected && identity.identifiedAt && identity.active,
+      ),
       status: this.getCameraIdentityStatus(identity),
       active: identity.active,
       lastSeenAt: identity.lastSeenAt?.toISOString() ?? null,

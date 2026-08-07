@@ -10,6 +10,7 @@ import {
 } from "@/components/camera/roi-editor-geometry";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { ConfirmModal } from "@/components/ui/confirm-modal";
 import { Input } from "@/components/ui/input";
 import {
   updateProductRoiRegions,
@@ -27,6 +28,9 @@ type RoiSettingsPanelProps = {
   onRedo: () => void;
   onReset: () => void;
   onSaved: (product: ProductProfile) => void;
+  onApplyToAll: (
+    regions: RoiRegion[],
+  ) => Promise<{ product: ProductProfile; updatedCount: number }>;
   onUndo: () => void;
   overlappingIndexes: Set<number>;
   product: ProductProfile | null;
@@ -40,12 +44,16 @@ export function RoiSettingsPanel({
   onRedo,
   onReset,
   onSaved,
+  onApplyToAll,
   onUndo,
   overlappingIndexes,
   product,
 }: RoiSettingsPanelProps) {
   const { apiError, t } = useI18n();
   const [saving, setSaving] = useState(false);
+  const [saveScope, setSaveScope] = useState<"product" | "all" | null>(
+    null,
+  );
   const regions = product?.roiRegions ?? [];
 
   function commit(nextRegions: RoiRegion[], snapshot = true) {
@@ -100,7 +108,18 @@ export function RoiSettingsPanel({
     toast.success(t("products.roiDeleted"));
   }
 
-  async function saveRegions() {
+  function buildRoiPayload() {
+    return regions.map(({ index, x, y, rotation }) => ({
+      height: CONFIGURATION_ROI_HEIGHT,
+      index,
+      rotation,
+      width: CONFIGURATION_ROI_WIDTH,
+      x,
+      y,
+    }));
+  }
+
+  function requestSave(scope: "product" | "all") {
     const accessToken = getAccessToken();
     if (!accessToken || !product) {
       toast.error(t("users.missingSession"));
@@ -111,23 +130,42 @@ export function RoiSettingsPanel({
       return;
     }
 
+    setSaveScope(scope);
+  }
+
+  async function saveRegions() {
+    const accessToken = getAccessToken();
+    if (!accessToken || !product || !saveScope) {
+      toast.error(t("users.missingSession"));
+      return;
+    }
+
     setSaving(true);
-    const toastId = toast.loading(t("products.saving"));
+    const toastId = toast.loading(
+      saveScope === "all" ? t("configuration.roiApplyingToAll") : t("products.saving"),
+    );
     try {
-      const response = await updateProductRoiRegions(
-        accessToken,
-        product.id,
-        regions.map(({ index, x, y, rotation }) => ({
-          height: CONFIGURATION_ROI_HEIGHT,
-          index,
-          rotation,
-          width: CONFIGURATION_ROI_WIDTH,
-          x,
-          y,
-        })),
-      );
-      onSaved(response.data);
-      toast.success(t("products.updateSuccess"), { id: toastId });
+      const roiPayload = buildRoiPayload();
+      if (saveScope === "all") {
+        const result = await onApplyToAll(roiPayload);
+        onSaved(result.product);
+        toast.success(
+          t("configuration.roiAppliedToAll").replace(
+            "{count}",
+            String(result.updatedCount),
+          ),
+          { id: toastId },
+        );
+      } else {
+        const response = await updateProductRoiRegions(
+          accessToken,
+          product.id,
+          roiPayload,
+        );
+        onSaved(response.data);
+        toast.success(t("products.updateSuccess"), { id: toastId });
+      }
+      setSaveScope(null);
     } catch (cause) {
       const message =
         cause instanceof Error
@@ -150,6 +188,7 @@ export function RoiSettingsPanel({
   }
 
   return (
+    <>
     <Card>
       <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-3 border-b border-slate-200">
         <div>
@@ -173,9 +212,13 @@ export function RoiSettingsPanel({
             <Plus className="h-4 w-4" />
             {t("configuration.addRoi")}
           </Button>
-          <Button type="button" onClick={() => void saveRegions()} disabled={saving || overlappingIndexes.size > 0}>
+          <Button type="button" variant="outline" onClick={() => requestSave("all")} disabled={saving || overlappingIndexes.size > 0}>
             <Save className="h-4 w-4" />
-            {saving ? t("products.saving") : t("common.save")}
+            {t("configuration.saveRoiToAll")}
+          </Button>
+          <Button type="button" onClick={() => requestSave("product")} disabled={saving || overlappingIndexes.size > 0}>
+            <Save className="h-4 w-4" />
+            {saving ? t("products.saving") : t("configuration.saveRoi")}
           </Button>
         </div>
       </CardHeader>
@@ -233,5 +276,33 @@ export function RoiSettingsPanel({
         )}
       </CardContent>
     </Card>
+    <ConfirmModal
+      open={saveScope !== null}
+      title={
+        saveScope === "all"
+          ? t("configuration.confirmApplyRoiAllTitle")
+          : t("configuration.confirmSaveRoiTitle")
+      }
+      description={
+        saveScope === "all"
+          ? t("configuration.confirmApplyRoiAllDescription")
+          : t("configuration.confirmSaveRoiDescription").replace(
+              "{code}",
+              product.code,
+            )
+      }
+      confirmLabel={
+        saving
+          ? t("products.saving")
+          : saveScope === "all"
+            ? t("configuration.applyRoiToAll")
+            : t("configuration.saveRoi")
+      }
+      cancelLabel={t("common.cancel")}
+      loading={saving}
+      onConfirm={() => void saveRegions()}
+      onCancel={() => setSaveScope(null)}
+    />
+    </>
   );
 }

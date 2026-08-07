@@ -85,7 +85,7 @@ Frontend:
 - AppShell uses fixed application chrome: sidebar/header/navbar do not scroll with page content.
 - AppShell now warms up camera runtime context in the background by calling backend camera status/device discovery for users with camera or inspection permissions.
 - Dedicated Camera page exists at `/dashboard/camera` with product-profile selection, Device Tool status/device discovery, connect/grab/live controls, view adjustment persistence, and manual refresh for camera status/devices.
-- Responsive behavior is being standardized around the 1280x1080 factory-machine viewport, but still needs a final pass across existing screens.
+- Responsive behavior is being standardized around the 1280x1024 factory-machine viewport, but still needs a final pass across existing screens.
 - Dedicated `roi`, `history`, and `reports` pages are not created yet even though their menu permissions already exist.
 
 Electron/packaging:
@@ -100,7 +100,7 @@ Electron/packaging:
 
 Finish frontend hardening for the first operational module:
 
-1. Complete final responsive verification for dashboard, roles, users, and products at 1280x1080.
+1. Complete final responsive verification for dashboard, roles, users, and products at 1280x1024.
 2. Re-check smaller/larger viewports and remove any remaining page-level horizontal overflow.
 3. Verify product profile ROI editor behavior with real backend restart and persisted save/load flow.
 4. Verify the dedicated Camera page against a running Device Tool and create the first dedicated ROI screen to reduce the remaining menu-to-missing-route gap.
@@ -111,10 +111,10 @@ Finish frontend hardening for the first operational module:
 - Vietnamese UI copy must always use proper Vietnamese diacritics.
 - The app must support English and Vietnamese.
 - Every user-facing page, modal, error screen, empty state, validation, and notification must use the i18n layer and display according to the user's previously selected language.
-- The frontend must be responsive across screen sizes, with 1280x1080 treated as the primary factory-machine viewport.
-- Every operational/admin screen must be comfortable at 1280x1080 without page-level horizontal overflow; use internal table scrolling only when tabular data is wider than the available content area.
+- The frontend must be responsive across screen sizes, with 1280x1024 treated as the primary factory-machine viewport.
+- Every operational/admin screen must be comfortable at 1280x1024 without page-level horizontal overflow; use internal table scrolling only when tabular data is wider than the available content area.
 - Header, sidebar, and navbar are fixed application chrome and must not scroll with page/tab content; only the active content pane may scroll.
-- Do not design only for web widescreen. Electron renderer layouts must work well on the 1280x1080 industrial PC screen first, then scale up/down for other desktop, laptop, tablet, and mobile sizes.
+- Do not design only for web widescreen. Electron renderer layouts must work well on the 1280x1024 industrial PC screen first, then scale up/down for other desktop, laptop, tablet, and mobile sizes.
 - The factory machine uses a single touchscreen display. All operational and setup screens must be designed touch-first: large hit targets, no hover-only critical actions, visible controls, and form inputs that work well with on-screen virtual keyboards.
 - Frontend calls backend only.
 - Backend calls the Python/FastAPI Device/OCR Tool in `tool/` through `/tool/v1`; frontend still calls backend only.

@@ -72,3 +72,48 @@ describe('DeviceToolService cropFrameRoi', () => {
     expect(metadata.height).toBe(440);
   });
 });
+
+describe('DeviceToolService intentional camera disconnect', () => {
+  const camera = {
+    sourceType: 'usb',
+    exposure: 3500,
+    imageWidth: 1500,
+    imageHeight: 500,
+    offsetX: 0,
+    offsetY: 0,
+    zoomFactor: 1,
+    previewPanX: 0,
+    previewPanY: 0,
+    previewRotation: 0,
+  } satisfies CameraProfileDto;
+
+  it('blocks automatic reconnect until an explicit manual reconnect', async () => {
+    const service = new DeviceToolService(
+      {} as ConfigService,
+      {} as PrismaService,
+    );
+    jest.spyOn(service, 'disconnectCamera').mockResolvedValue({
+      success: true,
+    });
+    const ensureCameraConnected = jest
+      .spyOn(
+        service as unknown as {
+          ensureCameraConnected: (
+            profile: CameraProfileDto,
+          ) => Promise<{ success: boolean }>;
+        },
+        'ensureCameraConnected',
+      )
+      .mockResolvedValue({ success: true });
+
+    await service.disconnectCameraByUser();
+
+    await expect(service.ensureCameraReady(camera)).rejects.toThrow(
+      'Camera was intentionally disconnected',
+    );
+    await expect(
+      service.ensureCameraPreviewReady(camera, { manualReconnect: true }),
+    ).resolves.toEqual({ success: true });
+    expect(ensureCameraConnected).toHaveBeenCalledWith(camera);
+  });
+});

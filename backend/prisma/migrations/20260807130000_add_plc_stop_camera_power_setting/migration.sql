@@ -1,0 +1,2 @@
+ALTER TABLE "PlcConfig"
+ADD COLUMN "powerOffCameraOnStop" BOOLEAN NOT NULL DEFAULT true;

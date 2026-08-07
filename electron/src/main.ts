@@ -54,7 +54,7 @@ const defaultWindowSettings: DesktopWindowSettings = {
   zoomFactor: 1,
   windowPreset: "factory",
   width: 1280,
-  height: 1080,
+  height: 1024,
 };
 
 const defaultTestStorageSettings: DesktopTestStorageSettings = {
@@ -121,6 +121,7 @@ async function startDesktopApp() {
   updateRecoveryManager = new UpdateRecoveryManager({
     onLog: showTerminalLog,
     programDataRoot: getProgramDataRoot(),
+    runtimeRoot,
     userDataRoot: app.getPath("userData"),
   });
   windowSettings = loadWindowSettings();
@@ -372,8 +373,8 @@ function registerDesktopIpc() {
       filePath: result.filePaths[0] ?? null,
     };
   });
-  ipcMain.handle("desktop:exit-app", (_event, mode?: DesktopExitMode) => {
-    return requestAppShutdown(mode === "app-and-hardware" ? mode : "app-only");
+  ipcMain.handle("desktop:exit-app", () => {
+    return requestAppShutdown("app-and-hardware");
   });
   ipcMain.handle("desktop:restart-app", () => {
     return requestAppRestart();
@@ -847,7 +848,7 @@ function resolvePresetSize(preset: WindowPreset) {
     case "factory":
     case "custom":
     default:
-      return { width: 1280, height: 1080 };
+      return { width: 1280, height: 1024 };
   }
 }
 
@@ -982,7 +983,7 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
   });
 }
 
-async function requestAppShutdown(mode: DesktopExitMode = "app-only") {
+async function requestAppShutdown(mode: DesktopExitMode = "app-and-hardware") {
   if (shutdownPromise) {
     return shutdownPromise;
   }

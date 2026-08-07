@@ -27,6 +27,9 @@ const defaultSettings: LineResultSettings = {
   newSessionOnLineStop: true,
   newSessionOnProductChange: true,
   showNgRecognizedText: true,
+  trainingImageEnabled: false,
+  trainingImageSaveFolderPath: "",
+  trainingImageSavePolicy: "all",
   createdAt: "",
   updatedAt: "",
 };
@@ -120,7 +123,6 @@ export function LineResultSettingsPanel({
       toast.warning(t("settings.lineResultFolderRequired"));
       return;
     }
-
     setSaving(true);
     const toastId = toast.loading(t("settings.lineResultSaving"));
 
