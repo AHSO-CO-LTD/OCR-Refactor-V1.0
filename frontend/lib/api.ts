@@ -268,6 +268,7 @@ export type TestInspectionImageResult = {
   imageWidth: number;
   imageHeight: number;
   cycleTimeMs: number;
+  trainingImagesSaved: number;
   success: boolean;
   error: string | null;
   result: "OK" | "NG" | "UNKNOWN";

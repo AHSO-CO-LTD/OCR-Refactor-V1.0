@@ -3,6 +3,7 @@ import {
   BrowserWindow,
   dialog,
   ipcMain,
+  Notification,
   shell,
   type OpenDialogOptions,
 } from "electron";
@@ -1069,9 +1070,12 @@ async function shutdownAndQuit(mode: DesktopExitMode) {
     try {
       await serviceManager?.shutdownHardware(reportShutdownStage);
     } catch (error) {
-      isQuitting = false;
-      reportShutdownStatus("Hardware shutdown failed.");
-      throw error;
+      const message = errorMessage(error);
+      console.error("Hardware shutdown failed; continuing app shutdown:", error);
+      reportShutdownStatus(
+        "Hardware shutdown failed. Closing the application anyway.",
+      );
+      showHardwareShutdownWarning(message);
     }
   }
 
@@ -1096,6 +1100,24 @@ async function shutdownAndQuit(mode: DesktopExitMode) {
   }
 
   return { success: true };
+}
+
+function showHardwareShutdownWarning(message: string) {
+  if (!Notification.isSupported()) {
+    return;
+  }
+
+  const isVietnamese = desktopLanguage === "vi";
+  new Notification({
+    title: isVietnamese
+      ? "Không thể tắt hoàn toàn phần cứng"
+      : "Hardware shutdown was incomplete",
+    body: isVietnamese
+      ? "Ứng dụng sẽ đóng. Vui lòng kiểm tra camera và PLC trước khi khởi động lại."
+      : "The application will close. Check the camera and PLC before restarting.",
+    silent: false,
+  }).show();
+  showTerminalLog(`[shutdown] Hardware warning: ${message}`);
 }
 
 async function shutdownAndRestart() {

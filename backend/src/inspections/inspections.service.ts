@@ -373,9 +373,12 @@ export class InspectionsService {
       });
       await this.saveTrainingRoiImages({
         capturedAt,
-        imageBase64: completedDetection.imageBase64,
         product: completedDetection.product,
-        scan: completedDetection.scan,
+        roiRegions: completedDetection.product.roiRegions,
+        scan: {
+          processedRoiCrops: completedDetection.scan.processedRoiCrops,
+          results: completedDetection.scan.results,
+        },
       });
     } catch (error) {
       if (signal?.aborted && imagePath) {
@@ -598,6 +601,15 @@ export class InspectionsService {
       rotateImageClockwise: product.rotateTestImageClockwise,
     });
     const expectedText = product.code.trim().toUpperCase();
+    const trainingImagesSaved = await this.saveTrainingRoiImages({
+      capturedAt: new Date(),
+      product,
+      roiRegions: testRoiRegions,
+      scan: {
+        processedRoiCrops: dto.crops,
+        results: scan.results,
+      },
+    });
 
     return {
       data: {
@@ -607,6 +619,7 @@ export class InspectionsService {
         imageWidth: scan.image_width,
         imageHeight: scan.image_height,
         cycleTimeMs: scan.cycle_time_ms,
+        trainingImagesSaved,
         success: scan.success,
         error: scan.error ?? null,
         result: resolveInspectionResults(scan.results, expectedText),
@@ -1001,18 +1014,12 @@ export class InspectionsService {
 
   async updateLineResultSettings(dto: UpdateLineResultSettingsDto) {
     const currentSettings = await this.ensureLineResultSettings();
-    const hasSaveFolderPath = Object.prototype.hasOwnProperty.call(
-      dto,
-      'saveFolderPath',
-    );
+    const hasSaveFolderPath = dto.saveFolderPath !== undefined;
     const saveFolderPath = hasSaveFolderPath
       ? dto.saveFolderPath?.trim() || null
       : currentSettings.saveFolderPath;
     const savePolicy = dto.savePolicy ?? currentSettings.savePolicy;
-    const hasTrainingFolderPath = Object.prototype.hasOwnProperty.call(
-      dto,
-      'trainingImageSaveFolderPath',
-    );
+    const hasTrainingFolderPath = dto.trainingImageSaveFolderPath !== undefined;
     const trainingImageSaveFolderPath = hasTrainingFolderPath
       ? dto.trainingImageSaveFolderPath?.trim() || null
       : currentSettings.trainingImageSaveFolderPath;
@@ -1228,14 +1235,14 @@ export class InspectionsService {
 
   private async saveTrainingRoiImages({
     capturedAt,
-    imageBase64,
     product,
+    roiRegions,
     scan,
   }: {
     capturedAt: Date;
-    imageBase64: string;
     product: ProductWithProfile;
-    scan: ProductFrameScan;
+    roiRegions: Array<{ index: number }>;
+    scan: Pick<ProductFrameScan, 'processedRoiCrops' | 'results'>;
   }) {
     try {
       const settings = await this.ensureLineResultSettings();
@@ -1243,16 +1250,7 @@ export class InspectionsService {
         !settings.trainingImageEnabled ||
         !settings.trainingImageSaveFolderPath
       ) {
-        return;
-      }
-
-      const imageBuffer = Buffer.from(
-        imageBase64.replace(/^data:[^;]+;base64,/i, ''),
-        'base64',
-      );
-      const metadata = await sharp(imageBuffer).metadata();
-      if (!metadata.width || !metadata.height) {
-        throw new Error('Training source image has no dimensions');
+        return 0;
       }
 
       const trainingDay = this.formatTrainingDay(capturedAt);
@@ -1268,12 +1266,8 @@ export class InspectionsService {
         .replaceAll(':', '-')
         .replace('T', '_')
         .replace('Z', '');
-      const configuredWidth =
-        product.cameraConfig?.imageWidth ?? metadata.width;
-      const configuredHeight =
-        product.cameraConfig?.imageHeight ?? metadata.height;
-
-      for (const [scanIndex, region] of product.roiRegions.entries()) {
+      let savedCount = 0;
+      for (const [scanIndex, region] of roiRegions.entries()) {
         const slotResult = scan.results[scanIndex];
         const evaluation = evaluateInspectionSlot({
           rawText: slotResult?.text,
@@ -1291,15 +1285,18 @@ export class InspectionsService {
         }
 
         try {
-          const bitmap = await this.cropTrainingRoiAsBitmap({
-            configuredHeight,
-            configuredWidth,
-            imageBuffer,
-            imageHeight: metadata.height,
-            imageWidth: metadata.width,
-            region,
-            rotateImageClockwise: product.rotateTestImageClockwise,
-          });
+          const processedCrop = scan.processedRoiCrops.find(
+            (crop) => crop.slotIndex === region.index,
+          );
+          if (!processedCrop) {
+            this.logger.warn(
+              `Training ROI ${region.index} for ${product.code} has no processed OCR crop`,
+            );
+            continue;
+          }
+          const bitmap = await this.processedRoiCropToBitmap(
+            processedCrop.imageBase64,
+          );
           const fileName = [
             `ROI-${String(region.index).padStart(2, '0')}`,
             evaluation.result,
@@ -1307,76 +1304,28 @@ export class InspectionsService {
             randomUUID().slice(0, 8),
           ].join('_');
           await writeFile(join(targetDirectory, `${fileName}.bmp`), bitmap);
+          savedCount += 1;
         } catch (error) {
           this.logger.error(
             `Could not save training ROI ${region.index} for ${product.code}: ${this.getErrorMessage(error)}`,
           );
         }
       }
+      return savedCount;
     } catch (error) {
       this.logger.error(
         `Could not save training images for ${product.code}: ${this.getErrorMessage(error)}`,
       );
+      return 0;
     }
   }
 
-  private async cropTrainingRoiAsBitmap({
-    configuredHeight,
-    configuredWidth,
-    imageBuffer,
-    imageHeight,
-    imageWidth,
-    region,
-    rotateImageClockwise,
-  }: {
-    configuredHeight: number;
-    configuredWidth: number;
-    imageBuffer: Buffer;
-    imageHeight: number;
-    imageWidth: number;
-    region: ProductWithProfile['roiRegions'][number];
-    rotateImageClockwise: boolean;
-  }) {
-    const containScale = Math.min(
-      configuredWidth / imageWidth,
-      configuredHeight / imageHeight,
+  private async processedRoiCropToBitmap(processedCropBase64: string) {
+    const processedCropBuffer = Buffer.from(
+      processedCropBase64.replace(/^data:[^;]+;base64,/i, ''),
+      'base64',
     );
-    const displayedWidth = imageWidth * containScale;
-    const displayedHeight = imageHeight * containScale;
-    const offsetX = (configuredWidth - displayedWidth) / 2;
-    const offsetY = (configuredHeight - displayedHeight) / 2;
-    const centerX = (region.x - offsetX) * (imageWidth / displayedWidth);
-    const centerY = (region.y - offsetY) * (imageHeight / displayedHeight);
-    const targetWidth = Math.max(
-      1,
-      Math.round(region.width * (imageWidth / displayedWidth)),
-    );
-    const targetHeight = Math.max(
-      1,
-      Math.round(region.height * (imageHeight / displayedHeight)),
-    );
-    const left = Math.max(
-      0,
-      Math.min(imageWidth - 1, Math.round(centerX - targetWidth / 2)),
-    );
-    const top = Math.max(
-      0,
-      Math.min(imageHeight - 1, Math.round(centerY - targetHeight / 2)),
-    );
-    const width = Math.max(1, Math.min(targetWidth, imageWidth - left));
-    const height = Math.max(1, Math.min(targetHeight, imageHeight - top));
-    const normalizedRotation = ((Number(region.rotation) % 360) + 360) % 360;
-    const rotation = rotateImageClockwise
-      ? 90
-      : (Math.round(normalizedRotation / 90) * 90) % 360;
-
-    let pipeline = sharp(imageBuffer).extract({ left, top, width, height });
-    if (rotation !== 0) pipeline = pipeline.rotate(rotation);
-    const raw = await pipeline
-      .resize(targetWidth, targetHeight, {
-        fit: 'contain',
-        background: { r: 0, g: 0, b: 0, alpha: 1 },
-      })
+    const raw = await sharp(processedCropBuffer)
       .removeAlpha()
       .raw()
       .toBuffer({ resolveWithObject: true });
