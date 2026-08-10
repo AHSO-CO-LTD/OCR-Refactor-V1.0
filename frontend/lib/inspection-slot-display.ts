@@ -9,7 +9,14 @@ export function getInspectionSlotDisplayText(
   if (!slot) return fallback;
 
   if (slot.result === "OK") {
-    return productCode.trim() || slot.expectedText?.trim() || fallback || "OK";
+    return (
+      slot.matchedText?.trim() ||
+      slot.rawText?.trim() ||
+      productCode.trim() ||
+      slot.expectedText?.trim() ||
+      fallback ||
+      "OK"
+    );
   }
 
   if (slot.result === "NG" && options.showNgRecognizedText === false) {

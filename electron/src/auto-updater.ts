@@ -119,10 +119,9 @@ export function registerAutoUpdater(options: RegisterAutoUpdaterOptions) {
       await options.prepareInstall(latestInfo.version);
       await options.armInstallFallback();
       publish(options, "installing", "Installing update and restarting...", infoDetails(latestInfo));
-      // In-app updates already create a database/configuration checkpoint above.
-      // Run the NSIS installer silently so it preserves that runtime state instead
-      // of reopening the first-install database bootstrap UI.
-      setImmediate(() => autoUpdater.quitAndInstall(true, true));
+      // The NSIS update flow has its own visible progress screen. It still receives
+      // electron-builder's update marker and must preserve ProgramData/runtime state.
+      setImmediate(() => autoUpdater.quitAndInstall(false, true));
       return { success: true, state };
     } catch (error) {
       publish(options, "error", errorMessage(error), infoDetails(latestInfo));

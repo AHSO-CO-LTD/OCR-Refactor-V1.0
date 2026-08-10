@@ -1,5 +1,5 @@
 param(
-  [int]$Port = 3969,
+  [int]$Port = 3970,
   [switch]$SkipCacheClean,
   [switch]$UseTurbopack
 )

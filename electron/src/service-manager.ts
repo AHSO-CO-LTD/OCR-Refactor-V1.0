@@ -58,9 +58,9 @@ const BACKEND_MIGRATION_TIMEOUT_MS = 120_000;
 const DEVICE_TOOL_API_PREFIX = "/tool/v1";
 const DEVICE_TOOL_HEALTH_PATH = "/";
 const DEFAULT_PORTS: Record<LocalServiceName, number> = {
-  backend: readPortEnv("BACKEND_PORT", 3979),
+  backend: readPortEnv("BACKEND_PORT", 3980),
   "device-tool": readPortEnv("DEVICE_TOOL_PORT", 8668),
-  frontend: readPortEnv("FRONTEND_PORT", 3969),
+  frontend: readPortEnv("FRONTEND_PORT", 3970),
 };
 const FALLBACK_PORTS: Record<LocalServiceName, { end: number; start: number }> =
   {
@@ -1470,7 +1470,11 @@ function resolveDeviceToolCommand(
   toolPython: { args: string[]; command: string },
   port: number,
 ): ServiceCommand {
-  const toolPath = join(repoRoot, "tool");
+  const configuredToolPath = process.env.DEVICE_TOOL_RUNTIME_ROOT?.trim();
+  const toolPath =
+    configuredToolPath && existsSync(configuredToolPath)
+      ? configuredToolPath
+      : join(repoRoot, "tool");
 
   if (port === 8668) {
     return {

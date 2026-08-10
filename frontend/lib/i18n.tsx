@@ -235,6 +235,7 @@ const translations = {
     "nav.users": "Users",
     "nav.roles": "Roles",
     "nav.products": "Products",
+    "nav.ocrVariants": "Variants",
     "nav.aiSettings": "AI settings",
     "nav.productCamera": "Products and camera",
     "nav.camera": "Camera",
@@ -251,6 +252,23 @@ const translations = {
     "configuration.quickProduct": "Product",
     "configuration.quickProductSelect": "Quickly select product",
     "configuration.switchingCamera": "Switching to camera {camera}...",
+    "ocrVariants.title": "Accepted OCR variants",
+    "ocrVariants.description":
+      "Add OCR forms that should be accepted in addition to the configured product code and legacy reverse variants.",
+    "ocrVariants.inputLabel": "OCR variant",
+    "ocrVariants.placeholder": "Example: IS-35-R",
+    "ocrVariants.add": "Add variant",
+    "ocrVariants.empty": "No additional OCR variants have been configured.",
+    "ocrVariants.primaryCodeExists": "The main product code is already accepted automatically.",
+    "ocrVariants.duplicate": "This OCR variant has already been added.",
+    "ocrVariants.limit": "A product can have at most 20 OCR variants.",
+    "ocrVariants.remove": "Remove variant",
+    "ocrVariants.matchHint":
+      "A ROI is OK when OCR text contains the product code, a legacy reverse variant, or any listed variant.",
+    "ocrVariants.save": "Save variants",
+    "ocrVariants.saving": "Saving OCR variants...",
+    "ocrVariants.saved": "OCR variants saved.",
+    "ocrVariants.saveError": "Cannot save OCR variants.",
     "configuration.roiHint":
       "ROI changes are shown immediately on the live view. Save to update the selected profile.",
     "configuration.addRoi": "Add ROI",
@@ -1210,6 +1228,9 @@ const translations = {
     "products.code": "Product code",
     "products.codeHint":
       "This is the product code that the inspection flow needs to check.",
+    "products.ocrAcceptedVariants": "Accepted OCR variants",
+    "products.ocrAcceptedVariantsHint":
+      "Optional. Separate variants with commas, for example: IS-35-R. OCR is OK when its text contains the product code or any variant.",
     "products.name": "Product name",
     "products.defaultNumber": "Default number",
     "products.batchSize": "Batch size",
@@ -1659,6 +1680,7 @@ const translations = {
     "nav.users": "Người dùng",
     "nav.roles": "Vai trò",
     "nav.products": "Sản phẩm",
+    "nav.ocrVariants": "Biến thể",
     "nav.aiSettings": "Cài đặt AI",
     "nav.productCamera": "Sản phẩm và camera",
     "nav.camera": "Camera",
@@ -1674,6 +1696,23 @@ const translations = {
     "configuration.quickProduct": "Mã hàng",
     "configuration.quickProductSelect": "Chọn nhanh mã hàng",
     "configuration.switchingCamera": "Đang chuyển sang camera {camera}...",
+    "ocrVariants.title": "Biến thể OCR chấp nhận",
+    "ocrVariants.description":
+      "Thêm các dạng OCR được chấp nhận bên cạnh mã hàng đã cài đặt và các biến thể đảo legacy.",
+    "ocrVariants.inputLabel": "Biến thể OCR",
+    "ocrVariants.placeholder": "Ví dụ: IS-35-R",
+    "ocrVariants.add": "Thêm biến thể",
+    "ocrVariants.empty": "Chưa cấu hình biến thể OCR bổ sung.",
+    "ocrVariants.primaryCodeExists": "Mã hàng chính đã tự động được chấp nhận.",
+    "ocrVariants.duplicate": "Biến thể OCR này đã được thêm.",
+    "ocrVariants.limit": "Mỗi mã hàng có tối đa 20 biến thể OCR.",
+    "ocrVariants.remove": "Xóa biến thể",
+    "ocrVariants.matchHint":
+      "ROI là OK khi text OCR chứa mã hàng, biến thể đảo legacy hoặc một biến thể trong danh sách.",
+    "ocrVariants.save": "Lưu biến thể",
+    "ocrVariants.saving": "Đang lưu biến thể OCR...",
+    "ocrVariants.saved": "Đã lưu biến thể OCR.",
+    "ocrVariants.saveError": "Không thể lưu biến thể OCR.",
     "configuration.roiHint":
       "Thay đổi ROI được hiển thị ngay trên Live view. Nhấn Lưu để cập nhật profile đang chọn.",
     "configuration.addRoi": "Thêm ROI",
@@ -2501,6 +2540,9 @@ const translations = {
     "products.code": "Mã product",
     "products.codeHint":
       "Đây là mã sản phẩm cần được kiểm tra trong quá trình inspect.",
+    "products.ocrAcceptedVariants": "Biến thể OCR chấp nhận",
+    "products.ocrAcceptedVariantsHint":
+      "Tùy chọn. Nhập các biến thể cách nhau bằng dấu phẩy, ví dụ: IS-35-R. OCR chứa mã hàng hoặc một biến thể sẽ là OK.",
     "products.name": "Tên sản phẩm",
     "products.defaultNumber": "Số mặc định",
     "products.batchSize": "Số lượng một batch",

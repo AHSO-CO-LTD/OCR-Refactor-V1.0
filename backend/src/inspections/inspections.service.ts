@@ -171,6 +171,7 @@ export class InspectionsService {
           rows: slotResult?.rows,
           errorMessage: slotResult?.error,
           expectedText,
+          acceptedVariants: product.ocrAcceptedVariants,
         });
 
         return {
@@ -178,6 +179,7 @@ export class InspectionsService {
           slotIndex: region.index,
           slotLabel: `slot-${region.index}`,
           expectedText,
+          matchedText: evaluation.matchedText,
           result: evaluation.result,
           text: evaluation.rawText,
           rows: slotResult?.rows ?? [],
@@ -622,7 +624,11 @@ export class InspectionsService {
         trainingImagesSaved,
         success: scan.success,
         error: scan.error ?? null,
-        result: resolveInspectionResults(scan.results, expectedText),
+        result: resolveInspectionResults(
+          scan.results,
+          expectedText,
+          product.ocrAcceptedVariants,
+        ),
         slots: testRoiRegions.map((region, index) => {
           const slotResult = scan.results[index];
           const evaluation = evaluateInspectionSlot({
@@ -630,12 +636,14 @@ export class InspectionsService {
             rows: slotResult?.rows,
             errorMessage: slotResult?.error,
             expectedText,
+            acceptedVariants: product.ocrAcceptedVariants,
           });
 
           return {
             slotIndex: region.index,
             slotLabel: `slot-${region.index}`,
             expectedText,
+            matchedText: evaluation.matchedText,
             rawText: evaluation.rawText,
             rows: slotResult?.rows ?? [],
             result: evaluation.result,
@@ -1137,6 +1145,7 @@ export class InspectionsService {
         rows: slotResult?.rows,
         errorMessage: slotResult?.error,
         expectedText,
+        acceptedVariants: product.ocrAcceptedVariants,
       });
 
       return {
@@ -1145,6 +1154,7 @@ export class InspectionsService {
         slotIndex: region.index,
         slotLabel: `slot-${region.index}`,
         expectedText,
+        matchedText: evaluation.matchedText,
         result: evaluation.result,
         text: evaluation.rawText,
         rows: slotResult?.rows ?? [],
@@ -1274,6 +1284,7 @@ export class InspectionsService {
           rows: slotResult?.rows,
           errorMessage: slotResult?.error,
           expectedText,
+          acceptedVariants: product.ocrAcceptedVariants,
         });
         if (
           !this.shouldSaveTrainingImage(
@@ -1579,6 +1590,7 @@ export class InspectionsService {
       slotIndex: number | null;
       slotLabel: string | null;
       expectedText: string | null;
+      matchedText: string | null;
       result: InspectionResult;
       text: string | null;
       rows: Prisma.JsonValue | null;
@@ -1609,6 +1621,7 @@ export class InspectionsService {
         slotIndex: log.slotIndex,
         slotLabel: log.slotLabel,
         expectedText: log.expectedText,
+        matchedText: log.matchedText,
         rawText: log.text,
         rows: this.normalizeRows(log.rows),
         imagePath: log.imagePath,
@@ -1898,12 +1911,14 @@ export class InspectionsService {
         rows: slotResult?.rows,
         errorMessage: slotResult?.error,
         expectedText,
+        acceptedVariants: detection.product.ocrAcceptedVariants,
       });
 
       return {
         slotIndex: region.index,
         slotLabel: `slot-${region.index}`,
         expectedText,
+        matchedText: evaluation.matchedText,
         rawText: evaluation.rawText,
         rows: slotResult?.rows ?? [],
         imagePath: null,
@@ -2057,6 +2072,7 @@ export class InspectionsService {
         slotIndex: log.slotIndex,
         slotLabel: log.slotLabel,
         expectedText: log.expectedText,
+        matchedText: log.matchedText,
         rawText: log.text,
         rows: this.normalizeRows(log.rows),
         imagePath: log.imagePath,

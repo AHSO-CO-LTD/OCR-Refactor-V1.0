@@ -8,6 +8,7 @@ import {
   ScanEye,
   ScanLine,
   SlidersHorizontal,
+  Tags,
   Unplug,
   Wrench,
 } from "lucide-react";
@@ -38,6 +39,7 @@ import {
   type RoiAssist,
 } from "@/components/camera/roi-editor-geometry";
 import { ProductProfilesPanel } from "@/components/products/product-profiles-panel";
+import { OcrAcceptedVariantsPanel } from "@/components/products/ocr-accepted-variants-panel";
 import { AiSettingsPanel } from "@/components/settings/ai-settings-panel";
 import {
   formatCameraApiError,
@@ -76,6 +78,7 @@ import { useLineDisplaySettings } from "@/lib/use-line-display-settings";
 
 type ConfigurationTab =
   | "products"
+  | "variants"
   | "ai"
   | "roi"
   | "camera"
@@ -130,6 +133,7 @@ export function CameraLiveViewPanel({ configurationMode = false }: CameraLiveVie
   const [configurationTestRunning, setConfigurationTestRunning] =
     useState(false);
   const [aiSettingsDirty, setAiSettingsDirty] = useState(false);
+  const [ocrVariantsDirty, setOcrVariantsDirty] = useState(false);
   const [cameraSettingsDirty, setCameraSettingsDirty] = useState(false);
   const [productSettingsDirty, setProductSettingsDirty] = useState(false);
   const user = useMemo(() => getStoredUser(), []);
@@ -174,6 +178,7 @@ export function CameraLiveViewPanel({ configurationMode = false }: CameraLiveVie
   const hasUnsavedConfigurationChanges =
     roiSettingsDirty ||
     aiSettingsDirty ||
+    ocrVariantsDirty ||
     cameraSettingsDirty ||
     productSettingsDirty;
   const overlappingRoiIndexes = useMemo(
@@ -340,6 +345,7 @@ export function CameraLiveViewPanel({ configurationMode = false }: CameraLiveVie
     const requestedTab = new URLSearchParams(window.location.search).get("tab");
     const requestedTabAllowed =
       requestedTab === "products" ||
+      requestedTab === "variants" ||
       requestedTab === "ai" ||
       requestedTab === "roi" ||
       requestedTab === "camera" ||
@@ -1353,6 +1359,17 @@ export function CameraLiveViewPanel({ configurationMode = false }: CameraLiveVie
         </div>
       ) : null}
 
+      {configurationMode && visitedTabs.has("variants") ? (
+        <div hidden={activeTab !== "variants"}>
+          <OcrAcceptedVariantsPanel
+            key={`${selectedProduct?.id ?? "no-product"}:${(selectedProduct?.ocrAcceptedVariants ?? []).join("|")}`}
+            onDirtyChange={setOcrVariantsDirty}
+            onSaved={handleSavedProduct}
+            product={selectedProduct}
+          />
+        </div>
+      ) : null}
+
       {configurationMode && visitedTabs.has("ai") ? (
         <div hidden={activeTab !== "ai"}>
           <AiSettingsPanel
@@ -1412,6 +1429,12 @@ const configurationTabs: ConfigurationTabDefinition[] = [
     id: "products",
     icon: PackageSearch,
     labelKey: "nav.products",
+    permission: "product.manage",
+  },
+  {
+    id: "variants",
+    icon: Tags,
+    labelKey: "nav.ocrVariants",
     permission: "product.manage",
   },
   {

@@ -208,6 +208,7 @@ function createSampleProduct({
     thresholdAccept: 0.5,
     thresholdMns: 0.5,
     rowThreshold: 20,
+    ocrAcceptedVariants: [],
     modelPath,
     rotateTestImageClockwise: true,
     active: true,

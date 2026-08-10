@@ -78,6 +78,7 @@ const demoProducts: ProductProfile[] = [
     thresholdAccept: 85,
     thresholdMns: 70,
     rowThreshold: 20,
+    ocrAcceptedVariants: [],
     modelPath: "models/sl-37.onnx",
     rotateTestImageClockwise: true,
     active: true,

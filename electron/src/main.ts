@@ -68,7 +68,7 @@ const terminalShortcutWindowMs = 4_000;
 
 let rendererUrl =
   process.env.ELECTRON_RENDERER_URL ??
-  `http://127.0.0.1:${process.env.FRONTEND_PORT ?? "3969"}/`;
+  `http://127.0.0.1:${process.env.FRONTEND_PORT ?? "3970"}/`;
 
 let mainWindow: BrowserWindow | null = null;
 let terminalWindow: BrowserWindow | null = null;

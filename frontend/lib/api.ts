@@ -204,6 +204,7 @@ export type ProductProfile = {
   thresholdAccept: number;
   thresholdMns: number;
   rowThreshold: number;
+  ocrAcceptedVariants: string[];
   modelPath: string | null;
   rotateTestImageClockwise: boolean;
   active: boolean;
@@ -253,6 +254,7 @@ export type InspectionSlotState = {
   slotIndex: number | null;
   slotLabel: string | null;
   expectedText: string | null;
+  matchedText?: string | null;
   rawText: string | null;
   rows?: string[];
   result: "OK" | "NG" | "UNKNOWN";
@@ -448,6 +450,7 @@ export type ProductProfilePayload = {
   thresholdAccept: number;
   thresholdMns: number;
   rowThreshold?: number;
+  ocrAcceptedVariants?: string[];
   modelPath?: string;
   rotateTestImageClockwise?: boolean;
   active: boolean;
@@ -720,7 +723,7 @@ export type MachineRuntimeAction = MachineRuntimeStatus & {
 };
 
 const API_BASE_URL =
-  process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://127.0.0.1:3979/api";
+  process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://127.0.0.1:3980/api";
 
 type ApiErrorBody = {
   error?: {
@@ -1795,6 +1798,30 @@ export async function updateProductAiSettings(
         "Content-Type": "application/json",
       },
       body: JSON.stringify(payload),
+    },
+  );
+
+  if (!response.ok) {
+    throw new ApiError(await parseError(response), response.status);
+  }
+
+  return (await response.json()) as { data: ProductProfile };
+}
+
+export async function updateProductOcrAcceptedVariants(
+  accessToken: string,
+  productId: string,
+  ocrAcceptedVariants: string[],
+) {
+  const response = await fetch(
+    `${API_BASE_URL}/products/${productId}/ocr-accepted-variants`,
+    {
+      method: "PATCH",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ ocrAcceptedVariants }),
     },
   );
 

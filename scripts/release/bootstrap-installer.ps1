@@ -15,6 +15,8 @@ $credentialPath = Join-Path $programDataRoot "support-dev-credential.json"
 $bootstrapLogPath = Join-Path $programDataRoot "bootstrap.log"
 $runtimeRoot = Join-Path $InstallDir "resources\runtime"
 $vendorRoot = Join-Path $runtimeRoot "vendor"
+$persistentToolRoot = Join-Path $programDataRoot "tool-runtime"
+$persistentToolManifestPath = Join-Path $persistentToolRoot "tool-runtime-manifest.json"
 
 function New-Secret {
   param([int]$Bytes = 32)
@@ -51,6 +53,40 @@ function Write-Status {
     details = $Details
     writtenAt = (Get-Date).ToUniversalTime().ToString("o")
   } | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $statusPath -Encoding UTF8
+}
+
+function Get-FileSha256 {
+  param([string]$Path)
+
+  return (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant()
+}
+
+function Read-JsonFile {
+  param([string]$Path)
+
+  if (-not (Test-Path -LiteralPath $Path)) {
+    return $null
+  }
+
+  try {
+    return Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json
+  } catch {
+    Write-BootstrapLog "Could not parse JSON file ${Path}: $($_.Exception.Message)"
+    return $null
+  }
+}
+
+function Write-EnvFile {
+  param(
+    [hashtable]$Values,
+    [string]$Path = $envPath
+  )
+
+  $lines = $Values.GetEnumerator() |
+    Sort-Object Key |
+    ForEach-Object { "{0}={1}" -f $_.Key, $_.Value }
+  Set-Content -LiteralPath $Path -Encoding UTF8 -Value $lines
+  Protect-ProgramDataFile -Path $Path -AllowAuthenticatedRead
 }
 
 function Protect-ProgramDataFile {
@@ -768,52 +804,178 @@ function Install-PythonIfBundled {
   return $python
 }
 
-function Install-ToolPythonDependencies {
+function Get-ToolRuntimeMetadata {
   $toolPath = Join-Path $runtimeRoot "tool"
   $requirementsPath = Join-Path $toolPath "requirements.txt"
-  if (-not (Test-Path $requirementsPath)) {
-    throw "Tool requirements.txt was not found"
+  $embeddedPython = Join-Path $toolPath "python-embed\python.exe"
+  if (-not (Test-Path -LiteralPath $requirementsPath) -or -not (Test-Path -LiteralPath $embeddedPython)) {
+    throw "The staged Tool package is incomplete. requirements.txt and python-embed\\python.exe are required."
   }
 
-  $embeddedPython = Join-Path $toolPath "python-embed\python.exe"
-  if (Test-Path -LiteralPath $embeddedPython) {
-    if (-not (Test-EmbeddedToolPython -Command $embeddedPython)) {
-      throw "The encrypted Tool embedded runtime is not Python 3.11"
-    }
+  $releaseManifest = Read-JsonFile -Path (Join-Path $runtimeRoot "runtime-manifest.json")
+  $runtimeManifest = $releaseManifest.toolRuntime
+  $codeFingerprint = [string]$runtimeManifest.codeSha256
+  $pythonFingerprint = [string]$runtimeManifest.pythonSha256
+  $requirementsFingerprint = [string]$runtimeManifest.requirementsSha256
 
-    Push-Location $toolPath
-    try {
-      Invoke-BootstrapCommand -Command $embeddedPython -Arguments @("-m", "pip", "install", "--upgrade", "pip") -ErrorMessage "Could not upgrade pip in embedded Tool Python"
-      Invoke-BootstrapCommand -Command $embeddedPython -Arguments @("-m", "pip", "install", "-r", $requirementsPath) -ErrorMessage "Could not install embedded Tool Python requirements"
-      Invoke-BootstrapCommand -Command $embeddedPython -Arguments @("-c", "import fastapi, uvicorn; from api.app import app") -ErrorMessage "Encrypted Tool runtime verification failed"
-    } finally {
-      Pop-Location
-    }
+  if ([string]::IsNullOrWhiteSpace($codeFingerprint)) {
+    $codeFingerprint = Get-FileSha256 -Path (Join-Path $toolPath ".tool-release.json")
+  }
+  if ([string]::IsNullOrWhiteSpace($pythonFingerprint)) {
+    $pythonFingerprint = Get-FileSha256 -Path $embeddedPython
+  }
+  if ([string]::IsNullOrWhiteSpace($requirementsFingerprint)) {
+    $requirementsFingerprint = Get-FileSha256 -Path $requirementsPath
+  }
+
+  return @{
+    codeFingerprint = $codeFingerprint
+    embeddedPython = $embeddedPython
+    pythonFingerprint = $pythonFingerprint
+    requirementsFingerprint = $requirementsFingerprint
+    requirementsPath = $requirementsPath
+    sourcePath = $toolPath
+  }
+}
+
+function Set-LocalPrismaEngineEnvironment {
+  param([string]$BackendPath)
+
+  $enginesPath = Join-Path $BackendPath "node_modules\@prisma\engines"
+  $queryEngine = Join-Path $enginesPath "query_engine-windows.dll.node"
+  $schemaEngine = Join-Path $enginesPath "schema-engine-windows.exe"
+  if (-not (Test-Path -LiteralPath $queryEngine) -or -not (Test-Path -LiteralPath $schemaEngine)) {
+    throw "Local Prisma engines were not installed in $enginesPath"
+  }
+
+  $env:PRISMA_QUERY_ENGINE_LIBRARY = $queryEngine
+  $env:PRISMA_SCHEMA_ENGINE_BINARY = $schemaEngine
+  # Prisma otherwise asks the public checksum endpoint even when local engines exist.
+  $env:PRISMA_ENGINES_CHECKSUM_IGNORE_MISSING = "1"
+  Write-BootstrapLog "Using packaged local Prisma engines."
+}
+
+function Copy-PersistentToolCode {
+  param(
+    [string]$SourcePath,
+    [string]$DestinationPath
+  )
+
+  if (Test-Path -LiteralPath $DestinationPath) {
     return
   }
 
-  $python = Install-PythonIfBundled
-  $venvPath = Join-Path $toolPath ".venv"
-  $venvPython = Join-Path $venvPath "Scripts\python.exe"
+  $stagingPath = "$DestinationPath.staging-$([guid]::NewGuid().ToString('N'))"
+  New-Item -ItemType Directory -Force -Path $stagingPath | Out-Null
+  try {
+    Get-ChildItem -LiteralPath $SourcePath -Force |
+      Where-Object { $_.Name -notin @("python-embed", ".venv", "__pycache__", ".pytest_cache", "logs") } |
+      ForEach-Object {
+        Copy-Item -LiteralPath $_.FullName -Destination $stagingPath -Recurse -Force
+      }
+    Move-Item -LiteralPath $stagingPath -Destination $DestinationPath
+  } finally {
+    if (Test-Path -LiteralPath $stagingPath) {
+      Remove-Item -LiteralPath $stagingPath -Recurse -Force
+    }
+  }
+}
 
-  if ((Test-Path $venvPython) -and -not (Test-PythonCommand -Command $venvPython -Args @())) {
-    Write-BootstrapLog "Existing Tool Python venv is not Python 3.11. Recreating $venvPath"
-    Remove-Item -LiteralPath $venvPath -Recurse -Force
+function Copy-PersistentToolPython {
+  param(
+    [string]$SourcePath,
+    [string]$DestinationPath
+  )
+
+  if (Test-Path -LiteralPath $DestinationPath) {
+    return
   }
 
-  if (-not (Test-Path $venvPython)) {
-    $pythonCommand = $python.command
-    $pythonArgs = @($python.args) + @("-m", "venv", $venvPath)
-    Invoke-BootstrapCommand -Command $pythonCommand -Arguments $pythonArgs -ErrorMessage "Could not create Tool Python venv"
+  $stagingPath = "$DestinationPath.staging-$([guid]::NewGuid().ToString('N'))"
+  New-Item -ItemType Directory -Force -Path $stagingPath | Out-Null
+  try {
+    Get-ChildItem -LiteralPath $SourcePath -Force | ForEach-Object {
+      Copy-Item -LiteralPath $_.FullName -Destination $stagingPath -Recurse -Force
+    }
+    Move-Item -LiteralPath $stagingPath -Destination $DestinationPath
+  } finally {
+    if (Test-Path -LiteralPath $stagingPath) {
+      Remove-Item -LiteralPath $stagingPath -Recurse -Force
+    }
+  }
+}
+
+function Test-PersistentToolRuntime {
+  param(
+    [string]$CodePath,
+    [string]$PythonPath
+  )
+
+  if (-not (Test-EmbeddedToolPython -Command $PythonPath)) {
+    return $false
   }
 
-  if (-not (Test-PythonCommand -Command $venvPython -Args @())) {
-    throw "Tool Python venv was created, but it is not Python 3.11"
+  Push-Location $CodePath
+  try {
+    & $PythonPath -c "import fastapi, uvicorn; from api.app import app" | Out-Null
+    return $LASTEXITCODE -eq 0
+  } catch {
+    return $false
+  } finally {
+    Pop-Location
+  }
+}
+
+function Install-ToolPythonDependencies {
+  $metadata = Get-ToolRuntimeMetadata
+  $codePath = Join-Path (Join-Path $persistentToolRoot "code") $metadata.codeFingerprint
+  $pythonRoot = Join-Path (Join-Path $persistentToolRoot "python") $metadata.pythonFingerprint
+  $persistentPython = Join-Path $pythonRoot "python.exe"
+  $previousManifest = Read-JsonFile -Path $persistentToolManifestPath
+
+  New-Item -ItemType Directory -Force -Path $persistentToolRoot | Out-Null
+  Copy-PersistentToolCode -SourcePath $metadata.sourcePath -DestinationPath $codePath
+  Copy-PersistentToolPython -SourcePath (Split-Path -Parent $metadata.embeddedPython) -DestinationPath $pythonRoot
+
+  if (-not (Test-EmbeddedToolPython -Command $persistentPython)) {
+    throw "Persistent Tool embedded runtime is not Python 3.11"
   }
 
-  Invoke-BootstrapCommand -Command $venvPython -Arguments @("-m", "pip", "install", "--upgrade", "pip") -ErrorMessage "Could not upgrade pip in Tool venv"
+  $requiresDependencyInstall =
+    -not (Test-PersistentToolRuntime -CodePath $codePath -PythonPath $persistentPython) -or
+    $null -eq $previousManifest -or
+    [string]$previousManifest.pythonFingerprint -ne $metadata.pythonFingerprint -or
+    [string]$previousManifest.requirementsFingerprint -ne $metadata.requirementsFingerprint
 
-  Invoke-BootstrapCommand -Command $venvPython -Arguments @("-m", "pip", "install", "-r", $requirementsPath) -ErrorMessage "Could not install Tool Python requirements"
+  Push-Location $codePath
+  try {
+    if ($requiresDependencyInstall) {
+      Write-BootstrapLog "Tool runtime changed or is incomplete. Installing dependencies into persistent Python $pythonRoot"
+      Invoke-BootstrapCommand -Command $persistentPython -Arguments @("-m", "pip", "install", "--upgrade", "pip") -ErrorMessage "Could not upgrade persistent Tool Python pip"
+      Invoke-BootstrapCommand -Command $persistentPython -Arguments @("-m", "pip", "install", "-r", (Join-Path $codePath "requirements.txt")) -ErrorMessage "Could not install persistent Tool Python requirements"
+    } else {
+      Write-BootstrapLog "Tool runtime is unchanged. Reusing persistent dependencies from $pythonRoot"
+    }
+
+    Invoke-BootstrapCommand -Command $persistentPython -Arguments @("-c", "import fastapi, uvicorn; from api.app import app") -ErrorMessage "Persistent Tool runtime verification failed"
+  } finally {
+    Pop-Location
+  }
+
+  [ordered]@{
+    codeFingerprint = $metadata.codeFingerprint
+    codePath = $codePath
+    pythonFingerprint = $metadata.pythonFingerprint
+    pythonPath = $persistentPython
+    requirementsFingerprint = $metadata.requirementsFingerprint
+    updatedAt = (Get-Date).ToUniversalTime().ToString("o")
+  } | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $persistentToolManifestPath -Encoding UTF8
+
+  return @{
+    codePath = $codePath
+    pythonPath = $persistentPython
+    reusedDependencies = -not $requiresDependencyInstall
+  }
 }
 
 $rollbackDatabaseOnFailure = $false
@@ -829,16 +991,22 @@ try {
       throw "Existing runtime .env was not found; automated update cannot safely rebuild dependencies."
     }
 
-    Install-NodeDependencies -Path (Join-Path $runtimeRoot "backend") -ProductionOnly
+    $backendPath = Join-Path $runtimeRoot "backend"
+    Install-NodeDependencies -Path $backendPath -ProductionOnly
     Install-NodeDependencies -Path (Join-Path $runtimeRoot "frontend-standalone") -ProductionOnly
-    Install-ToolPythonDependencies
+    $persistentToolRuntime = Install-ToolPythonDependencies
 
     $existingEnv = Read-EnvFile -Path $envPath
+    $existingEnv["DEVICE_TOOL_PYTHON"] = $persistentToolRuntime.pythonPath
+    $existingEnv["DEVICE_TOOL_RUNTIME_ROOT"] = $persistentToolRuntime.codePath
+    Write-EnvFile -Values $existingEnv
     foreach ($entry in $existingEnv.GetEnumerator()) {
       Set-Item -Path "Env:$($entry.Key)" -Value $entry.Value
     }
 
-    Push-Location (Join-Path $runtimeRoot "backend")
+    Set-LocalPrismaEngineEnvironment -BackendPath $backendPath
+
+    Push-Location $backendPath
     try {
       Invoke-BootstrapCommand -Command "npm.cmd" -Arguments @("exec", "--offline", "--", "prisma", "generate") -ErrorMessage "Prisma client generation failed"
       Invoke-BootstrapCommand -Command "npm.cmd" -Arguments @("exec", "--offline", "--", "prisma", "migrate", "deploy") -ErrorMessage "Prisma migrate deploy failed"
@@ -849,6 +1017,8 @@ try {
     Write-Status -State "ready" -Message "Updated runtime dependencies were rebuilt." -Details @{
       envPath = $envPath
       runtimeRoot = $runtimeRoot
+      toolDependenciesReused = $persistentToolRuntime.reusedDependencies
+      toolRuntimeRoot = $persistentToolRuntime.codePath
     }
     exit 0
   }
@@ -940,6 +1110,7 @@ JWT_SECRET=$jwtSecret
 DEVICE_TOOL_BASE_URL=http://127.0.0.1:8668
 DEVICE_TOOL_API_PREFIX=/tool/v1
 DEVICE_TOOL_PYTHON=$toolRuntimePython
+DEVICE_TOOL_RUNTIME_ROOT=
 DONGLE_MOCK_MODE=false
 DONGLE_DLL_PATH=$runtimeRoot\backend\native\System8.dll
 DONGLE_HELPER_PATH=$runtimeRoot\backend\native\dongle-checker.exe
@@ -958,16 +1129,26 @@ DONGLE_CHECK_TIMEOUT_MS=7000
   } | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $credentialPath -Encoding UTF8
   Protect-ProgramDataFile -Path $credentialPath
 
-  Install-NodeDependencies -Path (Join-Path $runtimeRoot "backend")
+  $backendPath = Join-Path $runtimeRoot "backend"
+  Install-NodeDependencies -Path $backendPath
   Install-NodeDependencies -Path (Join-Path $runtimeRoot "frontend-standalone") -ProductionOnly
-  Install-ToolPythonDependencies
+  $persistentToolRuntime = Install-ToolPythonDependencies
+
+  $initialEnv = Read-EnvFile -Path $envPath
+  $initialEnv["DEVICE_TOOL_PYTHON"] = $persistentToolRuntime.pythonPath
+  $initialEnv["DEVICE_TOOL_RUNTIME_ROOT"] = $persistentToolRuntime.codePath
+  Write-EnvFile -Values $initialEnv
+  foreach ($entry in $initialEnv.GetEnumerator()) {
+    Set-Item -Path "Env:$($entry.Key)" -Value $entry.Value
+  }
+  Set-LocalPrismaEngineEnvironment -BackendPath $backendPath
 
   $env:DATABASE_URL = $databaseUrl
   $env:JWT_SECRET = $jwtSecret
   $env:OCR_SEED_MODE = "production"
   $env:DEV_SUPPORT_PASSWORD = $supportPassword
 
-  Push-Location (Join-Path $runtimeRoot "backend")
+  Push-Location $backendPath
   try {
     Invoke-BootstrapCommand -Command "npm.cmd" -Arguments @("exec", "--", "prisma", "generate") -ErrorMessage "Prisma client generation failed"
     Invoke-BootstrapCommand -Command "npm.cmd" -Arguments @("exec", "--", "prisma", "migrate", "deploy") -ErrorMessage "Prisma migrate deploy failed"

@@ -8,7 +8,7 @@ import { CameraStreamGateway } from './camera/camera-stream.gateway';
 async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
   app.enableShutdownHooks();
-  const frontendPort = readPortEnv('FRONTEND_PORT', 3969);
+  const frontendPort = readPortEnv('FRONTEND_PORT', 3970);
   const frontendFallbackStart = readPortEnv(
     'FRONTEND_FALLBACK_PORT_START',
     frontendPort + 1,
@@ -59,7 +59,7 @@ async function bootstrap() {
   const swaggerDocument = SwaggerModule.createDocument(app, swaggerConfig);
   SwaggerModule.setup('api/docs', app, swaggerDocument);
 
-  const port = readPortEnv('BACKEND_PORT', 3979);
+  const port = readPortEnv('BACKEND_PORT', 3980);
   await app.listen(port);
   app.get(CameraStreamGateway).attach(app.getHttpServer());
 }
