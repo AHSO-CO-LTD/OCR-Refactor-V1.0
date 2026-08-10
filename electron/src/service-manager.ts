@@ -130,6 +130,7 @@ function toStartupServiceStageId(
 
 export class ServiceManager {
   private readonly services: ManagedService[];
+  private readonly runtimeRoot: string;
   private readonly desktopInternalToken = randomUUID();
   private backendMigrationsReady = false;
   private logListener: ((message: string) => void) | null = null;
@@ -152,6 +153,7 @@ export class ServiceManager {
   private startupHardwareAttempt = 0;
 
   constructor(repoRoot: string) {
+    this.runtimeRoot = repoRoot;
     const toolPython = resolveToolPython(repoRoot);
     const deviceToolCommand = resolveDeviceToolCommand(
       repoRoot,
@@ -1020,7 +1022,7 @@ export class ServiceManager {
   }
 
   private getRuntimeRoot() {
-    return join(this.services[0].cwd, "..");
+    return this.runtimeRoot;
   }
 
   private getServicePort(serviceName: LocalServiceName) {
@@ -1321,7 +1323,13 @@ function resolveFrontendCommand(
 ): ServiceCommand {
   const standaloneServer = findStandaloneFrontendServer(repoRoot);
 
-  if (isPackagedRuntime(repoRoot) && standaloneServer) {
+  if (isPackagedRuntime(repoRoot)) {
+    if (!standaloneServer) {
+      throw new Error(
+        `Packaged frontend server was not found under ${repoRoot}`,
+      );
+    }
+
     const nodeExecutable = resolveSystemNodeExecutable();
 
     if (!nodeExecutable) {
