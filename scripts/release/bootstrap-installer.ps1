@@ -917,7 +917,12 @@ function Test-PersistentToolRuntime {
 
   Push-Location $CodePath
   try {
-    & $PythonPath -c "import fastapi, uvicorn; from api.app import app" | Out-Null
+    # The embedded Python runtime uses an isolated ._pth file, so its import
+    # path does not automatically include the Tool code directory. Add it
+    # explicitly before checking either the development api/ package or the
+    # protected api.cp*.pyd module shipped in production releases.
+    $importCheck = "import sys; sys.path.insert(0, r'$CodePath'); import fastapi, uvicorn; from api.app import app"
+    & $PythonPath -c $importCheck 2>$null | Out-Null
     return $LASTEXITCODE -eq 0
   } catch {
     return $false
@@ -957,7 +962,8 @@ function Install-ToolPythonDependencies {
       Write-BootstrapLog "Tool runtime is unchanged. Reusing persistent dependencies from $pythonRoot"
     }
 
-    Invoke-BootstrapCommand -Command $persistentPython -Arguments @("-c", "import fastapi, uvicorn; from api.app import app") -ErrorMessage "Persistent Tool runtime verification failed"
+    $importCheck = "import sys; sys.path.insert(0, r'$codePath'); import fastapi, uvicorn; from api.app import app"
+    Invoke-BootstrapCommand -Command $persistentPython -Arguments @("-c", $importCheck) -ErrorMessage "Persistent Tool runtime verification failed"
   } finally {
     Pop-Location
   }
