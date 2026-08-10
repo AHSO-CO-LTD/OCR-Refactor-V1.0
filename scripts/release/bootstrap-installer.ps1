@@ -1003,6 +1003,11 @@ try {
     $persistentToolRuntime = Install-ToolPythonDependencies
 
     $existingEnv = Read-EnvFile -Path $envPath
+    $nodeExecutable = Find-CommandPath "node.exe"
+    if (-not $nodeExecutable) {
+      throw "Node.js executable was not found after dependency installation"
+    }
+    $existingEnv["AHSO_NODE_EXECUTABLE"] = $nodeExecutable
     $existingEnv["DEVICE_TOOL_PYTHON"] = $persistentToolRuntime.pythonPath
     $existingEnv["DEVICE_TOOL_RUNTIME_ROOT"] = $persistentToolRuntime.codePath
     Write-EnvFile -Values $existingEnv
@@ -1141,6 +1146,11 @@ DONGLE_CHECK_TIMEOUT_MS=7000
   $persistentToolRuntime = Install-ToolPythonDependencies
 
   $initialEnv = Read-EnvFile -Path $envPath
+  $nodeExecutable = Find-CommandPath "node.exe"
+  if (-not $nodeExecutable) {
+    throw "Node.js executable was not found after dependency installation"
+  }
+  $initialEnv["AHSO_NODE_EXECUTABLE"] = $nodeExecutable
   $initialEnv["DEVICE_TOOL_PYTHON"] = $persistentToolRuntime.pythonPath
   $initialEnv["DEVICE_TOOL_RUNTIME_ROOT"] = $persistentToolRuntime.codePath
   Write-EnvFile -Values $initialEnv

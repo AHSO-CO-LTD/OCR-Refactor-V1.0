@@ -2,7 +2,7 @@ import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { createConnection } from "node:net";
-import { dirname, join } from "node:path";
+import { delimiter, dirname, join } from "node:path";
 import type {
   StartupHardwareStageId,
   StartupHardwareStageUpdate,
@@ -800,6 +800,10 @@ export class ServiceManager {
 
     onStatus(`${service.name}: starting on port ${service.port}`);
     this.emitLog(service.name, `starting on port ${service.port}`);
+    this.emitLog(
+      service.name,
+      `launch command=${service.command}; cwd=${service.cwd}; args=${JSON.stringify(service.args)}`,
+    );
 
     const child = spawn(service.command, service.args, {
       cwd: service.cwd,
@@ -1318,12 +1322,20 @@ function resolveFrontendCommand(
   const standaloneServer = findStandaloneFrontendServer(repoRoot);
 
   if (isPackagedRuntime(repoRoot) && standaloneServer) {
+    const nodeExecutable = resolveSystemNodeExecutable();
+
+    if (!nodeExecutable) {
+      throw new Error(
+        "Packaged frontend requires Node.js, but node.exe was not found. Run the installer repair flow.",
+      );
+    }
+
     return {
       // Next.js standalone is a regular Node.js server. Running it through
       // the Electron executable can exit cleanly before it opens its port on
       // packaged Windows builds. Setup already verifies Node.js, so use it
       // directly for the renderer service.
-      command: process.platform === "win32" ? "node.exe" : "node",
+      command: nodeExecutable,
       args: [standaloneServer],
       cwd: dirname(standaloneServer),
       env: { NODE_ENV: "production" },
@@ -1360,6 +1372,26 @@ function resolveFrontendCommand(
   ]);
 
   return { ...command, cwd: repoRoot, env: undefined };
+}
+
+function resolveSystemNodeExecutable() {
+  if (process.platform !== "win32") {
+    return "node";
+  }
+
+  const configured = process.env.AHSO_NODE_EXECUTABLE?.trim();
+  if (configured && existsSync(configured)) {
+    return configured;
+  }
+
+  const pathValue = process.env.Path ?? process.env.PATH ?? "";
+  const candidates = pathValue
+    .split(delimiter)
+    .map((entry) => entry.trim().replace(/^"|"$/g, ""))
+    .filter(Boolean)
+    .map((entry) => join(entry, "node.exe"));
+
+  return candidates.find((candidate) => existsSync(candidate)) ?? null;
 }
 
 function isPackagedRuntime(repoRoot: string) {
