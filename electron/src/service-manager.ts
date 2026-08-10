@@ -1319,10 +1319,14 @@ function resolveFrontendCommand(
 
   if (isPackagedRuntime(repoRoot) && standaloneServer) {
     return {
-      command: process.execPath,
+      // Next.js standalone is a regular Node.js server. Running it through
+      // the Electron executable can exit cleanly before it opens its port on
+      // packaged Windows builds. Setup already verifies Node.js, so use it
+      // directly for the renderer service.
+      command: process.platform === "win32" ? "node.exe" : "node",
       args: [standaloneServer],
       cwd: dirname(standaloneServer),
-      env: { ELECTRON_RUN_AS_NODE: "1", NODE_ENV: "production" },
+      env: { NODE_ENV: "production" },
     };
   }
 
