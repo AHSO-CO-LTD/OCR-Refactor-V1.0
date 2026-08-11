@@ -108,7 +108,12 @@ type DeviceToolImageInspectionRequest = Omit<
   DeviceToolInspectionRequest,
   'camera'
 > & {
-  crops: { slotIndex: number; imageBase64: string }[];
+  crops: ProcessedRoiCrop[];
+};
+
+export type ProcessedRoiCrop = {
+  slotIndex: number;
+  imageBase64: string;
 };
 
 @Injectable()
@@ -479,6 +484,7 @@ export class DeviceToolService {
       ...scan,
       image_width: imageWidth,
       image_height: imageHeight,
+      processedRoiCrops: crops,
     };
   }
 
@@ -1075,10 +1081,7 @@ export class DeviceToolService {
     if (rotation !== 0) pipeline = pipeline.rotate(rotation);
 
     const output = await pipeline
-      .resize(targetWidth, targetHeight, {
-        fit: 'contain',
-        background: { r: 0, g: 0, b: 0, alpha: 1 },
-      })
+      .removeAlpha()
       .jpeg({ quality: 88 })
       .toBuffer();
 

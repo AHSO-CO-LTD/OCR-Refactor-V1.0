@@ -67,7 +67,11 @@ export async function cropProductRois(
     );
     const sourceTopLeftX = sourceCenterX - sourceWidth / 2;
     const sourceTopLeftY = sourceCenterY - sourceHeight / 2;
-    const rotationSteps = product.rotateTestImageClockwise ? 1 : 0;
+    const normalizedRegionRotation =
+      ((Math.round(Number(region.rotation) / 90) * 90) % 360 + 360) % 360;
+    const rotationSteps = product.rotateTestImageClockwise
+      ? 1
+      : normalizedRegionRotation / 90;
     const normalizedRotationSteps = ((rotationSteps % 4) + 4) % 4;
     const cropCanvas = document.createElement("canvas");
     const cropContext = cropCanvas.getContext("2d");
@@ -80,21 +84,16 @@ export async function cropProductRois(
     cropCanvas.height = sourceHeight;
     cropContext.drawImage(image, -sourceTopLeftX, -sourceTopLeftY);
 
-    rotateCanvas.width = sourceWidth;
-    rotateCanvas.height = sourceHeight;
-    rotateContext.clearRect(0, 0, rotateCanvas.width, rotateCanvas.height);
-    rotateContext.save();
-    rotateContext.translate(rotateCanvas.width / 2, rotateCanvas.height / 2);
-    rotateContext.rotate((normalizedRotationSteps * Math.PI) / 2);
     const rotatedWidth =
       normalizedRotationSteps % 2 === 1 ? cropCanvas.height : cropCanvas.width;
     const rotatedHeight =
       normalizedRotationSteps % 2 === 1 ? cropCanvas.width : cropCanvas.height;
-    const fitScale = Math.min(
-      rotateCanvas.width / Math.max(1, rotatedWidth),
-      rotateCanvas.height / Math.max(1, rotatedHeight),
-    );
-    rotateContext.scale(fitScale, fitScale);
+    rotateCanvas.width = rotatedWidth;
+    rotateCanvas.height = rotatedHeight;
+    rotateContext.clearRect(0, 0, rotateCanvas.width, rotateCanvas.height);
+    rotateContext.save();
+    rotateContext.translate(rotateCanvas.width / 2, rotateCanvas.height / 2);
+    rotateContext.rotate((normalizedRotationSteps * Math.PI) / 2);
     rotateContext.drawImage(
       cropCanvas,
       -cropCanvas.width / 2,

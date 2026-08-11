@@ -163,6 +163,16 @@ export class CreateProductProfileDto {
   @Max(500)
   rowThreshold?: number;
 
+  @ApiPropertyOptional({
+    example: ['IS-35-R'],
+    description: 'Additional OCR text variants accepted for this product code',
+  })
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(20)
+  @IsString({ each: true })
+  ocrAcceptedVariants?: string[];
+
   @ApiPropertyOptional({ example: 'models/SL-40_150_0.998.pt' })
   @IsOptional()
   @IsString()

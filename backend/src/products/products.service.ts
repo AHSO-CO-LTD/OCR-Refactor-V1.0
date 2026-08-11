@@ -71,6 +71,9 @@ export class ProductsService {
         thresholdAccept: dto.thresholdAccept,
         thresholdMns: dto.thresholdMns,
         rowThreshold: dto.rowThreshold ?? 20,
+        ocrAcceptedVariants: this.normalizeOcrAcceptedVariants(
+          dto.ocrAcceptedVariants,
+        ),
         modelPath: dto.modelPath || null,
         rotateTestImageClockwise: dto.rotateTestImageClockwise ?? true,
         active: dto.active,
@@ -115,6 +118,10 @@ export class ProductsService {
           thresholdAccept: dto.thresholdAccept,
           thresholdMns: dto.thresholdMns,
           rowThreshold: dto.rowThreshold,
+          ocrAcceptedVariants:
+            dto.ocrAcceptedVariants === undefined
+              ? undefined
+              : this.normalizeOcrAcceptedVariants(dto.ocrAcceptedVariants),
           modelPath:
             dto.modelPath === undefined ? undefined : dto.modelPath || null,
           rotateTestImageClockwise: dto.rotateTestImageClockwise,
@@ -354,6 +361,27 @@ export class ProductsService {
         ...(dto.rowThreshold !== undefined
           ? { rowThreshold: dto.rowThreshold }
           : {}),
+      },
+      include: productInclude,
+    });
+
+    return { data: this.toProductProfile(product) };
+  }
+
+  async updateProductOcrAcceptedVariants(id: string, variants: string[]) {
+    const existingProduct = await this.prisma.product.findUnique({
+      where: { id },
+      select: { id: true },
+    });
+
+    if (!existingProduct) {
+      throw new NotFoundException('Product not found');
+    }
+
+    const product = await this.prisma.product.update({
+      where: { id },
+      data: {
+        ocrAcceptedVariants: this.normalizeOcrAcceptedVariants(variants),
       },
       include: productInclude,
     });
@@ -635,6 +663,16 @@ export class ProductsService {
     };
   }
 
+  private normalizeOcrAcceptedVariants(variants?: string[]) {
+    return [
+      ...new Set(
+        (variants ?? [])
+          .map((variant) => variant.trim().toUpperCase())
+          .filter(Boolean),
+      ),
+    ];
+  }
+
   private toProductProfile(product: ProductWithProfile) {
     return {
       id: product.id,
@@ -646,6 +684,7 @@ export class ProductsService {
       thresholdAccept: Number(product.thresholdAccept),
       thresholdMns: Number(product.thresholdMns),
       rowThreshold: product.rowThreshold,
+      ocrAcceptedVariants: product.ocrAcceptedVariants,
       modelPath: product.modelPath,
       rotateTestImageClockwise: product.rotateTestImageClockwise,
       active: product.active,

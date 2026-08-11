@@ -5,45 +5,97 @@ type InspectionSlotEvaluationInput = {
   rows?: string[] | null;
   errorMessage?: string | null;
   expectedText: string;
+  acceptedVariants?: string[] | null;
+};
+
+type AcceptedInspectionText = {
+  candidate: string;
+  displayText: string;
 };
 
 export function matchesExpectedInspectionText(
   rawText: string,
   expectedText: string,
+  acceptedVariants: string[] = [],
 ) {
-  const text = rawText.trim().toUpperCase();
-  const acceptedTexts = buildAcceptedInspectionTexts(expectedText);
-
-  return acceptedTexts.some((candidate) => {
-    const escaped = candidate.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const pattern = new RegExp(`(^|-)${escaped}($|-)`);
-    return pattern.test(text);
-  });
+  return Boolean(
+    findMatchedInspectionText(rawText, expectedText, acceptedVariants),
+  );
 }
 
-export function buildAcceptedInspectionTexts(expectedText: string) {
-  const normalized = expectedText.trim().toUpperCase();
-  const values = new Set<string>([
-    normalized,
-    normalized.split('').reverse().join(''),
-  ]);
+function findMatchedInspectionText(
+  rawText: string,
+  expectedText: string,
+  acceptedVariants: string[] = [],
+) {
+  const text = rawText.trim().toUpperCase();
+  const acceptedTexts = buildAcceptedInspectionTextCandidates(
+    expectedText,
+    acceptedVariants,
+  );
 
-  if (normalized.includes('-')) {
-    const parts = normalized.split('-');
-    if (parts.length === 2) {
-      const [left, right] = parts;
-      const reversedLeft = left.split('').reverse().join('');
-      const reversedRight = right.split('').reverse().join('');
+  return acceptedTexts.find(({ candidate }) => text.includes(candidate));
+}
 
-      values.add(`${reversedRight}-${reversedLeft}`);
-      values.add(`${reversedRight}${reversedLeft[0]}-${reversedLeft.slice(1)}`);
-      values.add(
-        `${reversedRight.slice(0, -1)}-${reversedRight.slice(-1)}${reversedLeft}`,
-      );
+export function buildAcceptedInspectionTexts(
+  expectedText: string,
+  acceptedVariants: string[] = [],
+) {
+  return buildAcceptedInspectionTextCandidates(
+    expectedText,
+    acceptedVariants,
+  ).map(({ candidate }) => candidate);
+}
+
+function buildAcceptedInspectionTextCandidates(
+  expectedText: string,
+  acceptedVariants: string[] = [],
+) {
+  const configuredTexts = [expectedText, ...acceptedVariants]
+    .map((value) => value.trim().toUpperCase())
+    .filter(Boolean);
+
+  const candidates = configuredTexts.flatMap((value) =>
+    buildLegacyAcceptedTexts(value).map((candidate) => ({
+      candidate,
+      displayText: value,
+    })),
+  );
+  const uniqueCandidates = new Map<string, AcceptedInspectionText>();
+
+  for (const candidate of candidates) {
+    if (!uniqueCandidates.has(candidate.candidate)) {
+      uniqueCandidates.set(candidate.candidate, candidate);
     }
   }
 
-  return [...values];
+  return [...uniqueCandidates.values()].sort(
+    (left, right) => right.candidate.length - left.candidate.length,
+  );
+}
+
+function buildLegacyAcceptedTexts(value: string) {
+  const accepted = [value, value.split('').reverse().join('')];
+
+  if (!value.includes('-')) {
+    return accepted;
+  }
+
+  const parts = value.split('-');
+  if (parts.length !== 2) {
+    return accepted;
+  }
+
+  const [left, right] = parts;
+  const reversedLeft = left.split('').reverse().join('');
+  const reversedRight = right.split('').reverse().join('');
+
+  return [
+    ...accepted,
+    `${reversedRight}-${reversedLeft}`,
+    `${reversedRight}${reversedLeft[0]}-${reversedLeft.slice(1)}`,
+    `${reversedRight.slice(0, -1)}-${reversedRight.slice(-1)}${reversedLeft}`,
+  ];
 }
 
 export function evaluateInspectionSlot({
@@ -51,6 +103,7 @@ export function evaluateInspectionSlot({
   rows,
   errorMessage,
   expectedText,
+  acceptedVariants,
 }: InspectionSlotEvaluationInput) {
   const normalizedText = rawText?.trim() ?? '';
   const normalizedRows = rows
@@ -62,9 +115,12 @@ export function evaluateInspectionSlot({
       : normalizedText
         ? [normalizedText]
         : [];
-  const matched = textsToEvaluate.some((text) =>
-    matchesExpectedInspectionText(text, expectedText),
-  );
+  const matchedCandidate = textsToEvaluate
+    .map((text) =>
+      findMatchedInspectionText(text, expectedText, acceptedVariants ?? []),
+    )
+    .find(Boolean);
+  const matched = Boolean(matchedCandidate);
 
   let result: InspectionResult = InspectionResult.UNKNOWN;
   if (matched) {
@@ -75,6 +131,7 @@ export function evaluateInspectionSlot({
 
   return {
     rawText: normalizedText || null,
+    matchedText: matchedCandidate?.displayText ?? null,
     errorMessage: errorMessage ?? null,
     matched,
     result,
@@ -88,6 +145,7 @@ export function resolveInspectionResults(
     error?: string | null;
   }[],
   expectedText: string,
+  acceptedVariants: string[] = [],
 ) {
   if (results.length === 0) {
     return InspectionResult.UNKNOWN;
@@ -99,6 +157,7 @@ export function resolveInspectionResults(
       rows: result.rows,
       errorMessage: result.error,
       expectedText,
+      acceptedVariants,
     }),
   );
 

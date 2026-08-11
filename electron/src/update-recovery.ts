@@ -386,7 +386,9 @@ export class UpdateRecoveryManager {
 }
 
 function createInstallerFailureRollbackScript(markerPath: string) {
-  const watchdogTimeoutSeconds = 180;
+  // A Tool dependency change can legitimately take several minutes on a factory PC.
+  // Keep the rollback watchdog active long enough for the visible NSIS update flow.
+  const watchdogTimeoutSeconds = 30 * 60;
   const escapedMarkerPath = markerPath.replace(/'/g, "''");
 
   return [

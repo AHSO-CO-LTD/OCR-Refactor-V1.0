@@ -1,10 +1,10 @@
 {
   "name": "@ocr/frontend",
-  "version": "1.2.2",
+  "version": "1.2.6",
   "private": true,
   "scripts": {
-    "dev": "next dev --webpack --port 3969",
-    "dev:turbopack": "next dev --turbopack --port 3969",
+    "dev": "next dev --webpack --port 3970",
+    "dev:turbopack": "next dev --turbopack --port 3970",
     "build": "next build",
     "start": "next start",
     "lint": "eslint",

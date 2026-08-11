@@ -2,7 +2,7 @@ import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { createConnection } from "node:net";
-import { dirname, join } from "node:path";
+import { delimiter, dirname, join } from "node:path";
 import type {
   StartupHardwareStageId,
   StartupHardwareStageUpdate,
@@ -58,9 +58,9 @@ const BACKEND_MIGRATION_TIMEOUT_MS = 120_000;
 const DEVICE_TOOL_API_PREFIX = "/tool/v1";
 const DEVICE_TOOL_HEALTH_PATH = "/";
 const DEFAULT_PORTS: Record<LocalServiceName, number> = {
-  backend: readPortEnv("BACKEND_PORT", 3979),
+  backend: readPortEnv("BACKEND_PORT", 3980),
   "device-tool": readPortEnv("DEVICE_TOOL_PORT", 8668),
-  frontend: readPortEnv("FRONTEND_PORT", 3969),
+  frontend: readPortEnv("FRONTEND_PORT", 3970),
 };
 const FALLBACK_PORTS: Record<LocalServiceName, { end: number; start: number }> =
   {
@@ -130,6 +130,7 @@ function toStartupServiceStageId(
 
 export class ServiceManager {
   private readonly services: ManagedService[];
+  private readonly runtimeRoot: string;
   private readonly desktopInternalToken = randomUUID();
   private backendMigrationsReady = false;
   private logListener: ((message: string) => void) | null = null;
@@ -152,6 +153,7 @@ export class ServiceManager {
   private startupHardwareAttempt = 0;
 
   constructor(repoRoot: string) {
+    this.runtimeRoot = repoRoot;
     const toolPython = resolveToolPython(repoRoot);
     const deviceToolCommand = resolveDeviceToolCommand(
       repoRoot,
@@ -800,6 +802,10 @@ export class ServiceManager {
 
     onStatus(`${service.name}: starting on port ${service.port}`);
     this.emitLog(service.name, `starting on port ${service.port}`);
+    this.emitLog(
+      service.name,
+      `launch command=${service.command}; cwd=${service.cwd}; args=${JSON.stringify(service.args)}`,
+    );
 
     const child = spawn(service.command, service.args, {
       cwd: service.cwd,
@@ -1016,7 +1022,7 @@ export class ServiceManager {
   }
 
   private getRuntimeRoot() {
-    return join(this.services[0].cwd, "..");
+    return this.runtimeRoot;
   }
 
   private getServicePort(serviceName: LocalServiceName) {
@@ -1317,12 +1323,30 @@ function resolveFrontendCommand(
 ): ServiceCommand {
   const standaloneServer = findStandaloneFrontendServer(repoRoot);
 
-  if (isPackagedRuntime(repoRoot) && standaloneServer) {
+  if (isPackagedRuntime(repoRoot)) {
+    if (!standaloneServer) {
+      throw new Error(
+        `Packaged frontend server was not found under ${repoRoot}`,
+      );
+    }
+
+    const nodeExecutable = resolveSystemNodeExecutable();
+
+    if (!nodeExecutable) {
+      throw new Error(
+        "Packaged frontend requires Node.js, but node.exe was not found. Run the installer repair flow.",
+      );
+    }
+
     return {
-      command: process.execPath,
+      // Next.js standalone is a regular Node.js server. Running it through
+      // the Electron executable can exit cleanly before it opens its port on
+      // packaged Windows builds. Setup already verifies Node.js, so use it
+      // directly for the renderer service.
+      command: nodeExecutable,
       args: [standaloneServer],
       cwd: dirname(standaloneServer),
-      env: { ELECTRON_RUN_AS_NODE: "1", NODE_ENV: "production" },
+      env: { NODE_ENV: "production" },
     };
   }
 
@@ -1356,6 +1380,26 @@ function resolveFrontendCommand(
   ]);
 
   return { ...command, cwd: repoRoot, env: undefined };
+}
+
+function resolveSystemNodeExecutable() {
+  if (process.platform !== "win32") {
+    return "node";
+  }
+
+  const configured = process.env.AHSO_NODE_EXECUTABLE?.trim();
+  if (configured && existsSync(configured)) {
+    return configured;
+  }
+
+  const pathValue = process.env.Path ?? process.env.PATH ?? "";
+  const candidates = pathValue
+    .split(delimiter)
+    .map((entry) => entry.trim().replace(/^"|"$/g, ""))
+    .filter(Boolean)
+    .map((entry) => join(entry, "node.exe"));
+
+  return candidates.find((candidate) => existsSync(candidate)) ?? null;
 }
 
 function isPackagedRuntime(repoRoot: string) {
@@ -1470,7 +1514,11 @@ function resolveDeviceToolCommand(
   toolPython: { args: string[]; command: string },
   port: number,
 ): ServiceCommand {
-  const toolPath = join(repoRoot, "tool");
+  const configuredToolPath = process.env.DEVICE_TOOL_RUNTIME_ROOT?.trim();
+  const toolPath =
+    configuredToolPath && existsSync(configuredToolPath)
+      ? configuredToolPath
+      : join(repoRoot, "tool");
 
   if (port === 8668) {
     return {

@@ -34,6 +34,7 @@ import { CreateProductProfileDto } from './dto/product-profile.dto';
 import { UpdateProductBatchSizeDto } from './dto/update-product-batch-size.dto';
 import { UpdateProductAiSettingsDto } from './dto/update-product-ai-settings.dto';
 import { UpdateProductOcrTestSettingsDto } from './dto/update-product-ocr-test-settings.dto';
+import { UpdateProductOcrAcceptedVariantsDto } from './dto/update-product-ocr-accepted-variants.dto';
 import { UpdateProductProfileDto } from './dto/update-product-profile.dto';
 import { UpdateProductRoiRegionsDto } from './dto/update-product-roi-regions.dto';
 import { ProductsService } from './products.service';
@@ -190,6 +191,21 @@ export class ProductsController {
     }
 
     return this.productsService.updateProductAiSettings(id, dto);
+  }
+
+  @ApiOperation({
+    summary: 'Update accepted OCR text variants for one product profile',
+  })
+  @Patch(':id/ocr-accepted-variants')
+  @RequirePermissions(PERMISSIONS.PRODUCT_MANAGE)
+  updateProductOcrAcceptedVariants(
+    @Param('id') id: string,
+    @Body() dto: UpdateProductOcrAcceptedVariantsDto,
+  ) {
+    return this.productsService.updateProductOcrAcceptedVariants(
+      id,
+      dto.ocrAcceptedVariants,
+    );
   }
 
   @ApiOperation({

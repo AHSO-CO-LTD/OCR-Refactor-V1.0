@@ -12,6 +12,42 @@ $repoRoot = Resolve-Path (Join-Path $PSScriptRoot "..\..")
 $runtimeRoot = Join-Path $repoRoot "release-runtime"
 $manifestPath = Join-Path $runtimeRoot "runtime-manifest.json"
 
+function Get-FileSha256 {
+  param([string]$Path)
+
+  return (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant()
+}
+
+function Get-DirectorySha256 {
+  param(
+    [string]$Path,
+    [string[]]$ExcludePathPrefixes = @()
+  )
+
+  $root = (Resolve-Path -LiteralPath $Path).Path.TrimEnd("\\")
+  $entries = Get-ChildItem -LiteralPath $root -Recurse -File -Force |
+    Where-Object {
+      $relativePath = $_.FullName.Substring($root.Length).TrimStart("\\")
+      -not ($ExcludePathPrefixes | Where-Object {
+        $relativePath.StartsWith($_, [System.StringComparison]::OrdinalIgnoreCase)
+      })
+    } |
+    Sort-Object FullName |
+    ForEach-Object {
+      $relativePath = $_.FullName.Substring($root.Length).TrimStart("\\")
+      "{0}:{1}" -f $relativePath.Replace("\\", "/"), (Get-FileSha256 -Path $_.FullName)
+    }
+
+  $combined = [string]::Join("`n", @($entries))
+  $bytes = [System.Text.Encoding]::UTF8.GetBytes($combined)
+  $hasher = [System.Security.Cryptography.SHA256]::Create()
+  try {
+    return ($hasher.ComputeHash($bytes) | ForEach-Object { $_.ToString("x2") }) -join ""
+  } finally {
+    $hasher.Dispose()
+  }
+}
+
 function Assert-ChildPath {
   param(
     [string]$Parent,
@@ -136,6 +172,11 @@ $manifest = [ordered]@{
   frontend = "frontend-standalone"
   tool = "tool/main.py"
   toolPython = "tool/python-embed/python.exe"
+  toolRuntime = [ordered]@{
+    codeSha256 = Get-DirectorySha256 -Path $toolRuntime -ExcludePathPrefixes @("python-embed\\", ".venv\\", "__pycache__\\", "logs\\", ".tool-release.json")
+    pythonSha256 = Get-DirectorySha256 -Path (Join-Path $toolRuntime "python-embed") -ExcludePathPrefixes @("Lib\\site-packages\\", "Scripts\\")
+    requirementsSha256 = Get-FileSha256 -Path (Join-Path $toolRuntime "requirements.txt")
+  }
   toolRelease = (Get-Content -LiteralPath (Join-Path $toolRuntime ".tool-release.json") -Raw | ConvertFrom-Json)
   envPath = "C:\ProgramData\AHSO OCR\.env"
 }

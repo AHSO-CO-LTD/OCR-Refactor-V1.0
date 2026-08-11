@@ -12,34 +12,50 @@ describe('inspection-text-matcher', () => {
     expect(matchesExpectedInspectionText('IS35R', 'IS35R')).toBe(true);
   });
 
-  it('matches the reversed product code from the legacy flow', () => {
-    expect(matchesExpectedInspectionText('R53SI', 'IS35R')).toBe(true);
-  });
-
-  it('matches accepted dashed legacy reverse variants', () => {
-    const acceptedTexts = buildAcceptedInspectionTexts('AB-12');
-
-    expect(acceptedTexts).toEqual(
-      expect.arrayContaining(['AB-12', '21-BA', '21B-A', '2-1BA']),
+  it('matches a product code anywhere in OCR text without requiring dash boundaries', () => {
+    expect(matchesExpectedInspectionText('PREFIXIS-35RSUFFIX', 'IS-35R')).toBe(
+      true,
     );
   });
 
-  it('matches only on whole token boundaries', () => {
-    expect(matchesExpectedInspectionText('XX-IS35R-YY', 'IS35R')).toBe(true);
-    expect(matchesExpectedInspectionText('XX_IS35R_YY', 'IS35R')).toBe(false);
-    expect(matchesExpectedInspectionText('XXIS35RYY', 'IS35R')).toBe(false);
+  it('applies legacy reverse variants to configured OCR variants too', () => {
+    const acceptedTexts = buildAcceptedInspectionTexts('AB-12', ['AB-1-2']);
+
+    expect(acceptedTexts).toEqual(
+      expect.arrayContaining(['AB-12', '21-BA', '21B-A', '2-1BA', 'AB-1-2']),
+    );
+    expect(
+      matchesExpectedInspectionText('OCR: IS-35-R', 'IS-35R', ['IS-35-R']),
+    ).toBe(true);
+    expect(
+      matchesExpectedInspectionText('OCR: R-53-SI', 'IS-35R', ['IS-35-R']),
+    ).toBe(true);
   });
 
-  it('requires dash boundaries when OCR text has extra text around the expected code', () => {
-    expect(matchesExpectedInspectionText('IS-35R', 'IS-35R')).toBe(true);
-    expect(matchesExpectedInspectionText('A-IS-35R', 'IS-35R')).toBe(true);
-    expect(matchesExpectedInspectionText('IS-35R-A', 'IS-35R')).toBe(true);
-    expect(matchesExpectedInspectionText('A-IS-35R-B', 'IS-35R')).toBe(true);
+  it('keeps accepting legacy reverse forms', () => {
+    expect(matchesExpectedInspectionText('R53-SI', 'IS-35R')).toBe(true);
+    expect(
+      evaluateInspectionSlot({
+        rawText: 'R53-SI',
+        expectedText: 'IS-35R',
+      }),
+    ).toMatchObject({
+      matchedText: 'IS-35R',
+      result: InspectionResult.OK,
+    });
+  });
 
-    expect(matchesExpectedInspectionText('AIS-35R', 'IS-35R')).toBe(false);
-    expect(matchesExpectedInspectionText('IS-35RA', 'IS-35R')).toBe(false);
-    expect(matchesExpectedInspectionText('AIS-35RB', 'IS-35R')).toBe(false);
-    expect(matchesExpectedInspectionText('A_IS-35R_B', 'IS-35R')).toBe(false);
+  it('returns the configured variant in its canonical order when a reversed variant matches', () => {
+    expect(
+      evaluateInspectionSlot({
+        rawText: 'R-53-SI',
+        expectedText: 'IS-35R',
+        acceptedVariants: ['IS-35-R'],
+      }),
+    ).toMatchObject({
+      matchedText: 'IS-35-R',
+      result: InspectionResult.OK,
+    });
   });
 
   it('returns UNKNOWN when OCR text and error are both empty', () => {
@@ -74,21 +90,21 @@ describe('inspection-text-matcher', () => {
   it('matches a slot when any OCR row satisfies the expected-code rule', () => {
     expect(
       evaluateInspectionSlot({
-        rows: ['WRONG', 'A-IS-35R-B'],
-        rawText: 'WRONG A-IS-35R-B',
+        rows: ['WRONG', 'A_IS-35R_B'],
+        rawText: 'WRONG A_IS-35R_B',
         errorMessage: null,
         expectedText: 'IS-35R',
       }),
     ).toMatchObject({
-      rawText: 'WRONG A-IS-35R-B',
+      rawText: 'WRONG A_IS-35R_B',
       matched: true,
       result: InspectionResult.OK,
     });
 
     expect(
       evaluateInspectionSlot({
-        rows: ['WRONG', 'AIS-35RB'],
-        rawText: 'WRONG AIS-35RB',
+        rows: ['WRONG', 'NOT_MATCHED'],
+        rawText: 'WRONG NOT_MATCHED',
         errorMessage: null,
         expectedText: 'IS-35R',
       }),
@@ -101,7 +117,7 @@ describe('inspection-text-matcher', () => {
   it('resolves aggregate result consistently across slots', () => {
     expect(
       resolveInspectionResults(
-        [{ rows: ['IS35R'] }, { rows: ['R53SI'] }],
+        [{ rows: ['IS35R'] }, { rows: ['prefixIS35Rsuffix'] }],
         'IS35R',
       ),
     ).toBe(InspectionResult.OK);
@@ -143,7 +159,7 @@ describe('inspection-text-matcher', () => {
   it('treats partially empty OCR slots as OK when all known slots match', () => {
     expect(
       resolveInspectionResults(
-        [{ rows: ['IS-35R'] }, { rows: ['A-IS-35R-B'] }, { text: null }],
+        [{ rows: ['IS-35R'] }, { rows: ['A_IS-35R_B'] }, { text: null }],
         'IS-35R',
       ),
     ).toBe(InspectionResult.OK);

@@ -68,8 +68,94 @@ describe('DeviceToolService cropFrameRoi', () => {
     const metadata = await sharp(output).metadata();
 
     expect(result).toMatch(/^data:image\/jpeg;base64,/);
-    expect(metadata.width).toBe(300);
-    expect(metadata.height).toBe(440);
+    expect(metadata.width).toBe(440);
+    expect(metadata.height).toBe(300);
+    const pixels = await sharp(output).raw().toBuffer();
+    expect(pixels.every((value) => value > 240)).toBe(true);
+  });
+
+  it('returns the exact ROI crop sent to OCR for downstream training storage', async () => {
+    const service = new DeviceToolService(
+      {} as ConfigService,
+      {} as PrismaService,
+    );
+    const processedCrop = `data:image/jpeg;base64,${Buffer.from(
+      'processed-roi',
+    ).toString('base64')}`;
+    const inspectProductImageWithSignal = jest
+      .spyOn(
+        service as unknown as {
+          inspectProductImageWithSignal: (request: unknown) => Promise<unknown>;
+        },
+        'inspectProductImageWithSignal',
+      )
+      .mockResolvedValue({
+        success: true,
+        image_width: 0,
+        image_height: 0,
+        cycle_time_ms: 0,
+        results: [],
+        error: null,
+      });
+    jest
+      .spyOn(
+        service as unknown as { cropFrameRoi: () => Promise<string> },
+        'cropFrameRoi',
+      )
+      .mockResolvedValue(processedCrop);
+    const frame = await sharp({
+      create: {
+        width: 3000,
+        height: 1000,
+        channels: 3,
+        background: '#ffffff',
+      },
+    })
+      .jpeg()
+      .toBuffer();
+    const camera = {
+      sourceType: 'usb',
+      exposure: 3500,
+      imageWidth: 3000,
+      imageHeight: 1000,
+      offsetX: 0,
+      offsetY: 0,
+      zoomFactor: 1,
+      previewPanX: 0,
+      previewPanY: 0,
+      previewRotation: 0,
+    } satisfies CameraProfileDto;
+    const roi = {
+      index: 1,
+      x: 570,
+      y: 498,
+      width: 300,
+      height: 440,
+      rotation: 0,
+    } satisfies RoiRegionDto;
+
+    const result = await service.inspectProductFrame(
+      {
+        modelPath: 'models/test.pt',
+        camera,
+        roiRegions: [roi],
+        thresholdAccept: 0.5,
+        thresholdMns: 0.5,
+        rowThreshold: 20,
+        rotateImageClockwise: true,
+      },
+      `data:image/jpeg;base64,${frame.toString('base64')}`,
+    );
+
+    expect(inspectProductImageWithSignal).toHaveBeenCalledWith(
+      expect.objectContaining({
+        crops: [{ slotIndex: 1, imageBase64: processedCrop }],
+      }),
+      undefined,
+    );
+    expect(result.processedRoiCrops).toEqual([
+      { slotIndex: 1, imageBase64: processedCrop },
+    ]);
   });
 });
 

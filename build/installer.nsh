@@ -7,6 +7,8 @@
 !include nsDialogs.nsh
 !include LogicLib.nsh
 !include WinMessages.nsh
+!include FileFunc.nsh
+ShowInstDetails show
 
 Var DbHost
 Var DbPort
@@ -48,8 +50,20 @@ Var EnvPreflightBodyLabel
 Var EnvPreflightStatusBox
 Var EnvPreflightActionLabel
 Var EnvPreflightRecheckButton
+Var IsApplicationUpdate
+
+!macro customInit
+  StrCpy $IsApplicationUpdate "false"
+  ${GetParameters} $0
+  ClearErrors
+  ${GetOptions} $0 "--updated" $1
+  ${IfNot} ${Errors}
+    StrCpy $IsApplicationUpdate "true"
+  ${EndIf}
+!macroend
 
 !macro customPageAfterChangeDir
+  Page custom UpdateIntroPageCreate UpdateIntroPageLeave
   Page custom EnvPreflightIntroPageCreate EnvPreflightIntroPageLeave
   Page custom EnvPreflightReadyPageCreate EnvPreflightReadyPageLeave
   Page custom DbTargetPageCreate DbTargetPageLeave
@@ -61,6 +75,29 @@ Var EnvPreflightRecheckButton
   Page custom DbCreateCredentialPageCreate DbCreateCredentialPageLeave
   Page custom DbReplaceCredentialPageCreate DbReplaceCredentialPageLeave
 !macroend
+
+Function UpdateIntroPageCreate
+  ${If} $IsApplicationUpdate != "true"
+    Abort
+  ${EndIf}
+
+  nsDialogs::Create 1018
+  Pop $0
+  ${If} $0 == error
+    Abort
+  ${EndIf}
+
+  ${NSD_CreateLabel} 0u 0u 300u 22u "AHSO OCR is ready to update."
+  Pop $0
+  !insertmacro AhsoCreateReadOnlyScrollBox 0u 28u 300u 70u $0
+  ${NSD_SetText} $0 "Setup will replace the application files, reuse unchanged Tool dependencies, and run compatible database migrations.$\r$\n$\r$\nYour database, product settings, camera configuration, and ProgramData files are preserved."
+  ${NSD_CreateLabel} 0u 108u 300u 28u "Click Next to start the visible update process. Do not turn off this PC while setup is running."
+  Pop $0
+  nsDialogs::Show
+FunctionEnd
+
+Function UpdateIntroPageLeave
+FunctionEnd
 
 Function EnsureEnvironmentPreflightFiles
   InitPluginsDir
@@ -108,6 +145,9 @@ Function RunEnvironmentPreflight
 FunctionEnd
 
 Function EnvPreflightIntroPageCreate
+  ${If} $IsApplicationUpdate == "true"
+    Abort
+  ${EndIf}
   nsDialogs::Create 1018
   Pop $0
   ${If} $0 == error
@@ -132,6 +172,9 @@ Function EnvPreflightIntroPageLeave
 FunctionEnd
 
 Function EnvPreflightReadyPageCreate
+  ${If} $IsApplicationUpdate == "true"
+    Abort
+  ${EndIf}
   ${If} $EnvPreflightState == ""
     Abort
   ${EndIf}
@@ -265,6 +308,9 @@ Function ProbeDatabase
 FunctionEnd
 
 Function DbTargetPageCreate
+  ${If} $IsApplicationUpdate == "true"
+    Abort
+  ${EndIf}
   Call InitDatabaseDefaults
   nsDialogs::Create 1018
   Pop $0
@@ -331,6 +377,9 @@ Function DbTargetPageLeave
 FunctionEnd
 
 Function DbAdminProbePageCreate
+  ${If} $IsApplicationUpdate == "true"
+    Abort
+  ${EndIf}
   ${If} $DbScanState != "unknown"
     Abort
   ${EndIf}
@@ -383,6 +432,9 @@ Function DbAdminProbePageLeave
 FunctionEnd
 
 Function DbExistingChoicePageCreate
+  ${If} $IsApplicationUpdate == "true"
+    Abort
+  ${EndIf}
   ${If} $DbScanState != "exists"
     Abort
   ${EndIf}
@@ -442,6 +494,9 @@ Function DbExistingChoicePageLeave
 FunctionEnd
 
 Function DbRenamePageCreate
+  ${If} $IsApplicationUpdate == "true"
+    Abort
+  ${EndIf}
   ${If} $DbExistingAction != "rename"
     Abort
   ${EndIf}
@@ -491,6 +546,9 @@ Function DbRenamePageLeave
 FunctionEnd
 
 Function DbReuseCredentialPageCreate
+  ${If} $IsApplicationUpdate == "true"
+    Abort
+  ${EndIf}
   ${If} $DbExistingAction != "reuse"
     Abort
   ${EndIf}
@@ -528,6 +586,9 @@ Function DbReuseCredentialPageLeave
 FunctionEnd
 
 Function DbCreateCredentialPageCreate
+  ${If} $IsApplicationUpdate == "true"
+    Abort
+  ${EndIf}
   ${If} $DbScanState != "missing"
     Abort
   ${EndIf}
@@ -586,6 +647,9 @@ Function DbCreateCredentialPageLeave
 FunctionEnd
 
 Function DbReplaceCredentialPageCreate
+  ${If} $IsApplicationUpdate == "true"
+    Abort
+  ${EndIf}
   ${If} $DbExistingAction != "replace"
     Abort
   ${EndIf}
@@ -647,11 +711,14 @@ FunctionEnd
   CreateDirectory "$0\AHSO OCR\updates\installers"
   CopyFiles /SILENT "$EXEPATH" "$0\AHSO OCR\updates\installers\$EXEFILE"
 
-  ${If} ${Silent}
-    DetailPrint "Automated update: rebuilding local runtime dependencies."
+  ${If} $IsApplicationUpdate == "true"
+    DetailPrint "Step 1/4: Preserving database and local configuration."
+    DetailPrint "Step 2/4: Checking application and Tool runtime changes."
+    DetailPrint "Step 3/4: Rebuilding only the required local runtime components."
     ExecWait '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File "$INSTDIR\resources\installer\bootstrap-installer.ps1" -InstallDir "$INSTDIR" -UpdateExisting' $0
     IntCmp $0 0 bootstrap_done 0 0
-      Abort "AHSO OCR automated update runtime bootstrap failed."
+      MessageBox MB_ICONSTOP|MB_OK "AHSO OCR update could not finish. Your database and local configuration were preserved.$\r$\n$\r$\nOpen C:\ProgramData\AHSO OCR\bootstrap-status.json and bootstrap.log for details."
+      Abort "AHSO OCR update runtime bootstrap failed."
   ${EndIf}
 
   DetailPrint "Bootstrapping local OCR runtime..."
@@ -669,10 +736,14 @@ FunctionEnd
     RMDir /r "$INSTDIR"
     Abort "AHSO OCR runtime bootstrap failed."
   bootstrap_done:
+    ${If} $IsApplicationUpdate == "true"
+      DetailPrint "Step 4/4: Update completed. Starting the new AHSO OCR version."
+    ${EndIf}
 !macroend
 !else
 !include nsDialogs.nsh
 !include LogicLib.nsh
+!include FileFunc.nsh
 
 Var UninstallKeepDatabase
 Var UninstallKeepFrameworks
@@ -725,7 +796,10 @@ Function un.UninstallOptionsPageLeave
 FunctionEnd
 
 !macro customUnInstall
-  ${If} ${isUpdated}
+  ${GetParameters} $0
+  ClearErrors
+  ${GetOptions} $0 "--updated" $1
+  ${IfNot} ${Errors}
     DetailPrint "Application update: keeping database, runtime config, and frameworks."
     Goto uninstall_runtime_done
   ${EndIf}
