@@ -19,6 +19,28 @@ export type {
   StartupServiceStageUpdate,
 } from "./startup-types";
 
+export type DongilSyncBootstrapPayload = {
+  appVersion?: string;
+  credential?: string;
+  licenseStatus: "LICENSED" | "UNLICENSED";
+  machineId: string;
+  machineTypeCode: string;
+  serverUrl: string;
+};
+
+export type DongilSyncBootstrapResult = {
+  data?: {
+    assignedMachineTypeCode?: string;
+    assignmentCount?: number;
+    issuedCredential?: string | null;
+    state?:
+      | "READY"
+      | "REGISTERED_CONFIG_PENDING"
+      | "UNAUTHORIZED"
+      | "NEEDS_CREDENTIAL_RECOVERY";
+  };
+};
+
 type LocalServiceDefinition = {
   command: string;
   env?: Record<string, string>;
@@ -297,6 +319,27 @@ export class ServiceManager {
   getBackendUrl() {
     const backend = this.services.find((service) => service.name === "backend");
     return `http://127.0.0.1:${backend?.port ?? DEFAULT_PORTS.backend}/api/`;
+  }
+
+  async bootstrapDongilSync(
+    payload: DongilSyncBootstrapPayload,
+  ): Promise<DongilSyncBootstrapResult> {
+    const response = await fetch(
+      `http://127.0.0.1:${this.getServicePort("backend")}/api/internal/dongil-sync/bootstrap`,
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-desktop-internal-token": this.desktopInternalToken,
+        },
+        body: JSON.stringify(payload),
+        signal: AbortSignal.timeout(20_000),
+      },
+    );
+    if (!response.ok) {
+      throw new Error((await response.text()) || `Dongil bootstrap failed (${response.status})`);
+    }
+    return (await response.json()) as DongilSyncBootstrapResult;
   }
 
   prepareStartupHardware(

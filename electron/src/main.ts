@@ -11,6 +11,14 @@ import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { registerAutoUpdater } from "./auto-updater";
+import {
+  getLocalMachineIdentity,
+  type LocalMachineIdentity,
+} from "./license/local-machine-identity";
+import {
+  loadMachineCredential,
+  saveMachineCredential,
+} from "./license/machine-credential-store";
 import { ServiceManager } from "./service-manager";
 import { createStartupDocument } from "./startup-page";
 import { UpdateRecoveryManager } from "./update-recovery";
@@ -87,6 +95,9 @@ let terminalShortcutLastAt = 0;
 const terminalLogs: string[] = [];
 let startupError: string | null = null;
 let startupPhase: StartupPhase = "running";
+let localMachineIdentity: LocalMachineIdentity | null = null;
+let dongilBootstrapTimer: NodeJS.Timeout | null = null;
+let dongilBootstrapPromise: Promise<void> | null = null;
 let startupStages = new Map<StartupStageId, StartupStageUpdate>(
   createPendingStartupStages().map((stage) => [stage.id, stage]),
 );
@@ -440,21 +451,7 @@ async function runRemainingStartupChecks() {
       message?: string | null;
       status?: string;
     };
-  }>(new URL("system/license/public", backendUrl).toString()).then(
-    (license) => {
-      const valid =
-        license.data?.licensed === true && license.data?.donglePresent === true;
-      updateStartupStage({
-        id: "license",
-        status: valid ? "done" : "failed",
-      });
-      return license;
-    },
-    (error: unknown) => {
-      updateStartupStage({ id: "license", status: "failed" });
-      throw error;
-    },
-  );
+  }>(new URL("system/license/public", backendUrl).toString());
   const hardwarePromise = serviceManager.prepareStartupHardware(
     undefined,
     emitStartupHardwareStage,
@@ -477,6 +474,7 @@ async function runRemainingStartupChecks() {
 
   const license = licenseResult.value;
   if (license.data?.licensed !== true || license.data?.donglePresent !== true) {
+    updateStartupStage({ id: "license", status: "failed" });
     const reason = [license.data?.code, license.data?.message]
       .filter(Boolean)
       .join(": ");
@@ -484,6 +482,19 @@ async function runRemainingStartupChecks() {
     blockStartup("license", reason || "License dongle is unavailable");
     return null;
   }
+
+  let identity: LocalMachineIdentity;
+  try {
+    identity = await getLocalMachineIdentity();
+  } catch (error) {
+    updateStartupStage({ id: "license", status: "failed" });
+    await cleanupBlockedStartupHardware();
+    blockStartup("license", `Machine identity check failed: ${errorMessage(error)}`);
+    return null;
+  }
+
+  updateStartupStage({ id: "license", status: "done" });
+  startDongilBootstrapLoop(identity);
 
   const requiresAdminSetup =
     setupResult.value.data?.requiresAdminSetup === true;
@@ -498,6 +509,56 @@ async function runRemainingStartupChecks() {
     (stage) => stage.status === "failed" || stage.status === "warning",
   );
   return { hardwareWarning, requiresAdminSetup };
+}
+
+function startDongilBootstrapLoop(identity: LocalMachineIdentity) {
+  localMachineIdentity = identity;
+  void bootstrapDongilSync();
+  if (dongilBootstrapTimer) return;
+  dongilBootstrapTimer = setInterval(() => void bootstrapDongilSync(), 30_000);
+}
+
+function bootstrapDongilSync() {
+  if (dongilBootstrapPromise) return dongilBootstrapPromise;
+  dongilBootstrapPromise = performDongilBootstrap()
+    .catch((error) => {
+      showTerminalLog(`[dongil] bootstrap deferred: ${errorMessage(error)}`);
+    })
+    .finally(() => {
+      dongilBootstrapPromise = null;
+    });
+  return dongilBootstrapPromise;
+}
+
+async function performDongilBootstrap() {
+  const identity = localMachineIdentity;
+  if (!identity || !serviceManager || isQuitting) return;
+
+  const serverUrl = process.env.DONGIL_SERVER_URL?.trim().replace(/\/+$/, "");
+  if (!serverUrl) return;
+
+  const credential = loadMachineCredential(identity.machineId, serverUrl);
+  try {
+    const response = await serviceManager.bootstrapDongilSync({
+      serverUrl,
+      machineId: identity.machineId,
+      machineTypeCode:
+        process.env.DONGIL_MACHINE_TYPE_CODE?.trim() || "WASHING_MACHINE",
+      licenseStatus: identity.licenseStatus,
+      appVersion: app.getVersion(),
+      credential: credential ?? undefined,
+    });
+    const issuedCredential = response.data?.issuedCredential;
+    if (issuedCredential) {
+      saveMachineCredential(identity.machineId, serverUrl, issuedCredential);
+    }
+    const state = response.data?.state ?? "UNKNOWN";
+    showTerminalLog(
+      `[dongil] state=${state}; machine=${identity.machineId}; authorization=DONGLE`,
+    );
+  } catch (error) {
+    showTerminalLog(`[dongil] bootstrap deferred: ${errorMessage(error)}`);
+  }
 }
 
 async function cleanupBlockedStartupHardware() {
@@ -969,6 +1030,10 @@ app.on("activate", () => {
 });
 
 app.on("before-quit", (event) => {
+  if (dongilBootstrapTimer) {
+    clearInterval(dongilBootstrapTimer);
+    dongilBootstrapTimer = null;
+  }
   if (isQuitting || !serviceManager) {
     return;
   }

@@ -47,6 +47,7 @@ http://localhost:3979/api/docs
 Before continuing implementation, read:
 
 - `docs/11-agent-onboarding.md`
+- `docs/12-dongil-server-integration.md`
 - `docs/08-planner.md`
 
 Current active direction:

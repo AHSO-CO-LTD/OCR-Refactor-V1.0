@@ -6,7 +6,7 @@
   "private": true,
   "main": "dist/main.js",
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "node ../scripts/prepare-license-key-runtime.mjs && tsc -p tsconfig.json",
     "dist:win": "npm run build && electron-builder --win nsis --x64 --publish never",
     "dist:win:publish": "npm run build && electron-builder --win nsis --x64 --publish always",
     "dev": "powershell -ExecutionPolicy Bypass -File ../scripts/dev/ensure-tool-python.ps1 && npm run build && node scripts/launch-electron.cjs",
@@ -97,6 +97,7 @@
   },
   "dependencies": {
     "electron-log": "^5.4.4",
-    "electron-updater": "^6.8.9"
+    "electron-updater": "^6.8.9",
+    "systeminformation": "^5.31.17"
   }
 }

@@ -1103,6 +1103,8 @@ try {
 
   $databasePasswordUrl = [System.Uri]::EscapeDataString($dbPassword)
   $databaseUrl = "postgresql://${dbUser}:${databasePasswordUrl}@$($dbConfig.host):$($dbConfig.port)/${dbName}"
+  $dongilServerUrl = if ($envValues.ContainsKey("DONGIL_SERVER_URL")) { $envValues["DONGIL_SERVER_URL"] } else { "" }
+  $dongilMachineTypeCode = if ($envValues.ContainsKey("DONGIL_MACHINE_TYPE_CODE")) { $envValues["DONGIL_MACHINE_TYPE_CODE"] } else { "WASHING_MACHINE" }
   $embeddedToolPython = Join-Path $runtimeRoot "tool\python-embed\python.exe"
   $toolRuntimePython = if (Test-Path -LiteralPath $embeddedToolPython) {
     $embeddedToolPython
@@ -1129,6 +1131,8 @@ DONGLE_PYTHON_COMMAND=$toolRuntimePython
 DONGLE_RETRY_COUNT=3
 DONGLE_RETRY_INTERVAL_MS=1000
 DONGLE_CHECK_TIMEOUT_MS=7000
+DONGIL_SERVER_URL=$dongilServerUrl
+DONGIL_MACHINE_TYPE_CODE=$dongilMachineTypeCode
 "@
   Protect-ProgramDataFile -Path $envPath -AllowAuthenticatedRead
 

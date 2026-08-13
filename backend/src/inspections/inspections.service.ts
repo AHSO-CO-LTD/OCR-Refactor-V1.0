@@ -4,6 +4,7 @@ import {
   Injectable,
   Logger,
   NotFoundException,
+  Optional,
 } from '@nestjs/common';
 import { randomUUID } from 'crypto';
 import { mkdir, unlink, writeFile } from 'fs/promises';
@@ -19,6 +20,7 @@ import {
 import sharp from 'sharp';
 import { PrismaService } from '../database/prisma.service';
 import { DeviceToolService } from '../device-tool/device-tool.service';
+import { DongilSyncService } from '../dongil-sync/dongil-sync.service';
 import { CameraProfileDto } from '../products/dto/product-profile.dto';
 import { CreateTestSessionReportDto } from './dto/create-test-session-report.dto';
 import { UpdateLineResultSettingsDto } from './dto/line-result-settings.dto';
@@ -95,6 +97,7 @@ export class InspectionsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly deviceToolService: DeviceToolService,
+    @Optional() private readonly dongilSync?: DongilSyncService,
   ) {}
 
   async startInspection(
@@ -1165,7 +1168,32 @@ export class InspectionsService {
       };
     });
 
-    await this.prisma.inspectionLog.createMany({ data: logs });
+    const aggregateResult = resolveInspectionAggregateResult(
+      logs.map((log) => log.result),
+    );
+    if (
+      aggregateResult !== InspectionResult.OK &&
+      aggregateResult !== InspectionResult.NG
+    ) {
+      throw new Error('Completed PLC capture did not resolve to OK or NG');
+    }
+
+    const dongilSync = this.dongilSync;
+    if (!dongilSync) {
+      await this.prisma.inspectionLog.createMany({ data: logs });
+      return;
+    }
+
+    await this.prisma.$transaction(async (transaction) => {
+      await transaction.inspectionLog.createMany({ data: logs });
+      await dongilSync.enqueueCapture(transaction, {
+        localResultId: plcCaptureId,
+        productCode: product.code,
+        result: aggregateResult,
+        localSessionId: jobId,
+        inspectedAt: capturedAt,
+      });
+    });
   }
 
   private async savePlcCaptureFrame({
