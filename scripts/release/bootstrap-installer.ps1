@@ -18,6 +18,8 @@ $vendorRoot = Join-Path $runtimeRoot "vendor"
 $persistentToolRoot = Join-Path $programDataRoot "tool-runtime"
 $persistentToolManifestPath = Join-Path $persistentToolRoot "tool-runtime-manifest.json"
 
+. (Join-Path $PSScriptRoot "bootstrap-dongil-config.ps1")
+
 function New-Secret {
   param([int]$Bytes = 32)
 
@@ -1103,8 +1105,9 @@ try {
 
   $databasePasswordUrl = [System.Uri]::EscapeDataString($dbPassword)
   $databaseUrl = "postgresql://${dbUser}:${databasePasswordUrl}@$($dbConfig.host):$($dbConfig.port)/${dbName}"
-  $dongilServerUrl = if ($envValues.ContainsKey("DONGIL_SERVER_URL")) { $envValues["DONGIL_SERVER_URL"] } else { "" }
-  $dongilMachineTypeCode = if ($envValues.ContainsKey("DONGIL_MACHINE_TYPE_CODE")) { $envValues["DONGIL_MACHINE_TYPE_CODE"] } else { "WASHING_MACHINE" }
+  $dongilConfig = Resolve-DongilBootstrapConfig -EnvValues (Read-EnvFile -Path $envPath)
+  $dongilServerUrl = $dongilConfig.serverUrl
+  $dongilMachineTypeCode = $dongilConfig.machineTypeCode
   $embeddedToolPython = Join-Path $runtimeRoot "tool\python-embed\python.exe"
   $toolRuntimePython = if (Test-Path -LiteralPath $embeddedToolPython) {
     $embeddedToolPython
