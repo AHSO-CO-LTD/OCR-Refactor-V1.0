@@ -30,7 +30,10 @@ import {
   resolveInspectionResults,
 } from './inspection-text-matcher';
 import { StartInspectionDto } from './dto/start-inspection.dto';
-import { TestInspectionImageDto } from './dto/test-inspection-image.dto';
+import {
+  SimulateInspectionImageDto,
+  TestInspectionImageDto,
+} from './dto/test-inspection-image.dto';
 
 const productInclude = {
   cameraConfig: { include: { cameraIdentity: true } },
@@ -654,6 +657,89 @@ export class InspectionsService {
             toolDebugImageBase64: slotResult?.debugImageBase64 ?? null,
           };
         }),
+      },
+    };
+  }
+
+  async simulateImage(dto: SimulateInspectionImageDto) {
+    const product = await this.getActiveProductForScan(dto.productId);
+    const job = await this.prisma.inspectionJob.findFirst({
+      where: { status: InspectionStatus.running },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    if (!job || job.productId !== product.id) {
+      throw new BadRequestException(
+        'A running inspection job for the selected product is required',
+      );
+    }
+
+    const scan = await this.deviceToolService.inspectProductImage({
+      modelPath: product.modelPath!,
+      crops: dto.crops,
+      roiRegions: product.roiRegions.map((region) => ({
+        index: region.index,
+        x: region.x,
+        y: region.y,
+        width: region.width,
+        height: region.height,
+        rotation: Number(region.rotation),
+      })),
+      thresholdAccept: Number(product.thresholdAccept),
+      thresholdMns: Number(product.thresholdMns),
+      rowThreshold: product.rowThreshold,
+      rotateImageClockwise: product.rotateTestImageClockwise,
+    });
+    const result = resolveInspectionResults(
+      scan.results,
+      product.code.trim().toUpperCase(),
+      product.ocrAcceptedVariants,
+    );
+
+    if (result !== InspectionResult.OK && result !== InspectionResult.NG) {
+      return {
+        data: {
+          latched: false,
+          result,
+          inspection: await this.buildInspectionState(job.id),
+        },
+      };
+    }
+
+    const capturedAt = new Date();
+    const imagePath = await this.savePlcCaptureFrame({
+      job,
+      productCode: product.code,
+      imageBase64: dto.originalImageBase64,
+      capturedAt,
+    });
+    const simulatedScan = {
+      ...scan,
+      processedRoiCrops: dto.crops,
+    };
+
+    await this.persistPlcCaptureLogs({
+      jobId: job.id,
+      product,
+      scan: simulatedScan,
+      imagePath,
+      capturedAt,
+    });
+    await this.saveTrainingRoiImages({
+      capturedAt,
+      product,
+      roiRegions: product.roiRegions,
+      scan: {
+        processedRoiCrops: dto.crops,
+        results: scan.results,
+      },
+    });
+
+    return {
+      data: {
+        latched: true,
+        result,
+        inspection: await this.buildInspectionState(job.id),
       },
     };
   }

@@ -7,6 +7,8 @@ import {
   IsNotEmpty,
   IsOptional,
   IsString,
+  Matches,
+  MaxLength,
   Min,
   ValidateNested,
 } from 'class-validator';
@@ -44,4 +46,16 @@ export class TestInspectionImageDto {
   @ValidateNested({ each: true })
   @Type(() => RoiRegionDto)
   roiRegions?: RoiRegionDto[];
+}
+
+export class SimulateInspectionImageDto extends TestInspectionImageDto {
+  @ApiProperty({
+    example: 'data:image/jpeg;base64,/9j/4AAQ...',
+    description: 'Original uploaded image shown and optionally saved as the simulated capture.',
+  })
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(20_000_000)
+  @Matches(/^data:image\/(?:jpeg|png|bmp|webp);base64,/i)
+  originalImageBase64!: string;
 }

@@ -24,7 +24,10 @@ import { CreateTestSessionReportDto } from './dto/create-test-session-report.dto
 import { UpdateLineResultSettingsDto } from './dto/line-result-settings.dto';
 import { StartInspectionDto } from './dto/start-inspection.dto';
 import { StopInspectionDto } from './dto/stop-inspection.dto';
-import { TestInspectionImageDto } from './dto/test-inspection-image.dto';
+import {
+  SimulateInspectionImageDto,
+  TestInspectionImageDto,
+} from './dto/test-inspection-image.dto';
 import { InspectionsService } from './inspections.service';
 import { LineOperationReportService } from './line-operation-report.service';
 
@@ -75,6 +78,22 @@ export class InspectionsController {
   )
   testImage(@Body() dto: TestInspectionImageDto) {
     return this.inspectionsService.testImage(dto);
+  }
+
+  @ApiOperation({
+    summary:
+      'DEV only: run an uploaded image through real OCR and enqueue its OK/NG result for Dongil sync without pulsing the PLC',
+  })
+  @Post('dev-simulate-image')
+  @RequirePermissions(PERMISSIONS.INSPECTION_START)
+  simulateImage(
+    @Body() dto: SimulateInspectionImageDto,
+    @CurrentUser() user: { id: string; username: string; role: string },
+  ) {
+    if (user.role !== 'dev') {
+      throw new ForbiddenException('Only dev can simulate a production image');
+    }
+    return this.inspectionsService.simulateImage(dto);
   }
 
   @ApiOperation({

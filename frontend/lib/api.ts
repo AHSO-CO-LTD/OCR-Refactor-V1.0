@@ -277,6 +277,12 @@ export type TestInspectionImageResult = {
   slots: InspectionSlotState[];
 };
 
+export type SimulatedInspectionImageResult = {
+  latched: boolean;
+  result: "OK" | "NG" | "UNKNOWN";
+  inspection: CurrentInspectionState;
+};
+
 export type TestSessionImageResult = "OK" | "NG" | "UNKNOWN" | "ERROR";
 
 export type LineResultSavePolicy = "all" | "ok" | "ng" | "none";
@@ -1008,6 +1014,31 @@ export async function testInspectionImage(
   }
 
   return (await response.json()) as { data: TestInspectionImageResult };
+}
+
+export async function simulateInspectionImage(
+  accessToken: string,
+  productId: string,
+  originalImageBase64: string,
+  crops: Array<{ slotIndex: number; imageBase64: string }>,
+) {
+  const response = await fetch(
+    `${API_BASE_URL}/inspections/dev-simulate-image`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ productId, originalImageBase64, crops }),
+    },
+  );
+
+  if (!response.ok) {
+    throw new ApiError(await parseError(response), response.status);
+  }
+
+  return (await response.json()) as { data: SimulatedInspectionImageResult };
 }
 
 export async function createTestSessionReport(

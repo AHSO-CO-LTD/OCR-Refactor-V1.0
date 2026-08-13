@@ -894,6 +894,18 @@ const translations = {
     "operator.previewRuntimeCamera": "Runtime camera",
     "operator.grab": "Grab",
     "operator.grabQueued": "Grab command queued for the next camera API.",
+    "operator.dongilSimulationTitle": "DEV · Dongil image simulation",
+    "operator.dongilChooseImage": "Choose an inspection image",
+    "operator.dongilSendImage": "Run OCR and send result",
+    "operator.dongilSendingImage": "Running OCR...",
+    "operator.dongilInvalidImage": "Choose a supported image file.",
+    "operator.dongilImageTooLarge": "The image must not exceed 10 MB.",
+    "operator.dongilUnknownResult":
+      "OCR did not produce a completed OK/NG result, so nothing was queued.",
+    "operator.dongilImageSent":
+      "Simulated {result} result was queued for Dongil Server.",
+    "operator.dongilImageFailed":
+      "Could not process and queue the simulated image.",
     "operator.triggerOk": "Trigger OK",
     "operator.triggerNg": "Trigger NG",
     "operator.resetCounter": "Reset counter",
@@ -2250,6 +2262,18 @@ const translations = {
     "operator.previewRuntimeCamera": "Camera runtime",
     "operator.grab": "Chụp ảnh",
     "operator.grabQueued": "Lệnh chụp ảnh đã sẵn sàng cho API camera sau này.",
+    "operator.dongilSimulationTitle": "DEV · Giả lập ảnh gửi Dongil",
+    "operator.dongilChooseImage": "Chọn ảnh kiểm tra",
+    "operator.dongilSendImage": "Chạy OCR và gửi kết quả",
+    "operator.dongilSendingImage": "Đang chạy OCR...",
+    "operator.dongilInvalidImage": "Hãy chọn một tệp ảnh được hỗ trợ.",
+    "operator.dongilImageTooLarge": "Dung lượng ảnh không được vượt quá 10 MB.",
+    "operator.dongilUnknownResult":
+      "OCR chưa tạo được kết quả OK/NG hoàn chỉnh nên dữ liệu chưa được đưa vào hàng đợi.",
+    "operator.dongilImageSent":
+      "Kết quả giả lập {result} đã được đưa vào hàng đợi gửi lên Dongil Server.",
+    "operator.dongilImageFailed":
+      "Không thể xử lý và đưa ảnh giả lập vào hàng đợi.",
     "operator.triggerOk": "Kích OK",
     "operator.triggerNg": "Kích NG",
     "operator.resetCounter": "Reset bộ đếm",

@@ -12,6 +12,7 @@ import {
 import { toast } from "sonner";
 import { CameraConnectionOverlay } from "@/components/camera/camera-connection-overlay";
 import { useConnectedCameraPreview } from "@/components/camera/use-connected-camera-preview";
+import { DongilImageSimulationControls } from "@/components/operator/dongil-image-simulation-controls";
 import {
   OperatorRoiEditor,
   type OperatorRoiStatus,
@@ -36,6 +37,7 @@ import {
   getMachineRuntimeStatus,
   grabMachineFrame,
   listProductProfiles,
+  simulateInspectionImage,
   startMachineOperation,
   stopMachineOperation,
   stopInspection,
@@ -50,6 +52,10 @@ import {
 } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
 import { getInspectionSlotDisplayText } from "@/lib/inspection-slot-display";
+import {
+  cropProductRois,
+  readImageFileAsDataUrl,
+} from "@/lib/inspection-test-image";
 import {
   saveOperatorStartupPreferences,
   selectOperatorStartupProduct,
@@ -152,7 +158,9 @@ function resolveLiveRoiAnimationState(
 
 export function OperatorRuntimePanel() {
   const { apiError, t } = useI18n();
-  const operatorActionButtonsLocked = getStoredUser()?.role === "operator";
+  const currentUserRole = getStoredUser()?.role;
+  const operatorActionButtonsLocked = currentUserRole === "operator";
+  const canSimulateDongilImage = currentUserRole === "dev";
   const timersRef = useRef<number[]>([]);
   const batchEditorRef = useRef<HTMLDivElement | null>(null);
   const currentJobIdRef = useRef("");
@@ -192,6 +200,7 @@ export function OperatorRuntimePanel() {
   const [savingBatch, setSavingBatch] = useState(false);
   const [changingProduct, setChangingProduct] = useState(false);
   const [scanRunning, setScanRunning] = useState(false);
+  const [dongilSimulationRunning, setDongilSimulationRunning] = useState(false);
   const [autoRunning, setAutoRunning] = useState(false);
   const [machineRuntimeState, setMachineRuntimeState] =
     useState<MachineRuntimeStatus["state"]>("inactive");
@@ -508,9 +517,12 @@ export function OperatorRuntimePanel() {
   const overlayResult =
     animationState === "OK" || animationState === "NG" ? animationState : null;
   const runtimeActionsDisabled = loadingProducts || dataSource !== "api";
-  const previewImageSrc = effectiveLiveCameraEnabled
-    ? livePreviewImageSrc
-    : capturedPreviewImageSrc || livePreviewImageSrc;
+  const previewImageSrc =
+    dongilSimulationRunning && capturedPreviewImageSrc
+      ? capturedPreviewImageSrc
+      : effectiveLiveCameraEnabled
+        ? livePreviewImageSrc
+        : capturedPreviewImageSrc || livePreviewImageSrc;
 
   useEffect(() => {
     if (dataSource !== "api" || loadingProducts) {
@@ -916,6 +928,68 @@ export function OperatorRuntimePanel() {
       toast.error(message);
     } finally {
       scanRunningRef.current = false;
+      setScanRunning(false);
+    }
+  }
+
+  async function handleDongilImageSimulation(file: File) {
+    if (scanRunningRef.current || dongilSimulationRunning) return;
+    if (!file.type.startsWith("image/")) {
+      toast.error(t("operator.dongilInvalidImage"));
+      return;
+    }
+    if (file.size > 10 * 1024 * 1024) {
+      toast.error(t("operator.dongilImageTooLarge"));
+      return;
+    }
+
+    const validated = validateRuntimeInputs();
+    if (!validated) return;
+
+    scanRunningRef.current = true;
+    setDongilSimulationRunning(true);
+    setScanRunning(true);
+    setAnimationState("CHECKING");
+
+    try {
+      const inspection = await beginInspectionSession(
+        validated.accessToken,
+        validated.product.id,
+      );
+      currentJobIdRef.current = inspection.data.jobId;
+      const imageBase64 = await readImageFileAsDataUrl(file);
+      const crops = await cropProductRois(imageBase64, validated.product);
+      setCapturedPreviewImageSrc(imageBase64);
+      const response = await simulateInspectionImage(
+        validated.accessToken,
+        validated.product.id,
+        imageBase64,
+        crops,
+      );
+
+      if (!response.data.latched) {
+        setAnimationState("UNKNOWN");
+        toast.warning(t("operator.dongilUnknownResult"));
+        return;
+      }
+
+      await playLatchedInspectionResult(response.data.inspection);
+      toast.success(
+        t("operator.dongilImageSent").replace(
+          "{result}",
+          response.data.result,
+        ),
+      );
+    } catch (cause) {
+      setAnimationState("UNKNOWN");
+      toast.error(
+        cause instanceof ApiError
+          ? apiError(cause.message, "operator.dongilImageFailed")
+          : t("operator.dongilImageFailed"),
+      );
+    } finally {
+      scanRunningRef.current = false;
+      setDongilSimulationRunning(false);
       setScanRunning(false);
     }
   }
@@ -1427,6 +1501,13 @@ export function OperatorRuntimePanel() {
           <div className="operator-line-top-actions rounded-sm border border-[#9db7d8] bg-[#d9e6f5] p-4">
             <div className="operator-line-top-action-grid grid gap-2">
               {actionButtons}
+              {canSimulateDongilImage ? (
+                <DongilImageSimulationControls
+                  disabled={runtimeActionsDisabled || scanRunning}
+                  submitting={dongilSimulationRunning}
+                  onSubmit={handleDongilImageSimulation}
+                />
+              ) : null}
             </div>
           </div>
         </CardContent>

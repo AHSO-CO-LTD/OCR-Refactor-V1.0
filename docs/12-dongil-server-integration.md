@@ -99,6 +99,17 @@ ROI rows are not uploaded. `UNKNOWN` is not a completed result and is not queued
 
 The worker runs every 5 seconds. A server/network outage does not block PLC or OCR. Retry uses bounded exponential backoff. Missing assignment metadata creates `BLOCKED_CONFIG` instead of sending invented versions.
 
+### DEV uploaded-image simulation
+
+The Operation screen exposes an image simulation panel only to the local `dev` role. It uses the currently selected product, saved ROI configuration, current OCR model and normal OK/NG matching rules. A completed result is persisted through the same transaction as a real PLC-latched result:
+
+```text
+uploaded image -> ROI crop -> real OCR -> aggregate OK/NG
+-> InspectionLog rows + DongilSyncOutbox row -> normal background sender
+```
+
+This development path does not force an OK/NG verdict, does not pulse the PLC, and does not upload the image to Dongil Server. An `UNKNOWN` OCR outcome is shown locally and is not queued.
+
 When configuration becomes available, a blocked row is released automatically only if the server assignment already existed at that row's `inspectedAt`. Results older than the assignment remain blocked because applying a later version would corrupt historical reporting.
 
 Local tables:

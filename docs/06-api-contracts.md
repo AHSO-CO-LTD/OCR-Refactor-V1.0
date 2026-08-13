@@ -611,6 +611,18 @@ Request:
 }
 ```
 
+### DEV Simulate Uploaded Production Image
+
+```http
+POST /inspections/dev-simulate-image
+```
+
+- Requires an authenticated `dev` user and `inspection.start` permission.
+- Accepts the current local product ID, the original image data URL, and ROI crop data URLs.
+- Runs the existing OCR and aggregate matching rules.
+- A completed `OK` or `NG` creates normal inspection logs and a Dongil outbox record.
+- `UNKNOWN` is not queued, and this endpoint never emits a PLC result pulse.
+
 ### Get Current Inspection Status
 
 ```http
