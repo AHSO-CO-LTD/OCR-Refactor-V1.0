@@ -39,6 +39,7 @@ import {
   setDevRolePreview,
 } from "@/lib/session";
 import { useLicenseWatchdog } from "@/lib/use-license-watchdog";
+import { useDongilStatus } from "@/lib/use-dongil-status";
 
 type AppShellProps = {
   children: ReactNode;
@@ -141,6 +142,7 @@ export function AppShell({ children }: AppShellProps) {
   const pathname = usePathname();
   const { t } = useI18n();
   const { requestExit, requestRestart } = useDesktopLifecycle();
+  const { status: dongilStatus } = useDongilStatus();
   const adminNavRef = useRef<HTMLDivElement | null>(null);
   const [user, setUser] = useState<SessionUser | null>(null);
   const [rolePreview, setRolePreview] = useState<ReturnType<typeof getDevRolePreview>>(null);
@@ -504,6 +506,7 @@ export function AppShell({ children }: AppShellProps) {
                 canManageDesktopSettings={canManageDesktopSettings}
                 canPreviewRoles={user?.isDev === true}
                 donglePresent={license?.licensed === true && license.donglePresent === true}
+                dongilStatus={dongilStatus}
                 onExitApp={requestExit}
                 onLogout={handleLogout}
                 onRolePreviewChange={handleRolePreviewChange}

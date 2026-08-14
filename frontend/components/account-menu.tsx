@@ -1,11 +1,12 @@
 "use client";
 
 import Link from "next/link";
-import { ChevronDown, LogOut, Power, RefreshCw, Settings, Usb } from "lucide-react";
+import { ChevronDown, LogOut, Power, RefreshCw, Server, Settings, Usb } from "lucide-react";
 import { useEffect, useId, useRef, useState } from "react";
 import { LanguageToggle } from "@/components/language-toggle";
 import { Button } from "@/components/ui/button";
 import type { RoleWithPermissions, SessionUser } from "@/lib/api";
+import type { DesktopDongilStatus } from "@/lib/desktop";
 import { useI18n } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
@@ -13,6 +14,7 @@ type AccountMenuProps = {
   canManageDesktopSettings: boolean;
   canPreviewRoles?: boolean;
   donglePresent: boolean;
+  dongilStatus: DesktopDongilStatus | null;
   onExitApp: () => void | Promise<void>;
   onLogout: () => void | Promise<void>;
   onRolePreviewChange?: (role: RoleWithPermissions) => void;
@@ -26,6 +28,7 @@ export function AccountMenu({
   canManageDesktopSettings,
   canPreviewRoles = false,
   donglePresent,
+  dongilStatus,
   onExitApp,
   onLogout,
   onRolePreviewChange,
@@ -76,21 +79,34 @@ export function AccountMenu({
         aria-controls={menuId}
         aria-expanded={open}
         aria-haspopup="menu"
-        className="h-auto w-[clamp(150px,42vw,210px)] min-w-0 justify-between gap-2 px-2 py-1.5 text-left sm:gap-3 sm:px-3"
+        className="h-auto w-[clamp(190px,48vw,250px)] min-w-0 justify-between gap-2 px-2 py-1.5 text-left sm:gap-3 sm:px-3"
         onClick={() => setOpen((current) => !current)}
       >
-        <span
-          className={cn(
-            "flex h-8 w-8 shrink-0 items-center justify-center border",
-            donglePresent
-              ? "border-emerald-200 bg-emerald-50 text-emerald-600"
-              : "border-rose-200 bg-rose-50 text-rose-600",
-          )}
-          title={
-            donglePresent ? t("dashboard.donglePresent") : t("dashboard.dongleMissing")
-          }
-        >
-          <Usb className="h-4 w-4" />
+        <span className="flex shrink-0 items-center gap-1.5">
+          <span
+            className={cn(
+              "flex h-8 w-8 items-center justify-center border",
+              donglePresent
+                ? "border-emerald-200 bg-emerald-50 text-emerald-600"
+                : "border-rose-200 bg-rose-50 text-rose-600",
+            )}
+            title={donglePresent ? t("dashboard.donglePresent") : t("dashboard.dongleMissing")}
+          >
+            <Usb className="h-4 w-4" />
+          </span>
+          <span
+            className={cn(
+              "flex h-8 w-8 items-center justify-center border",
+              dongilStatus?.state === "ONLINE" && dongilStatus.socketConnected
+                ? "border-emerald-200 bg-emerald-50 text-emerald-600"
+                : dongilStatus?.state === "CONNECTING" || dongilStatus?.state === "RETRYING"
+                  ? "border-amber-200 bg-amber-50 text-amber-700"
+                  : "border-rose-200 bg-rose-50 text-rose-600",
+            )}
+            title={`${dongilStatus?.serverUrl ?? "Dongil Server"} · ${dongilStatus ? t(`settings.dongilState.${dongilStatus.state}`) : t("settings.dongilState.DISABLED")} · ${t("settings.dongilPending")}: ${dongilStatus?.pendingSyncCount ?? 0}`}
+          >
+            <Server className="h-4 w-4" />
+          </span>
         </span>
         <span className="min-w-0 flex-1">
           <span className="block truncate text-sm font-semibold text-slate-950">

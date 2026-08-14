@@ -6,9 +6,11 @@ import {
   Notification,
   shell,
   type OpenDialogOptions,
+  type WebContents,
 } from "electron";
 import { spawnSync } from "node:child_process";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { randomUUID } from "node:crypto";
+import { existsSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { registerAutoUpdater } from "./auto-updater";
 import {
@@ -47,6 +49,11 @@ type DesktopWindowSettings = {
 
 type DesktopTestStorageSettings = {
   testImageSaveFolderPath: string | null;
+};
+
+type SaveDongilSettingsPayload = {
+  accessToken: string;
+  serverUrl: string;
 };
 
 type DesktopLanguage = "en" | "vi";
@@ -278,6 +285,33 @@ function registerDesktopIpc() {
   ipcMain.handle("desktop:get-window-settings", () => windowSettings);
   ipcMain.handle("desktop:get-terminal-logs", () => [...terminalLogs]);
   ipcMain.handle("desktop:get-startup-snapshot", () => getStartupSnapshot());
+  ipcMain.handle("desktop:get-dongil-status", async (event) => {
+    assertMainRendererSender(event.sender);
+    if (!serviceManager) throw new Error("Local service manager is unavailable.");
+    return serviceManager.getDongilSyncStatus();
+  });
+  ipcMain.handle("desktop:test-dongil-server", async (event, serverUrl: string) => {
+    assertMainRendererSender(event.sender);
+    if (!serviceManager) throw new Error("Local service manager is unavailable.");
+    return serviceManager.testDongilConnection(normalizeDongilServerUrl(serverUrl));
+  });
+  ipcMain.handle(
+    "desktop:save-dongil-settings",
+    async (event, payload: SaveDongilSettingsPayload) => {
+      assertMainRendererSender(event.sender);
+      if (!serviceManager) throw new Error("Local service manager is unavailable.");
+      await serviceManager.assertDongilSettingsAccess(payload.accessToken);
+      const serverUrl = normalizeDongilServerUrl(payload.serverUrl);
+      persistRuntimeEnvValue("DONGIL_SERVER_URL", serverUrl);
+      process.env.DONGIL_SERVER_URL = serverUrl;
+      await bootstrapDongilSync();
+      await bootstrapDongilSync();
+      return {
+        serverUrl,
+        status: await serviceManager.getDongilSyncStatus(),
+      };
+    },
+  );
   ipcMain.handle(
     "desktop:get-update-recovery",
     () => updateRecoveryManager?.getNotice() ?? null,
@@ -742,6 +776,51 @@ function parseEnvFile(content: string) {
   }
 
   return result;
+}
+
+function normalizeDongilServerUrl(value: string) {
+  const normalized = value.trim().replace(/\/+$/, "");
+  const url = new URL(normalized);
+  if (!['http:', 'https:'].includes(url.protocol) || !url.hostname) {
+    throw new Error("Dongil Server URL must use http or https and include a hostname.");
+  }
+  return normalized;
+}
+
+function persistRuntimeEnvValue(key: string, value: string) {
+  if (/\r|\n/.test(value)) throw new Error("Environment value contains an invalid newline.");
+  const runtimeRoot = getRuntimeRoot();
+  const envPath = app.isPackaged
+    ? join(getProgramDataRoot(), ".env")
+    : join(runtimeRoot, "backend", ".env");
+  if (!existsSync(envPath)) {
+    throw new Error(`Runtime environment file was not found: ${envPath}`);
+  }
+  const content = readFileSync(envPath, "utf8");
+  const escapedKey = key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const linePattern = new RegExp(`^\\s*${escapedKey}\\s*=.*$`, "m");
+  const nextLine = `${key}=${value}`;
+  const nextContent = linePattern.test(content)
+    ? content.replace(linePattern, nextLine)
+    : `${content.replace(/\s*$/, "")}\r\n${nextLine}\r\n`;
+  const temporaryPath = `${envPath}.${randomUUID()}.tmp`;
+  try {
+    writeFileSync(temporaryPath, nextContent, { encoding: "utf8", flush: true });
+    renameSync(temporaryPath, envPath);
+  } catch (error) {
+    try {
+      if (existsSync(temporaryPath)) unlinkSync(temporaryPath);
+    } catch {
+      // Preserve the original write error; stale temporary files are non-authoritative.
+    }
+    throw error;
+  }
+}
+
+function assertMainRendererSender(sender: WebContents) {
+  if (!mainWindow || mainWindow.isDestroyed() || sender !== mainWindow.webContents) {
+    throw new Error("Desktop IPC caller is not authorized.");
+  }
 }
 
 function getProgramDataRoot() {

@@ -123,6 +123,32 @@ export type DesktopUpdateActionResult = {
 
 export type DesktopExitMode = "app-and-hardware" | "app-only";
 
+export type DongilConnectionState =
+  | "DISABLED"
+  | "CONNECTING"
+  | "ONLINE"
+  | "RETRYING"
+  | "ERROR"
+  | "UNAUTHORIZED";
+
+export type DesktopDongilStatus = {
+  state: DongilConnectionState;
+  socketConnected: boolean;
+  serverUrl: string | null;
+  machineId: string | null;
+  machineTypeCode: string | null;
+  assignedMachineTypeCode: string | null;
+  licenseStatus: string | null;
+  operationalStatus: string;
+  runtimeStatus: string;
+  pendingSyncCount: number;
+  lastConnectedAt: string | null;
+  lastHeartbeatAckAt: string | null;
+  lastRegisteredAt: string | null;
+  lastConfigSyncAt: string | null;
+  lastError: { code?: string | null; message?: string | null; at?: string | null } | null;
+};
+
 export type DesktopShutdownStageId =
   | "app"
   | "camera"
@@ -154,6 +180,7 @@ export type DesktopBridge = {
   getTestStorageSettings(): Promise<DesktopTestStorageSettings>;
   getTerminalLogs(): Promise<string[]>;
   getStartupSnapshot(): Promise<DesktopStartupSnapshot>;
+  getDongilStatus(): Promise<{ data?: DesktopDongilStatus }>;
   getUpdateRecovery(): Promise<DesktopUpdateRecoveryNotice | null>;
   getUpdateStatus(): Promise<DesktopUpdateState>;
   exportStartupLog(
@@ -170,6 +197,13 @@ export type DesktopBridge = {
   saveTestStorageSettings(
     settings: DesktopTestStorageSettings,
   ): Promise<DesktopTestStorageSettings>;
+  testDongilServer(
+    serverUrl: string,
+  ): Promise<{ data?: { serverUrl?: string; reachable?: boolean; latencyMs?: number } }>;
+  saveDongilSettings(settings: {
+    accessToken: string;
+    serverUrl: string;
+  }): Promise<{ serverUrl: string; status: { data?: DesktopDongilStatus } }>;
   selectFolder(): Promise<{ canceled: boolean; folderPath: string | null }>;
   selectModelFile(): Promise<{ canceled: boolean; filePath: string | null }>;
   onTerminalLog(callback: (message: string) => void): () => void;

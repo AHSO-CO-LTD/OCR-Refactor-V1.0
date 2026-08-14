@@ -36,6 +36,15 @@ DONGIL_MACHINE_TYPE_CODE=WASHING_MACHINE
 
 Do not set `DONGIL_SERVER_URL` to `localhost` unless Dongil Server actually runs on the same PC. The installer preserves an existing Dongil URL during repair/reinstall.
 
+DEV/ADMIN can also open **Settings → General → Dongil Server** to:
+
+- enter `http://<server-ip>:3979`;
+- test `/api/v1/health` without changing the saved value;
+- confirm Save and connect immediately without restarting the app;
+- view machine ID/type, connection state, runtime state, pending outbox count, last heartbeat and last error.
+
+The saved URL is written atomically to the same development or ProgramData `.env`. The renderer never receives the machine credential. All signed-in roles can see the status, but Electron re-validates an active DEV/ADMIN session before changing the URL.
+
 ## Registration and credential
 
 Electron sends trusted local identity to the owned NestJS backend through a localhost endpoint protected by `DESKTOP_INTERNAL_TOKEN`. The backend registers through:
@@ -67,6 +76,9 @@ If the one-time credential is lost after registration, automatic registration ca
 - Reconnect: bounded exponential delay with jitter.
 - Handshake authenticates `machineId` and machine credential.
 - `machine:hello` and heartbeat report machine type and normalized license status.
+- Heartbeat preserves the raw washing runtime state and reports normalized `RUNNING`, `PAUSED`, `STOPPED`, `STARTING`, `STOPPING`, `ERROR` or `UNKNOWN` separately.
+- A normal application exit makes Electron call the protected local shutdown endpoint before stopping backend; backend sends `machine:shutdown` and waits up to 1.5 seconds for acknowledgement. An unexpected socket loss or heartbeat timeout is classified by the server as `CONNECTION_LOST`.
+- The navbar server icon polls real local connection state every 5 seconds: green is connected, amber is connecting/retrying, red is disabled/error/unauthorized.
 - OK/NG results are not sent through WebSocket.
 
 ## Product/version assignment
@@ -129,7 +141,7 @@ Local tables:
 
 ## One-machine pilot checklist
 
-1. Configure Dongil Server URL on the local PC.
+1. Open Settings → General → Dongil Server, test `http://192.168.3.4:3979`, then Save and connect.
 2. Start the local application with a valid physical dongle.
 3. Confirm the machine appears on Dongil Server with the expected `machine_id`.
 4. Assign the correct washing-machine product/profile/model tuple on the server.
@@ -138,6 +150,7 @@ Local tables:
 7. Confirm the local outbox reaches `SENT`.
 8. Confirm server raw results show exactly one OK and one NG, and washing statistics match the known ROI OK/NG quantities.
 9. Disconnect LAN, run additional cycles, reconnect, and confirm offline results replay without duplicates.
+10. Close the local app normally and confirm `SHUTDOWN`; restart, then interrupt the LAN and confirm `CONNECTION_LOST` followed by automatic `ONLINE` recovery.
 
 ## Diagnostics
 

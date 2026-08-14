@@ -1,6 +1,22 @@
 import { DongilSyncOutboxStatus, type Prisma } from '@prisma/client';
 import { PrismaService } from '../database/prisma.service';
-import { DongilSyncService } from './dongil-sync.service';
+import { DongilSyncService, normalizeDongilOperationalStatus } from './dongil-sync.service';
+
+describe('Dongil runtime state normalization', () => {
+  it.each([
+    ['running', 'RUNNING'],
+    ['idle_machine_stop', 'PAUSED'],
+    ['idle_capture_timeout', 'PAUSED'],
+    ['inactive', 'STOPPED'],
+    ['resuming', 'STARTING'],
+    ['waiting_camera', 'STARTING'],
+    ['stopping', 'STOPPING'],
+    ['restart_required', 'ERROR'],
+    ['error', 'ERROR'],
+  ] as const)('maps %s to %s', (runtimeState, expected) => {
+    expect(normalizeDongilOperationalStatus(runtimeState)).toBe(expected);
+  });
+});
 
 describe('DongilSyncService capture outbox', () => {
   it('snapshots the assigned profile/model tuple when the inspection is created', async () => {
@@ -15,7 +31,7 @@ describe('DongilSyncService capture outbox', () => {
       },
       dongilSyncOutbox: { create },
     } as unknown as Prisma.TransactionClient;
-    const service = new DongilSyncService({} as PrismaService);
+    const service = new DongilSyncService({} as PrismaService, {} as never);
 
     await service.enqueueCapture(transaction, captureInput());
 
@@ -38,7 +54,7 @@ describe('DongilSyncService capture outbox', () => {
       dongilProductAssignment: { findUnique: jest.fn().mockResolvedValue(null) },
       dongilSyncOutbox: { create },
     } as unknown as Prisma.TransactionClient;
-    const service = new DongilSyncService({} as PrismaService);
+    const service = new DongilSyncService({} as PrismaService, {} as never);
 
     await service.enqueueCapture(transaction, captureInput());
 

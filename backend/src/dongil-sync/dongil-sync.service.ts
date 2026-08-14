@@ -1,4 +1,5 @@
 import { Injectable, Logger, type OnModuleDestroy, type OnModuleInit } from '@nestjs/common';
+import { ModuleRef } from '@nestjs/core';
 import {
   DongilSyncOutboxStatus,
   Prisma,
@@ -6,6 +7,7 @@ import {
 import { randomUUID } from 'node:crypto';
 import { io, type Socket } from 'socket.io-client';
 import { PrismaService } from '../database/prisma.service';
+import { MachineRuntimeService, type MachineRuntimeState } from '../plc/machine-runtime.service';
 import {
   DongilApiClient,
   DongilApiError,
@@ -37,6 +39,45 @@ type RuntimeConfiguration = {
   credential: string;
 };
 
+type DongilConnectionState =
+  | 'DISABLED'
+  | 'CONNECTING'
+  | 'ONLINE'
+  | 'RETRYING'
+  | 'ERROR'
+  | 'UNAUTHORIZED';
+
+export type DongilOperationalStatus =
+  | 'RUNNING'
+  | 'PAUSED'
+  | 'STOPPED'
+  | 'STARTING'
+  | 'STOPPING'
+  | 'ERROR'
+  | 'UNKNOWN';
+
+export function normalizeDongilOperationalStatus(state: MachineRuntimeState): DongilOperationalStatus {
+  switch (state) {
+    case 'running':
+      return 'RUNNING';
+    case 'idle_machine_stop':
+    case 'idle_capture_timeout':
+      return 'PAUSED';
+    case 'inactive':
+      return 'STOPPED';
+    case 'resuming':
+    case 'waiting_camera':
+      return 'STARTING';
+    case 'stopping':
+      return 'STOPPING';
+    case 'restart_required':
+    case 'error':
+      return 'ERROR';
+    default:
+      return 'UNKNOWN';
+  }
+}
+
 @Injectable()
 export class DongilSyncService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(DongilSyncService.name);
@@ -47,8 +88,15 @@ export class DongilSyncService implements OnModuleInit, OnModuleDestroy {
   private heartbeatTimer: NodeJS.Timeout | null = null;
   private workerRunning = false;
   private bootstrapPromise: Promise<{ data: unknown }> | null = null;
+  private connectionState: DongilConnectionState = 'DISABLED';
+  private lastConnectedAt: Date | null = null;
+  private lastHeartbeatAckAt: Date | null = null;
+  private lastErrorMessage: string | null = null;
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly moduleRef: ModuleRef,
+  ) {}
 
   async onModuleInit() {
     await this.prisma.dongilSyncOutbox.updateMany({
@@ -58,18 +106,110 @@ export class DongilSyncService implements OnModuleInit, OnModuleDestroy {
     this.workerTimer = setInterval(() => void this.flushOutbox(), WORKER_INTERVAL_MS);
   }
 
-  onModuleDestroy() {
+  async onModuleDestroy() {
     if (this.workerTimer) clearInterval(this.workerTimer);
+    await this.shutdownConnection();
+  }
+
+  async shutdownConnection() {
     this.clearHeartbeat();
+    if (this.socket?.connected) {
+      try {
+        await this.socket.timeout(1_500).emitWithAck('machine:shutdown', {
+          reason: 'APPLICATION_SHUTDOWN',
+        });
+      } catch {
+        this.logger.warn('Dongil graceful shutdown acknowledgement timed out.');
+      }
+    }
+    this.socket?.removeAllListeners();
     this.socket?.disconnect();
+    this.socket = null;
+    this.socketIdentityKey = null;
+    this.runtime = null;
+    this.connectionState = 'DISABLED';
+    return { data: { state: 'SHUTDOWN_SENT' } };
   }
 
   bootstrap(dto: BootstrapDongilSyncDto) {
     if (this.bootstrapPromise) return this.bootstrapPromise;
-    this.bootstrapPromise = this.performBootstrap(dto).finally(() => {
-      this.bootstrapPromise = null;
-    });
+    this.connectionState = 'CONNECTING';
+    this.lastErrorMessage = null;
+    this.bootstrapPromise = this.performBootstrap(dto)
+      .catch((error) => {
+        this.connectionState = 'ERROR';
+        this.lastErrorMessage = describeError(error);
+        throw error;
+      })
+      .finally(() => {
+        this.bootstrapPromise = null;
+      });
     return this.bootstrapPromise;
+  }
+
+  async getStatus() {
+    const [configuration, pendingSyncCount, latestFailure] = await Promise.all([
+      this.prisma.dongilSyncConfiguration.findUnique({ where: { id: CONFIGURATION_ID } }),
+      this.prisma.dongilSyncOutbox.count({
+        where: { status: { not: DongilSyncOutboxStatus.SENT } },
+      }),
+      this.prisma.dongilSyncOutbox.findFirst({
+        where: { lastErrorMessage: { not: null } },
+        orderBy: { updatedAt: 'desc' },
+        select: { lastErrorCode: true, lastErrorMessage: true, updatedAt: true },
+      }),
+    ]);
+    const machineRuntime = this.getMachineRuntimeStatus();
+    return {
+      data: {
+        state: this.connectionState,
+        socketConnected: this.socket?.connected === true,
+        serverUrl: this.runtime?.serverUrl ?? configuration?.serverUrl ?? null,
+        machineId: this.runtime?.machineId ?? configuration?.machineId ?? null,
+        machineTypeCode: this.runtime?.machineTypeCode ?? configuration?.machineTypeCode ?? null,
+        assignedMachineTypeCode: configuration?.assignedMachineTypeCode ?? null,
+        licenseStatus: this.runtime?.licenseStatus ?? configuration?.licenseStatus ?? null,
+        operationalStatus: normalizeDongilOperationalStatus(machineRuntime.state),
+        runtimeStatus: machineRuntime.state,
+        pendingSyncCount,
+        lastConnectedAt: this.lastConnectedAt,
+        lastHeartbeatAckAt: this.lastHeartbeatAckAt,
+        lastRegisteredAt: configuration?.lastRegisteredAt ?? null,
+        lastConfigSyncAt: configuration?.lastConfigSyncAt ?? null,
+        lastError: this.lastErrorMessage
+          ? { code: 'DONGIL_CONNECTION_ERROR', message: this.lastErrorMessage, at: new Date() }
+          : latestFailure
+            ? {
+                code: latestFailure.lastErrorCode,
+                message: latestFailure.lastErrorMessage,
+                at: latestFailure.updatedAt,
+              }
+            : null,
+      },
+    };
+  }
+
+  async testConnection(serverUrl: string) {
+    const normalized = this.normalizeServerUrl(serverUrl);
+    const startedAt = Date.now();
+    const response = await fetch(`${normalized}/api/v1/health`, {
+      headers: { accept: 'application/json' },
+      signal: AbortSignal.timeout(5_000),
+    });
+    if (!response.ok) {
+      throw new Error(`Dongil Server health check failed with HTTP ${response.status}.`);
+    }
+    const payload = (await response.json()) as { data?: { status?: unknown } };
+    if (payload.data?.status !== 'ok') {
+      throw new Error('Dongil Server health response is not ready.');
+    }
+    return {
+      data: {
+        serverUrl: normalized,
+        reachable: true,
+        latencyMs: Date.now() - startedAt,
+      },
+    };
   }
 
   async enqueueCapture(
@@ -110,7 +250,7 @@ export class DongilSyncService implements OnModuleInit, OnModuleDestroy {
   }
 
   private async performBootstrap(dto: BootstrapDongilSyncDto) {
-    const serverUrl = dto.serverUrl.trim().replace(/\/+$/, '');
+    const serverUrl = this.normalizeServerUrl(dto.serverUrl);
     await this.prisma.dongilSyncConfiguration.upsert({
       where: { id: CONFIGURATION_ID },
       create: {
@@ -131,6 +271,7 @@ export class DongilSyncService implements OnModuleInit, OnModuleDestroy {
     if (dto.licenseStatus !== 'LICENSED') {
       this.disconnectSocket();
       this.runtime = null;
+      this.connectionState = 'UNAUTHORIZED';
       return { data: { state: 'UNAUTHORIZED', issuedCredential: null } };
     }
 
@@ -162,6 +303,7 @@ export class DongilSyncService implements OnModuleInit, OnModuleDestroy {
       if (!credential) {
         this.disconnectSocket();
         this.runtime = null;
+        this.connectionState = 'ERROR';
         return {
           data: {
             state: 'NEEDS_CREDENTIAL_RECOVERY',
@@ -295,6 +437,9 @@ export class DongilSyncService implements OnModuleInit, OnModuleDestroy {
     this.socket = socket;
     this.socketIdentityKey = identityKey;
     socket.on('server:accepted', (payload: { heartbeatIntervalMs?: unknown }) => {
+      this.connectionState = 'ONLINE';
+      this.lastConnectedAt = new Date();
+      this.lastErrorMessage = null;
       socket.emit('machine:hello', {
         machineTypeCode: runtime.machineTypeCode,
         licenseStatus: runtime.licenseStatus,
@@ -306,8 +451,23 @@ export class DongilSyncService implements OnModuleInit, OnModuleDestroy {
           : DEFAULT_HEARTBEAT_INTERVAL_MS;
       this.startHeartbeat(interval);
     });
-    socket.on('disconnect', () => this.clearHeartbeat());
+    socket.on('server:heartbeat-ack', () => {
+      this.connectionState = 'ONLINE';
+      this.lastHeartbeatAckAt = new Date();
+      this.lastErrorMessage = null;
+    });
+    socket.on('server:rejected', (payload: { message?: unknown }) => {
+      this.connectionState = 'ERROR';
+      this.lastErrorMessage =
+        typeof payload?.message === 'string' ? payload.message : 'Dongil Server rejected the socket.';
+    });
+    socket.on('disconnect', () => {
+      this.clearHeartbeat();
+      if (this.runtime) this.connectionState = 'RETRYING';
+    });
     socket.on('connect_error', (error: Error) => {
+      this.connectionState = 'RETRYING';
+      this.lastErrorMessage = error.message;
       this.logger.warn(`Dongil WebSocket connection failed: ${error.message}`);
     });
   }
@@ -324,10 +484,12 @@ export class DongilSyncService implements OnModuleInit, OnModuleDestroy {
     const pendingSyncCount = await this.prisma.dongilSyncOutbox.count({
       where: { status: { not: DongilSyncOutboxStatus.SENT } },
     });
+    const machineRuntime = this.getMachineRuntimeStatus();
     this.socket.emit('machine:heartbeat', {
       machineTypeCode: this.runtime.machineTypeCode,
       licenseStatus: this.runtime.licenseStatus,
-      runtimeStatus: 'READY',
+      runtimeStatus: machineRuntime.state,
+      operationalStatus: normalizeDongilOperationalStatus(machineRuntime.state),
       pendingSyncCount,
     });
   }
@@ -493,4 +655,23 @@ export class DongilSyncService implements OnModuleInit, OnModuleDestroy {
     this.socket = null;
     this.socketIdentityKey = null;
   }
+
+  private normalizeServerUrl(value: string): string {
+    const normalized = value.trim().replace(/\/+$/, '');
+    const url = new URL(normalized);
+    if (!['http:', 'https:'].includes(url.protocol) || !url.hostname) {
+      throw new Error('Dongil Server URL must use http or https and include a hostname.');
+    }
+    return normalized;
+  }
+
+  private getMachineRuntimeStatus(): { state: MachineRuntimeState } {
+    try {
+      const service = this.moduleRef.get(MachineRuntimeService, { strict: false });
+      return service.getStatus().data;
+    } catch {
+      return { state: 'inactive' };
+    }
+  }
+
 }

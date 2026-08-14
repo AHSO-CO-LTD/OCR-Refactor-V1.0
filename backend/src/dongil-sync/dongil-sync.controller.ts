@@ -1,6 +1,7 @@
-import { Body, Controller, ForbiddenException, Headers, Post } from '@nestjs/common';
+import { Body, Controller, ForbiddenException, Get, Headers, Post } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { BootstrapDongilSyncDto } from './dto/bootstrap-dongil-sync.dto';
+import { TestDongilConnectionDto } from './dto/test-dongil-connection.dto';
 import { DongilSyncService } from './dongil-sync.service';
 
 @Controller('internal/dongil-sync')
@@ -17,6 +18,27 @@ export class DongilSyncController {
   ) {
     this.assertInternalToken(providedToken);
     return this.dongilSync.bootstrap(dto);
+  }
+
+  @Get('status')
+  status(@Headers('x-desktop-internal-token') providedToken?: string) {
+    this.assertInternalToken(providedToken);
+    return this.dongilSync.getStatus();
+  }
+
+  @Post('test')
+  test(
+    @Body() dto: TestDongilConnectionDto,
+    @Headers('x-desktop-internal-token') providedToken?: string,
+  ) {
+    this.assertInternalToken(providedToken);
+    return this.dongilSync.testConnection(dto.serverUrl);
+  }
+
+  @Post('shutdown')
+  shutdown(@Headers('x-desktop-internal-token') providedToken?: string) {
+    this.assertInternalToken(providedToken);
+    return this.dongilSync.shutdownConnection();
   }
 
   private assertInternalToken(providedToken?: string) {
