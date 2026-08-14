@@ -10,7 +10,13 @@ import {
 } from "electron";
 import { spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { existsSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  readFileSync,
+  renameSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { join, resolve } from "node:path";
 import { registerAutoUpdater } from "./auto-updater";
 import {
@@ -53,7 +59,7 @@ type DesktopTestStorageSettings = {
 
 type SaveDongilSettingsPayload = {
   accessToken: string;
-  serverUrl: string;
+  serverIp: string;
 };
 
 type DesktopLanguage = "en" | "vi";
@@ -103,8 +109,9 @@ const terminalLogs: string[] = [];
 let startupError: string | null = null;
 let startupPhase: StartupPhase = "running";
 let localMachineIdentity: LocalMachineIdentity | null = null;
-let dongilBootstrapTimer: NodeJS.Timeout | null = null;
-let dongilBootstrapPromise: Promise<void> | null = null;
+let dongilStatusTimer: NodeJS.Timeout | null = null;
+let dongilLifecyclePromise: Promise<void> | null = null;
+let lastDongilLifecycleState: string | null = null;
 let startupStages = new Map<StartupStageId, StartupStageUpdate>(
   createPendingStartupStages().map((stage) => [stage.id, stage]),
 );
@@ -287,29 +294,90 @@ function registerDesktopIpc() {
   ipcMain.handle("desktop:get-startup-snapshot", () => getStartupSnapshot());
   ipcMain.handle("desktop:get-dongil-status", async (event) => {
     assertMainRendererSender(event.sender);
-    if (!serviceManager) throw new Error("Local service manager is unavailable.");
-    return serviceManager.getDongilSyncStatus();
+    return getDongilStatusWithLocalIdentity();
   });
-  ipcMain.handle("desktop:test-dongil-server", async (event, serverUrl: string) => {
-    assertMainRendererSender(event.sender);
-    if (!serviceManager) throw new Error("Local service manager is unavailable.");
-    return serviceManager.testDongilConnection(normalizeDongilServerUrl(serverUrl));
-  });
+  ipcMain.handle(
+    "desktop:test-dongil-server",
+    async (event, serverIp: string) => {
+      assertMainRendererSender(event.sender);
+      if (!serviceManager)
+        throw new Error("Local service manager is unavailable.");
+      return serviceManager.testDongilConnection(
+        buildDongilServerUrl(serverIp),
+      );
+    },
+  );
   ipcMain.handle(
     "desktop:save-dongil-settings",
     async (event, payload: SaveDongilSettingsPayload) => {
       assertMainRendererSender(event.sender);
-      if (!serviceManager) throw new Error("Local service manager is unavailable.");
+      if (!serviceManager)
+        throw new Error("Local service manager is unavailable.");
       await serviceManager.assertDongilSettingsAccess(payload.accessToken);
-      const serverUrl = normalizeDongilServerUrl(payload.serverUrl);
+      const serverIp = normalizeDongilServerIp(payload.serverIp);
+      const serverUrl = buildDongilServerUrl(serverIp);
       persistRuntimeEnvValue("DONGIL_SERVER_URL", serverUrl);
       process.env.DONGIL_SERVER_URL = serverUrl;
-      await bootstrapDongilSync();
-      await bootstrapDongilSync();
+      const identity = requireLocalMachineIdentity();
+      await serviceManager.configureDongilSync(
+        buildDongilPayload(identity, serverUrl),
+      );
       return {
+        serverIp,
         serverUrl,
-        status: await serviceManager.getDongilSyncStatus(),
+        status: await getDongilStatusWithLocalIdentity(),
       };
+    },
+  );
+  ipcMain.handle(
+    "desktop:request-dongil-registration",
+    async (event, accessToken: string) => {
+      assertMainRendererSender(event.sender);
+      if (!serviceManager)
+        throw new Error("Local service manager is unavailable.");
+      await serviceManager.assertDongilSettingsAccess(accessToken);
+      const identity = requireLocalMachineIdentity();
+      const serverUrl = requireDongilServerUrl();
+      const response = await serviceManager.requestDongilRegistration(
+        buildDongilPayload(identity, serverUrl),
+      );
+      const registrationToken = response.data?.registrationToken;
+      if (registrationToken) {
+        saveMachineCredential(identity.machineId, serverUrl, registrationToken);
+      }
+      return {
+        data: response.data
+          ? {
+              state: response.data.state,
+              registrationStatus: response.data.registrationStatus,
+              assignedMachineTypeCode: response.data.assignedMachineTypeCode,
+            }
+          : undefined,
+      };
+    },
+  );
+  ipcMain.handle("desktop:refresh-dongil-registration", async (event) => {
+    assertMainRendererSender(event.sender);
+    return refreshDongilRegistrationStatus();
+  });
+  ipcMain.handle(
+    "desktop:connect-dongil-server",
+    async (event, accessToken: string) => {
+      assertMainRendererSender(event.sender);
+      if (!serviceManager)
+        throw new Error("Local service manager is unavailable.");
+      await serviceManager.assertDongilSettingsAccess(accessToken);
+      const identity = requireLocalMachineIdentity();
+      const serverUrl = requireDongilServerUrl();
+      const credential = loadMachineCredential(identity.machineId, serverUrl);
+      if (!credential)
+        throw new Error(
+          "Send a registration request before connecting to Dongil Server.",
+        );
+      return serviceManager.bootstrapDongilSync({
+        ...buildDongilPayload(identity, serverUrl),
+        credential,
+      });
     },
   );
   ipcMain.handle(
@@ -523,12 +591,15 @@ async function runRemainingStartupChecks() {
   } catch (error) {
     updateStartupStage({ id: "license", status: "failed" });
     await cleanupBlockedStartupHardware();
-    blockStartup("license", `Machine identity check failed: ${errorMessage(error)}`);
+    blockStartup(
+      "license",
+      `Machine identity check failed: ${errorMessage(error)}`,
+    );
     return null;
   }
 
   updateStartupStage({ id: "license", status: "done" });
-  startDongilBootstrapLoop(identity);
+  startDongilLifecycleLoop(identity);
 
   const requiresAdminSetup =
     setupResult.value.data?.requiresAdminSetup === true;
@@ -545,26 +616,51 @@ async function runRemainingStartupChecks() {
   return { hardwareWarning, requiresAdminSetup };
 }
 
-function startDongilBootstrapLoop(identity: LocalMachineIdentity) {
+function startDongilLifecycleLoop(identity: LocalMachineIdentity) {
   localMachineIdentity = identity;
-  void bootstrapDongilSync();
-  if (dongilBootstrapTimer) return;
-  dongilBootstrapTimer = setInterval(() => void bootstrapDongilSync(), 30_000);
+  void refreshDongilLifecycle();
+  if (dongilStatusTimer) return;
+  dongilStatusTimer = setInterval(() => void refreshDongilLifecycle(), 10_000);
 }
 
-function bootstrapDongilSync() {
-  if (dongilBootstrapPromise) return dongilBootstrapPromise;
-  dongilBootstrapPromise = performDongilBootstrap()
+function refreshDongilLifecycle() {
+  if (dongilLifecyclePromise) return dongilLifecyclePromise;
+  dongilLifecyclePromise = performDongilLifecycleRefresh()
     .catch((error) => {
-      showTerminalLog(`[dongil] bootstrap deferred: ${errorMessage(error)}`);
+      showTerminalLog(
+        `[dongil] status refresh deferred: ${errorMessage(error)}`,
+      );
     })
     .finally(() => {
-      dongilBootstrapPromise = null;
+      dongilLifecyclePromise = null;
     });
-  return dongilBootstrapPromise;
+  return dongilLifecyclePromise;
 }
 
-async function performDongilBootstrap() {
+async function getDongilStatusWithLocalIdentity() {
+  if (!serviceManager) throw new Error("Local service manager is unavailable.");
+  const response = await serviceManager.getDongilSyncStatus();
+  if (!response.data) return response;
+
+  return {
+    ...response,
+    data: {
+      ...response.data,
+      machineId:
+        localMachineIdentity?.machineId ?? response.data.machineId ?? null,
+      machineTypeCode:
+        process.env.DONGIL_MACHINE_TYPE_CODE?.trim() ||
+        response.data.machineTypeCode ||
+        "WASHING_MACHINE",
+      licenseStatus:
+        localMachineIdentity?.licenseStatus ??
+        response.data.licenseStatus ??
+        null,
+    },
+  };
+}
+
+async function performDongilLifecycleRefresh() {
   const identity = localMachineIdentity;
   if (!identity || !serviceManager || isQuitting) return;
 
@@ -573,26 +669,81 @@ async function performDongilBootstrap() {
 
   const credential = loadMachineCredential(identity.machineId, serverUrl);
   try {
-    const response = await serviceManager.bootstrapDongilSync({
-      serverUrl,
-      machineId: identity.machineId,
-      machineTypeCode:
-        process.env.DONGIL_MACHINE_TYPE_CODE?.trim() || "WASHING_MACHINE",
-      licenseStatus: identity.licenseStatus,
-      appVersion: app.getVersion(),
-      credential: credential ?? undefined,
-    });
-    const issuedCredential = response.data?.issuedCredential;
-    if (issuedCredential) {
-      saveMachineCredential(identity.machineId, serverUrl, issuedCredential);
+    let current = await serviceManager.getDongilSyncStatus();
+    if (
+      current.data?.serverUrl !== serverUrl ||
+      current.data?.machineId !== identity.machineId
+    ) {
+      await serviceManager.configureDongilSync(
+        buildDongilPayload(identity, serverUrl),
+      );
+      current = await serviceManager.getDongilSyncStatus();
     }
-    const state = response.data?.state ?? "UNKNOWN";
-    showTerminalLog(
-      `[dongil] state=${state}; machine=${identity.machineId}; authorization=DONGLE`,
-    );
+    if (!credential) return;
+    const response = current.data?.autoConnectEnabled
+      ? await serviceManager.bootstrapDongilSync({
+          ...buildDongilPayload(identity, serverUrl),
+          credential,
+        })
+      : await serviceManager.refreshDongilRegistration({
+          serverUrl,
+          machineId: identity.machineId,
+          registrationToken: credential,
+        });
+    const state = response.data?.state ?? current.data?.state ?? "UNKNOWN";
+    if (state !== lastDongilLifecycleState) {
+      lastDongilLifecycleState = state;
+      showTerminalLog(
+        `[dongil] state=${state}; machine=${identity.machineId}; authorization=DONGLE`,
+      );
+    }
   } catch (error) {
-    showTerminalLog(`[dongil] bootstrap deferred: ${errorMessage(error)}`);
+    showTerminalLog(
+      `[dongil] lifecycle refresh deferred: ${errorMessage(error)}`,
+    );
   }
+}
+
+async function refreshDongilRegistrationStatus() {
+  if (!serviceManager) throw new Error("Local service manager is unavailable.");
+  const identity = requireLocalMachineIdentity();
+  const serverUrl = requireDongilServerUrl();
+  const registrationToken = loadMachineCredential(
+    identity.machineId,
+    serverUrl,
+  );
+  if (!registrationToken)
+    throw new Error(
+      "Send a registration request before refreshing its status.",
+    );
+  return serviceManager.refreshDongilRegistration({
+    serverUrl,
+    machineId: identity.machineId,
+    registrationToken,
+  });
+}
+
+function requireLocalMachineIdentity() {
+  if (!localMachineIdentity)
+    throw new Error("Local machine identity is unavailable.");
+  return localMachineIdentity;
+}
+
+function requireDongilServerUrl() {
+  const serverUrl = process.env.DONGIL_SERVER_URL?.trim().replace(/\/+$/, "");
+  if (!serverUrl) throw new Error("Save the Dongil Server IP first.");
+  return serverUrl;
+}
+
+function buildDongilPayload(identity: LocalMachineIdentity, serverUrl: string) {
+  return {
+    serverUrl,
+    machineId: identity.machineId,
+    machineTypeCode:
+      process.env.DONGIL_MACHINE_TYPE_CODE?.trim() || "WASHING_MACHINE",
+    licenseStatus: identity.licenseStatus,
+    appVersion: app.getVersion(),
+  };
 }
 
 async function cleanupBlockedStartupHardware() {
@@ -778,17 +929,28 @@ function parseEnvFile(content: string) {
   return result;
 }
 
-function normalizeDongilServerUrl(value: string) {
-  const normalized = value.trim().replace(/\/+$/, "");
-  const url = new URL(normalized);
-  if (!['http:', 'https:'].includes(url.protocol) || !url.hostname) {
-    throw new Error("Dongil Server URL must use http or https and include a hostname.");
+function normalizeDongilServerIp(value: string) {
+  const normalized = value.trim();
+  const octets = normalized.split(".");
+  if (
+    octets.length !== 4 ||
+    octets.some(
+      (octet) =>
+        !/^\d{1,3}$/.test(octet) || Number(octet) < 0 || Number(octet) > 255,
+    )
+  ) {
+    throw new Error("Dongil Server must be a valid IPv4 address.");
   }
-  return normalized;
+  return octets.map((octet) => String(Number(octet))).join(".");
+}
+
+function buildDongilServerUrl(value: string) {
+  return `http://${normalizeDongilServerIp(value)}:3979`;
 }
 
 function persistRuntimeEnvValue(key: string, value: string) {
-  if (/\r|\n/.test(value)) throw new Error("Environment value contains an invalid newline.");
+  if (/\r|\n/.test(value))
+    throw new Error("Environment value contains an invalid newline.");
   const runtimeRoot = getRuntimeRoot();
   const envPath = app.isPackaged
     ? join(getProgramDataRoot(), ".env")
@@ -805,7 +967,10 @@ function persistRuntimeEnvValue(key: string, value: string) {
     : `${content.replace(/\s*$/, "")}\r\n${nextLine}\r\n`;
   const temporaryPath = `${envPath}.${randomUUID()}.tmp`;
   try {
-    writeFileSync(temporaryPath, nextContent, { encoding: "utf8", flush: true });
+    writeFileSync(temporaryPath, nextContent, {
+      encoding: "utf8",
+      flush: true,
+    });
     renameSync(temporaryPath, envPath);
   } catch (error) {
     try {
@@ -818,7 +983,11 @@ function persistRuntimeEnvValue(key: string, value: string) {
 }
 
 function assertMainRendererSender(sender: WebContents) {
-  if (!mainWindow || mainWindow.isDestroyed() || sender !== mainWindow.webContents) {
+  if (
+    !mainWindow ||
+    mainWindow.isDestroyed() ||
+    sender !== mainWindow.webContents
+  ) {
     throw new Error("Desktop IPC caller is not authorized.");
   }
 }
@@ -1109,9 +1278,9 @@ app.on("activate", () => {
 });
 
 app.on("before-quit", (event) => {
-  if (dongilBootstrapTimer) {
-    clearInterval(dongilBootstrapTimer);
-    dongilBootstrapTimer = null;
+  if (dongilStatusTimer) {
+    clearInterval(dongilStatusTimer);
+    dongilStatusTimer = null;
   }
   if (isQuitting || !serviceManager) {
     return;
@@ -1215,7 +1384,10 @@ async function shutdownAndQuit(mode: DesktopExitMode) {
       await serviceManager?.shutdownHardware(reportShutdownStage);
     } catch (error) {
       const message = errorMessage(error);
-      console.error("Hardware shutdown failed; continuing app shutdown:", error);
+      console.error(
+        "Hardware shutdown failed; continuing app shutdown:",
+        error,
+      );
       reportShutdownStatus(
         "Hardware shutdown failed. Closing the application anyway.",
       );

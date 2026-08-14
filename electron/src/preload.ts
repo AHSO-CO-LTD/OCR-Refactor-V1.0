@@ -43,11 +43,23 @@ contextBridge.exposeInMainWorld("ocrDesktop", {
   getDongilStatus() {
     return ipcRenderer.invoke("desktop:get-dongil-status");
   },
-  testDongilServer(serverUrl: string) {
-    return ipcRenderer.invoke("desktop:test-dongil-server", serverUrl);
+  testDongilServer(serverIp: string) {
+    return ipcRenderer.invoke("desktop:test-dongil-server", serverIp);
   },
-  saveDongilSettings(settings: { accessToken: string; serverUrl: string }) {
+  saveDongilSettings(settings: { accessToken: string; serverIp: string }) {
     return ipcRenderer.invoke("desktop:save-dongil-settings", settings);
+  },
+  requestDongilRegistration(accessToken: string) {
+    return ipcRenderer.invoke(
+      "desktop:request-dongil-registration",
+      accessToken,
+    );
+  },
+  refreshDongilRegistration() {
+    return ipcRenderer.invoke("desktop:refresh-dongil-registration");
+  },
+  connectDongilServer(accessToken: string) {
+    return ipcRenderer.invoke("desktop:connect-dongil-server", accessToken);
   },
   exportStartupLog(context?: Record<string, unknown>) {
     return ipcRenderer.invoke("desktop:export-startup-log", context);

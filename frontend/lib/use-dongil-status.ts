@@ -1,10 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import {
-  getDesktopBridge,
-  type DesktopDongilStatus,
-} from "@/lib/desktop";
+import { getDesktopBridge, type DesktopDongilStatus } from "@/lib/desktop";
 
 export function useDongilStatus(refreshMs = 5_000) {
   const [status, setStatus] = useState<DesktopDongilStatus | null>(null);
@@ -25,7 +22,11 @@ export function useDongilStatus(refreshMs = 5_000) {
       setError(null);
       return nextStatus;
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Dongil status is unavailable.");
+      setError(
+        cause instanceof Error
+          ? cause.message
+          : "Dongil status is unavailable.",
+      );
       return null;
     } finally {
       setLoading(false);
@@ -33,9 +34,12 @@ export function useDongilStatus(refreshMs = 5_000) {
   }, []);
 
   useEffect(() => {
-    void refresh();
+    const initialTimer = window.setTimeout(() => void refresh(), 0);
     const timer = window.setInterval(() => void refresh(), refreshMs);
-    return () => window.clearInterval(timer);
+    return () => {
+      window.clearTimeout(initialTimer);
+      window.clearInterval(timer);
+    };
   }, [refresh, refreshMs]);
 
   return { status, loading, error, refresh };

@@ -1,7 +1,15 @@
 "use client";
 
 import Link from "next/link";
-import { ChevronDown, LogOut, Power, RefreshCw, Server, Settings, Usb } from "lucide-react";
+import {
+  ChevronDown,
+  LogOut,
+  Power,
+  RefreshCw,
+  Server,
+  Settings,
+  Usb,
+} from "lucide-react";
 import { useEffect, useId, useRef, useState } from "react";
 import { LanguageToggle } from "@/components/language-toggle";
 import { Button } from "@/components/ui/button";
@@ -90,7 +98,11 @@ export function AccountMenu({
                 ? "border-emerald-200 bg-emerald-50 text-emerald-600"
                 : "border-rose-200 bg-rose-50 text-rose-600",
             )}
-            title={donglePresent ? t("dashboard.donglePresent") : t("dashboard.dongleMissing")}
+            title={
+              donglePresent
+                ? t("dashboard.donglePresent")
+                : t("dashboard.dongleMissing")
+            }
           >
             <Usb className="h-4 w-4" />
           </span>
@@ -99,7 +111,12 @@ export function AccountMenu({
               "flex h-8 w-8 items-center justify-center border",
               dongilStatus?.state === "ONLINE" && dongilStatus.socketConnected
                 ? "border-emerald-200 bg-emerald-50 text-emerald-600"
-                : dongilStatus?.state === "CONNECTING" || dongilStatus?.state === "RETRYING"
+                : [
+                      "CONNECTING",
+                      "RETRYING",
+                      "REGISTRATION_PENDING",
+                      "REGISTRATION_APPROVED",
+                    ].includes(dongilStatus?.state ?? "")
                   ? "border-amber-200 bg-amber-50 text-amber-700"
                   : "border-rose-200 bg-rose-50 text-rose-600",
             )}

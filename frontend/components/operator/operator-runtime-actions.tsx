@@ -13,6 +13,8 @@ type OperatorRuntimeActionsProps = {
   operationMode: "manual" | "auto";
   realtimeAiEnabled: boolean;
   runtimeControlsActive: boolean;
+  runtimeLocked: boolean;
+  resettingCounters: boolean;
   scanRunning: boolean;
   onGrab: () => void;
   onLiveCameraToggle: () => void;
@@ -36,6 +38,8 @@ export function OperatorRuntimeActions({
   operationMode,
   realtimeAiEnabled,
   runtimeControlsActive,
+  runtimeLocked,
+  resettingCounters,
   scanRunning,
   onGrab,
   onLiveCameraToggle,
@@ -44,11 +48,12 @@ export function OperatorRuntimeActions({
   onResetCounter,
 }: OperatorRuntimeActionsProps) {
   const { t } = useI18n();
-  const [flashingAction, setFlashingAction] = useState<
-    "grab" | "reset" | null
-  >(null);
+  const [flashingAction, setFlashingAction] = useState<"grab" | "reset" | null>(
+    null,
+  );
   const flashTimerRef = useRef<number | null>(null);
-  const sharedDisabled = actionsLocked || controlsDisabled || controlUpdating;
+  const sharedDisabled =
+    actionsLocked || controlsDisabled || controlUpdating || runtimeLocked;
   const stateClassName = (active: boolean) =>
     [baseClassName, active ? enabledClassName : defaultClassName].join(" ");
 
@@ -112,9 +117,7 @@ export function OperatorRuntimeActions({
         variant="outline"
         aria-pressed={runtimeControlsActive && realtimeAiEnabled}
         disabled={sharedDisabled || scanRunning}
-        className={stateClassName(
-          runtimeControlsActive && realtimeAiEnabled,
-        )}
+        className={stateClassName(runtimeControlsActive && realtimeAiEnabled)}
         onClick={onRealtimeAiToggle}
       >
         <Zap className="h-5 w-5" />
@@ -152,6 +155,7 @@ export function OperatorRuntimeActions({
       <Button
         type="button"
         variant="outline"
+        disabled={runtimeLocked || resettingCounters}
         className={stateClassName(flashingAction === "reset")}
         onClick={() => runWithFlash("reset", onResetCounter)}
       >

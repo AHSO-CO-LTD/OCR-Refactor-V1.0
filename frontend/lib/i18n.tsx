@@ -259,7 +259,8 @@ const translations = {
     "ocrVariants.placeholder": "Example: IS-35-R",
     "ocrVariants.add": "Add variant",
     "ocrVariants.empty": "No additional OCR variants have been configured.",
-    "ocrVariants.primaryCodeExists": "The main product code is already accepted automatically.",
+    "ocrVariants.primaryCodeExists":
+      "The main product code is already accepted automatically.",
     "ocrVariants.duplicate": "This OCR variant has already been added.",
     "ocrVariants.limit": "A product can have at most 20 OCR variants.",
     "ocrVariants.remove": "Remove variant",
@@ -564,18 +565,20 @@ const translations = {
     "settings.tabDongil": "Dongil Server",
     "settings.dongilTitle": "Dongil Server connection",
     "settings.dongilDescription":
-      "Configure the central server used for registration, machine status, and result synchronization.",
-    "settings.dongilUrl": "Server URL",
-    "settings.dongilInvalidUrl": "Enter a valid HTTP or HTTPS server URL.",
+      "Enter the Dongil Server IP. HTTP, port 3979, and connection details are derived automatically.",
+    "settings.dongilUrl": "Server IP",
+    "settings.dongilInvalidUrl": "Enter a valid IPv4 server address.",
     "settings.dongilMachineId": "Machine ID",
-    "settings.dongilMachineType": "Assigned machine type",
+    "settings.dongilMachineType": "Machine type",
     "settings.dongilTest": "Test connection",
     "settings.dongilTesting": "Testing...",
     "settings.dongilTestSuccess": "Server responded in {latency} ms.",
     "settings.dongilTestFailed": "Could not reach Dongil Server.",
-    "settings.dongilSaveConnect": "Save and connect",
+    "settings.dongilSaveConnect": "Save configuration",
+    "settings.dongilSave": "Save configuration",
     "settings.dongilSaving": "Saving...",
-    "settings.dongilSaved": "Dongil Server settings were saved and reconnection started.",
+    "settings.dongilSaved":
+      "Dongil Server configuration was saved. No connection was started.",
     "settings.dongilSaveFailed": "Could not save Dongil Server settings.",
     "settings.dongilStatus": "Connection status",
     "settings.dongilPending": "Pending results",
@@ -583,7 +586,29 @@ const translations = {
     "settings.dongilLastConnected": "Last connected",
     "settings.dongilLastHeartbeat": "Last heartbeat acknowledged",
     "settings.dongilConfirmTitle": "Confirm server change",
-    "settings.dongilConfirmDescription": "Save {url} and reconnect this machine?",
+    "settings.dongilConfirmDescription": "Save Dongil Server address {url}?",
+    "settings.dongilRegister": "Send registration request",
+    "settings.dongilRegistering": "Sending request...",
+    "settings.dongilRegistrationSent":
+      "Registration request was sent. Waiting for server approval.",
+    "settings.dongilRegistrationFailed":
+      "Could not send the registration request.",
+    "settings.dongilRegistrationStatus": "Registration status",
+    "settings.dongilRegistrationRefresh": "Refresh registration status now",
+    "settings.dongilRegistrationRefreshing":
+      "Refreshing registration status...",
+    "settings.dongilRegistrationRefreshed": "Registration status was updated.",
+    "settings.dongilRegistrationRefreshFailed":
+      "Could not refresh registration status.",
+    "settings.dongilConnect": "Connect server",
+    "settings.dongilConnecting": "Connecting...",
+    "settings.dongilConnectStarted": "Dongil Server connection started.",
+    "settings.dongilConnectFailed": "Could not connect to Dongil Server.",
+    "settings.dongilState.REGISTRATION_PENDING": "Waiting for server approval",
+    "settings.dongilState.REGISTRATION_APPROVED": "Approved - ready to connect",
+    "settings.dongilState.REGISTRATION_REJECTED": "Registration rejected",
+    "settings.dongilState.NEEDS_CREDENTIAL_RECOVERY":
+      "Credential recovery required",
     "settings.dongilState.DISABLED": "Not configured",
     "settings.dongilState.CONNECTING": "Connecting",
     "settings.dongilState.ONLINE": "Connected",
@@ -615,7 +640,8 @@ const translations = {
     "settings.stopDelayDescription":
       "After a PLC STOP signal, the line keeps operating for this period before the camera and PLC outputs are stopped. Default: 5 seconds.",
     "settings.stopDelaySeconds": "Delay after STOP signal (seconds)",
-    "settings.stopDelayHint": "Allowed range: 0 to 300 seconds. Set 0 to stop immediately.",
+    "settings.stopDelayHint":
+      "Allowed range: 0 to 300 seconds. Set 0 to stop immediately.",
     "settings.stopDelaySave": "Save stop delay",
     "settings.stopDelaySaving": "Saving PLC stop delay...",
     "settings.stopDelaySaved": "PLC stop delay saved.",
@@ -755,7 +781,8 @@ const translations = {
       "Hardware could not be shut down completely. The app has not closed.",
     "settings.shutdownRetry": "Retry",
     "settings.shutdownAppOnlyFallback": "Close app only",
-    "settings.shutdownCancelled": "Shutdown was canceled. The app remains open.",
+    "settings.shutdownCancelled":
+      "Shutdown was canceled. The app remains open.",
     "settings.restartApp": "Restart app",
     "settings.restarting": "Restarting local app...",
     "settings.restartError": "Cannot restart the local app cleanly.",
@@ -807,14 +834,18 @@ const translations = {
       "Review and export results recorded during actual Line operation.",
     "operationReports.summary": "Quick summary",
     "operationReports.sessions": "Saved Line sessions",
-    "operationReports.sessionsLoading": "Loading actual Line operation results...",
-    "operationReports.sessionsEmpty": "No actual Line operation result was found.",
-    "operationReports.sessionsLoadError": "Cannot load actual Line operation results.",
+    "operationReports.sessionsLoading":
+      "Loading actual Line operation results...",
+    "operationReports.sessionsEmpty":
+      "No actual Line operation result was found.",
+    "operationReports.sessionsLoadError":
+      "Cannot load actual Line operation results.",
     "operationReports.sessionMeta": "Operated by {actor} at {createdAt}",
     "operationReports.sessionId": "Session: {sessionId}",
     "operationReports.totalResults": "Latched results",
     "operationReports.captureMeta": "Captured at {capturedAt}",
-    "operationReports.imageUnavailable": "No saved camera image is available for this result.",
+    "operationReports.imageUnavailable":
+      "No saved camera image is available for this result.",
     "reports.testSessions": "Saved test sessions",
     "reports.testSessionsLoading": "Loading saved test sessions...",
     "reports.testSessionsEmpty": "No saved test session found.",
@@ -1122,7 +1153,8 @@ const translations = {
       "Do you want to use these camera settings for all product codes? The active camera will restart to apply the changes.",
     "camera.restartAndApplyAll": "Apply to all and restart",
     "camera.applyingSettings": "Applying camera settings...",
-    "camera.applyingSettingsToAll": "Applying camera settings to all products...",
+    "camera.applyingSettingsToAll":
+      "Applying camera settings to all products...",
     "camera.applyingSettingsLive": "Applying changes and restarting camera...",
     "camera.settingsApplied": "Camera settings applied successfully.",
     "camera.settingsAppliedToAll":
@@ -1770,8 +1802,7 @@ const translations = {
     "configuration.confirmApplyRoiAllDescription":
       "Bạn có muốn sử dụng cấu hình ROI này với toàn bộ mã hàng không?",
     "configuration.applyRoiToAll": "Áp dụng ROI toàn bộ",
-    "configuration.roiApplyingToAll":
-      "Đang áp dụng ROI cho toàn bộ mã hàng...",
+    "configuration.roiApplyingToAll": "Đang áp dụng ROI cho toàn bộ mã hàng...",
     "configuration.roiAppliedToAll":
       "Đã áp dụng cấu hình ROI cho {count} mã hàng.",
     "configuration.roiCreated": "Đã tạo ROI với kích thước cố định.",
@@ -2044,18 +2075,20 @@ const translations = {
     "settings.tabDongil": "Dongil Server",
     "settings.dongilTitle": "Kết nối Dongil Server",
     "settings.dongilDescription":
-      "Cấu hình máy chủ trung tâm dùng để đăng ký máy, gửi trạng thái và đồng bộ kết quả.",
-    "settings.dongilUrl": "Địa chỉ server",
-    "settings.dongilInvalidUrl": "Nhập địa chỉ server HTTP hoặc HTTPS hợp lệ.",
+      "Nhập IP Dongil Server. HTTP, cổng 3979 và thông tin kết nối được tự động suy ra.",
+    "settings.dongilUrl": "IP server",
+    "settings.dongilInvalidUrl": "Nhập địa chỉ IPv4 hợp lệ.",
     "settings.dongilMachineId": "Machine ID",
-    "settings.dongilMachineType": "Loại máy được gán",
+    "settings.dongilMachineType": "Loại máy",
     "settings.dongilTest": "Kiểm tra kết nối",
     "settings.dongilTesting": "Đang kiểm tra...",
     "settings.dongilTestSuccess": "Server phản hồi trong {latency} ms.",
     "settings.dongilTestFailed": "Không thể kết nối Dongil Server.",
-    "settings.dongilSaveConnect": "Lưu và kết nối",
+    "settings.dongilSaveConnect": "Lưu cấu hình",
+    "settings.dongilSave": "Lưu cấu hình",
     "settings.dongilSaving": "Đang lưu...",
-    "settings.dongilSaved": "Đã lưu cấu hình và bắt đầu kết nối lại Dongil Server.",
+    "settings.dongilSaved":
+      "Đã lưu cấu hình Dongil Server, chưa thực hiện kết nối.",
     "settings.dongilSaveFailed": "Không thể lưu cấu hình Dongil Server.",
     "settings.dongilStatus": "Trạng thái kết nối",
     "settings.dongilPending": "Kết quả đang chờ",
@@ -2063,7 +2096,28 @@ const translations = {
     "settings.dongilLastConnected": "Kết nối gần nhất",
     "settings.dongilLastHeartbeat": "Heartbeat gần nhất",
     "settings.dongilConfirmTitle": "Xác nhận đổi server",
-    "settings.dongilConfirmDescription": "Lưu {url} và kết nối lại máy này?",
+    "settings.dongilConfirmDescription": "Lưu địa chỉ Dongil Server {url}?",
+    "settings.dongilRegister": "Gửi yêu cầu đăng ký",
+    "settings.dongilRegistering": "Đang gửi yêu cầu...",
+    "settings.dongilRegistrationSent":
+      "Đã gửi yêu cầu đăng ký và đang chờ server duyệt.",
+    "settings.dongilRegistrationFailed": "Không thể gửi yêu cầu đăng ký.",
+    "settings.dongilRegistrationStatus": "Trạng thái đăng ký",
+    "settings.dongilRegistrationRefresh": "Cập nhật trạng thái đăng ký ngay",
+    "settings.dongilRegistrationRefreshing":
+      "Đang cập nhật trạng thái đăng ký...",
+    "settings.dongilRegistrationRefreshed": "Đã cập nhật trạng thái đăng ký.",
+    "settings.dongilRegistrationRefreshFailed":
+      "Không thể cập nhật trạng thái đăng ký.",
+    "settings.dongilConnect": "Kết nối server",
+    "settings.dongilConnecting": "Đang kết nối...",
+    "settings.dongilConnectStarted": "Đã bắt đầu kết nối Dongil Server.",
+    "settings.dongilConnectFailed": "Không thể kết nối Dongil Server.",
+    "settings.dongilState.REGISTRATION_PENDING": "Đang chờ server duyệt",
+    "settings.dongilState.REGISTRATION_APPROVED": "Đã duyệt - sẵn sàng kết nối",
+    "settings.dongilState.REGISTRATION_REJECTED": "Đăng ký bị từ chối",
+    "settings.dongilState.NEEDS_CREDENTIAL_RECOVERY":
+      "Cần cấp lại thông tin xác thực",
     "settings.dongilState.DISABLED": "Chưa cấu hình",
     "settings.dongilState.CONNECTING": "Đang kết nối",
     "settings.dongilState.ONLINE": "Đã kết nối",
@@ -2094,7 +2148,8 @@ const translations = {
     "settings.stopDelayDescription":
       "Sau khi nhận tín hiệu STOP từ PLC, line vẫn vận hành trong thời gian này rồi mới dừng camera và các ngõ ra PLC. Mặc định: 5 giây.",
     "settings.stopDelaySeconds": "Thời gian chờ sau tín hiệu STOP (giây)",
-    "settings.stopDelayHint": "Cho phép từ 0 đến 300 giây. Chọn 0 để dừng ngay.",
+    "settings.stopDelayHint":
+      "Cho phép từ 0 đến 300 giây. Chọn 0 để dừng ngay.",
     "settings.stopDelaySave": "Lưu thời gian chờ dừng",
     "settings.stopDelaySaving": "Đang lưu thời gian chờ dừng PLC...",
     "settings.stopDelaySaved": "Đã lưu thời gian chờ dừng PLC.",
@@ -2219,12 +2274,14 @@ const translations = {
     "operationReports.sessions": "Session vận hành đã lưu",
     "operationReports.sessionsLoading": "Đang tải kết quả vận hành thực tế...",
     "operationReports.sessionsEmpty": "Chưa có kết quả vận hành thực tế nào.",
-    "operationReports.sessionsLoadError": "Không thể tải kết quả vận hành thực tế.",
+    "operationReports.sessionsLoadError":
+      "Không thể tải kết quả vận hành thực tế.",
     "operationReports.sessionMeta": "Người vận hành {actor} lúc {createdAt}",
     "operationReports.sessionId": "Session: {sessionId}",
     "operationReports.totalResults": "Lần chốt kết quả",
     "operationReports.captureMeta": "Chốt lúc {capturedAt}",
-    "operationReports.imageUnavailable": "Không có ảnh camera đã lưu cho kết quả này.",
+    "operationReports.imageUnavailable":
+      "Không có ảnh camera đã lưu cho kết quả này.",
     "reports.testSessions": "Session test đã lưu",
     "reports.testSessionsLoading": "Đang tải session test đã lưu...",
     "reports.testSessionsEmpty": "Chưa có session test nào được lưu.",
@@ -2941,13 +2998,15 @@ const translationOverrides: Record<Language, Record<string, string>> = {
     "settings.trainingImagesPolicyValue.all": "OK and NG",
     "settings.trainingImagesPolicyValue.ok": "OK only",
     "settings.trainingImagesPolicyValue.ng": "NG only",
-    "settings.trainingImagesUnknownExcluded": "UNKNOWN results are never saved.",
+    "settings.trainingImagesUnknownExcluded":
+      "UNKNOWN results are never saved.",
     "settings.trainingImagesFolder": "Training folder",
     "settings.trainingImagesFolderHint":
       "Files are saved as BMP in <product code>\\<YYYY-MM-DD>.",
     "settings.trainingImagesFolderRequired":
       "Choose a training folder before enabling training capture.",
-    "settings.trainingImagesFolderPickError": "Cannot choose the training folder.",
+    "settings.trainingImagesFolderPickError":
+      "Cannot choose the training folder.",
     "settings.trainingImagesSave": "Save training settings",
     "settings.trainingImagesSaving": "Saving training settings...",
     "settings.trainingImagesSaved": "Training settings saved.",
@@ -2956,6 +3015,10 @@ const translationOverrides: Record<Language, Record<string, string>> = {
       "Cannot load NG display settings. Current display behavior is being used.",
     "operator.productChangedSessionRestarted":
       "Product changed. Old session saved and new session started.",
+    "operator.productChangedWaitingStart":
+      "Product changed. Old session saved; waiting for the PLC START signal.",
+    "operator.productChangedSessionStarted":
+      "PLC START received. The new product session has started.",
     "settings.terminalTitle": "Service terminal",
     "settings.terminalDescription":
       "Developer-only service log view. The separate terminal window is opened only from this setting or the F12 x5 shortcut.",
@@ -3420,7 +3483,8 @@ const translationOverrides: Record<Language, Record<string, string>> = {
     "settings.trainingImagesPolicyValue.all": "OK và NG",
     "settings.trainingImagesPolicyValue.ok": "Chỉ OK",
     "settings.trainingImagesPolicyValue.ng": "Chỉ NG",
-    "settings.trainingImagesUnknownExcluded": "Kết quả UNKNOWN sẽ không bao giờ được lưu.",
+    "settings.trainingImagesUnknownExcluded":
+      "Kết quả UNKNOWN sẽ không bao giờ được lưu.",
     "settings.trainingImagesFolder": "Thư mục training",
     "settings.trainingImagesFolderHint":
       "Ảnh BMP được lưu theo <mã hàng>\\<YYYY-MM-DD>.",
@@ -3436,6 +3500,10 @@ const translationOverrides: Record<Language, Record<string, string>> = {
       "Không thể tải cài đặt hiển thị NG. Ứng dụng đang dùng cách hiển thị hiện tại.",
     "operator.productChangedSessionRestarted":
       "Đã đổi mã hàng. Session cũ đã được lưu và session mới đã bắt đầu.",
+    "operator.productChangedWaitingStart":
+      "Đã đổi mã hàng và lưu session cũ. Đang chờ tín hiệu START từ PLC.",
+    "operator.productChangedSessionStarted":
+      "Đã nhận tín hiệu START. Session của mã hàng mới đã bắt đầu.",
     "settings.terminalTitle": "Terminal dịch vụ",
     "settings.terminalDescription":
       "Khu vực log dịch vụ chỉ dành cho dev. Cửa sổ terminal riêng chỉ mở từ setting này hoặc phím tắt F12 x5.",

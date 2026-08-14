@@ -1,9 +1,17 @@
 export type DongilRegistration = {
   machineId: string;
-  registrationStatus: 'ACTIVE' | 'INACTIVE';
+  registrationStatus: 'PENDING' | 'APPROVED' | 'REJECTED';
   assignedMachineTypeCode: string;
-  credential: string | null;
+  registrationToken: string | null;
   requiresCredentialRecovery?: boolean;
+};
+
+export type DongilRegistrationStatus = {
+  machineId: string;
+  registrationStatus: 'PENDING' | 'APPROVED' | 'REJECTED';
+  assignedMachineTypeCode: string;
+  rejectionReason: string | null;
+  credentialReady: boolean;
 };
 
 export type DongilMachineAssignment = {
@@ -77,6 +85,17 @@ export class DongilApiClient {
     });
   }
 
+  getRegistrationStatus(machineId: string, registrationToken: string) {
+    return this.request<DongilRegistrationStatus>(
+      '/api/v1/machines/registration-status',
+      {
+        method: 'POST',
+        body: JSON.stringify({ machineId, registrationToken }),
+        headers: { 'content-type': 'application/json' },
+      },
+    );
+  }
+
   getCurrentConfig(machineId: string, credential: string) {
     return this.request<DongilMachineConfig>('/api/v1/machine-config/current', {
       method: 'GET',
@@ -92,14 +111,17 @@ export class DongilApiClient {
       items: DongilResultPayload[];
     },
   ) {
-    return this.request<DongilBatchResponse>('/api/v1/inspection-results/batches', {
-      method: 'POST',
-      body: JSON.stringify(payload),
-      headers: {
-        ...this.machineHeaders(machineId, credential),
-        'content-type': 'application/json',
+    return this.request<DongilBatchResponse>(
+      '/api/v1/inspection-results/batches',
+      {
+        method: 'POST',
+        body: JSON.stringify(payload),
+        headers: {
+          ...this.machineHeaders(machineId, credential),
+          'content-type': 'application/json',
+        },
       },
-    });
+    );
   }
 
   sendWashingBatch(
@@ -135,12 +157,15 @@ export class DongilApiClient {
       ...init,
       signal: AbortSignal.timeout(8_000),
     });
-    const envelope = (await response.json().catch(() => null)) as ApiEnvelope<T> | null;
+    const envelope = (await response
+      .json()
+      .catch(() => null)) as ApiEnvelope<T> | null;
     if (!response.ok || !envelope || envelope.data === null) {
       throw new DongilApiError(
         response.status,
         envelope?.error?.code || 'DONGIL_REQUEST_FAILED',
-        envelope?.message || `Dongil Server request failed with HTTP ${response.status}`,
+        envelope?.message ||
+          `Dongil Server request failed with HTTP ${response.status}`,
       );
     }
     return envelope.data;

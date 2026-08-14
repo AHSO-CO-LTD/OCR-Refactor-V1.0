@@ -125,8 +125,8 @@ Mỗi key có tên, address, trạng thái bật/tắt và một trong ba thao t
 1. Nhận `stopTrigger` từ PLC và giữ nguyên session Line hiện tại.
 2. Dừng OCR, ngắt kết nối camera.
 3. Tắt đèn trạng thái, ghi `cameraLight=false`, sau đó `cameraPower=false`.
-4. Hiển thị modal toàn ứng dụng và chờ `startTrigger`. Role `operator` bị khóa và không thể đóng modal; `dev`, `admin`, `engineer` có thể đóng thông báo để tiếp tục cấu hình ứng dụng nhưng không tự resume flow máy.
-5. Khi nhận `startTrigger`: khôi phục `Auto + Live camera + Realtime AI`, giữ nguyên `jobId` và bộ đếm, bật nguồn camera, bật đèn, kết nối lại và yêu cầu frame thực tế.
+4. Hiển thị modal toàn ứng dụng và chờ `startTrigger`. Role `operator` bị khóa và không thể đóng modal; `dev`, `admin`, `engineer` có thể đóng thông báo để tiếp tục cấu hình ứng dụng nhưng không tự resume flow máy. Trên màn vận hành, toàn bộ nút điều khiển và phần chỉnh số lượng pack bị khóa; chỉ dropdown chuyển mã sản phẩm còn thao tác được.
+5. Khi nhận `startTrigger`: ngắt ngay khoảng chờ 5 giây trước khi tắt nguồn nếu chuỗi STOP vẫn đang chạy, sau đó khôi phục `Auto + Live camera + Realtime AI`, mặc định giữ nguyên `jobId` và bộ đếm, bật nguồn camera, bật đèn, kết nối lại và yêu cầu frame thực tế. Live View phải chuyển ngay sang trạng thái **Đang kết nối camera** trong toàn bộ `resuming/waiting_camera`, không hiển thị cảnh báo mất kết nối cũ trong lúc backend đang chủ động thử lại. Nếu người vận hành đã đổi mã trong lúc STOP thì mở session mới cho mã đang chờ thay vì dùng `jobId` cũ.
 6. Có một frame thật thì tự tiếp tục vận hành và bật đèn vàng. Trong lúc camera chưa sẵn sàng, modal có thể đóng để người dùng thử **Kết nối lại** trên Live View; backend vẫn tự động thử lại cho đến khi thành công hoặc nhận tín hiệu dừng/shutdown.
 
 ## Ngắt kết nối camera thủ công
@@ -175,13 +175,15 @@ OK từ `captureTrigger` phát `okResult` một lần. NG chỉ phát `errorPuls
 7. ROI có kết quả `UNKNOWN` không hiển thị trên overlay của Line hoặc Line Test.
 8. Khi đổi tài khoản, session đang `running` của cùng sản phẩm được giữ nguyên `jobId`, bộ đếm và người bắt đầu. Tài khoản mới gắn lại vào session và chỉ được ghi là người kết thúc khi chính tài khoản đó dừng session.
 9. `operatorId` là người bắt đầu session; `endedById` là người kết thúc. Session lịch sử được backfill người kết thúc bằng người bắt đầu và đánh dấu `endedByInferred=true`.
-10. Sau tín hiệu dừng máy, runtime cấp nguồn/kết nối lại camera và tiếp tục thử tự động kể cả sau mốc cảnh báo 60 giây. Chỉ cần nhận thành công một frame thật thì trạng thái chuyển sang `running`; tín hiệu dừng mới hoặc shutdown sẽ hủy việc chờ frame.
+10. Sau tín hiệu dừng máy, runtime cấp nguồn/kết nối lại camera và tiếp tục thử tự động kể cả sau mốc cảnh báo 60 giây. Chỉ cần nhận thành công một frame thật thì trạng thái chuyển sang `running`; tín hiệu dừng mới phải được chấp nhận cả trong `resuming/waiting_camera`, hủy việc chờ frame và đưa máy trở lại `idle_machine_stop`. Shutdown cũng hủy việc chờ frame.
 
 ## Vòng đời session Line
 
-- Đổi mã sản phẩm: kết thúc session hiện tại với `product_change`, sau đó mở session mới.
+- Đổi mã sản phẩm trong lúc máy đang chạy: kết thúc session hiện tại với `product_change`, sau đó mở session mới và tiếp tục flow hiện hành.
+- Đổi mã sản phẩm trong lúc đang chờ PLC START: kết thúc session hiện tại với `product_change`, giữ nguyên `idle_machine_stop` và màn STOP, chỉ ghi nhận mã mới đang chờ. Không gọi start/stop machine, không kết nối camera và không chạy model. Khi nhận `startTrigger`, session mã mới được mở trước khi camera/model tiếp tục vận hành.
+- Reset bộ đếm: kết thúc session đếm hiện tại và mở ngay session mới cho cùng mã sản phẩm; không gọi dừng machine runtime, không ngắt PLC/camera và không làm gián đoạn việc nhận trigger.
 - Nút dừng Line: kết thúc session với `line_stop`.
-- PLC dừng máy: tạm nghỉ nhưng giữ nguyên session; PLC Start tiếp tục cùng `jobId` sau khi camera trả được một frame thật.
+- PLC dừng máy: tạm nghỉ nhưng giữ nguyên session; PLC Start tiếp tục cùng `jobId` sau khi camera trả được một frame thật, trừ trường hợp mã sản phẩm đã được đổi trong lúc STOP.
 - Đóng ứng dụng: kết thúc session với `app_shutdown` trước khi tắt đầu ra PLC.
 
 ## Đóng ứng dụng

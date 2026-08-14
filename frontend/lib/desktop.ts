@@ -125,6 +125,10 @@ export type DesktopExitMode = "app-and-hardware" | "app-only";
 
 export type DongilConnectionState =
   | "DISABLED"
+  | "REGISTRATION_PENDING"
+  | "REGISTRATION_APPROVED"
+  | "REGISTRATION_REJECTED"
+  | "NEEDS_CREDENTIAL_RECOVERY"
   | "CONNECTING"
   | "ONLINE"
   | "RETRYING"
@@ -138,6 +142,8 @@ export type DesktopDongilStatus = {
   machineId: string | null;
   machineTypeCode: string | null;
   assignedMachineTypeCode: string | null;
+  registrationStatus: "PENDING" | "APPROVED" | "REJECTED" | null;
+  autoConnectEnabled: boolean;
   licenseStatus: string | null;
   operationalStatus: string;
   runtimeStatus: string;
@@ -146,7 +152,11 @@ export type DesktopDongilStatus = {
   lastHeartbeatAckAt: string | null;
   lastRegisteredAt: string | null;
   lastConfigSyncAt: string | null;
-  lastError: { code?: string | null; message?: string | null; at?: string | null } | null;
+  lastError: {
+    code?: string | null;
+    message?: string | null;
+    at?: string | null;
+  } | null;
 };
 
 export type DesktopShutdownStageId =
@@ -198,12 +208,37 @@ export type DesktopBridge = {
     settings: DesktopTestStorageSettings,
   ): Promise<DesktopTestStorageSettings>;
   testDongilServer(
-    serverUrl: string,
-  ): Promise<{ data?: { serverUrl?: string; reachable?: boolean; latencyMs?: number } }>;
+    serverIp: string,
+  ): Promise<{
+    data?: { serverUrl?: string; reachable?: boolean; latencyMs?: number };
+  }>;
   saveDongilSettings(settings: {
     accessToken: string;
+    serverIp: string;
+  }): Promise<{
+    serverIp: string;
     serverUrl: string;
-  }): Promise<{ serverUrl: string; status: { data?: DesktopDongilStatus } }>;
+    status: { data?: DesktopDongilStatus };
+  }>;
+  requestDongilRegistration(
+    accessToken: string,
+  ): Promise<{
+    data?: {
+      state?: DongilConnectionState;
+      registrationStatus?: "PENDING" | "APPROVED" | "REJECTED";
+      assignedMachineTypeCode?: string;
+    };
+  }>;
+  refreshDongilRegistration(): Promise<{
+    data?: {
+      state?: DongilConnectionState;
+      registrationStatus?: "PENDING" | "APPROVED" | "REJECTED";
+      rejectionReason?: string | null;
+    };
+  }>;
+  connectDongilServer(
+    accessToken: string,
+  ): Promise<{ data?: { state?: string; assignedMachineTypeCode?: string } }>;
   selectFolder(): Promise<{ canceled: boolean; folderPath: string | null }>;
   selectModelFile(): Promise<{ canceled: boolean; filePath: string | null }>;
   onTerminalLog(callback: (message: string) => void): () => void;

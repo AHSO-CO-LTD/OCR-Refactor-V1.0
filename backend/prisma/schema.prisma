@@ -277,6 +277,8 @@ model DongilSyncConfiguration {
   machineTypeCode         String   @default("WASHING_MACHINE")
   licenseStatus           String
   assignedMachineTypeCode String?
+  registrationStatus      String?
+  autoConnectEnabled      Boolean  @default(false)
   lastRegisteredAt        DateTime?
   lastConfigSyncAt        DateTime?
   createdAt               DateTime @default(now())

@@ -38,12 +38,13 @@ Do not set `DONGIL_SERVER_URL` to `localhost` unless Dongil Server actually runs
 
 DEV/ADMIN can also open **Settings → General → Dongil Server** to:
 
-- enter `http://<server-ip>:3979`;
+- enter only `<server-ip>`; Electron derives `http://<server-ip>:3979`;
 - test `/api/v1/health` without changing the saved value;
-- confirm Save and connect immediately without restarting the app;
+- save the server configuration without registering or connecting;
+- send a registration request, refresh its state immediately, and explicitly connect only after server approval;
 - view machine ID/type, connection state, runtime state, pending outbox count, last heartbeat and last error.
 
-The saved URL is written atomically to the same development or ProgramData `.env`. The renderer never receives the machine credential. All signed-in roles can see the status, but Electron re-validates an active DEV/ADMIN session before changing the URL.
+The saved URL is written atomically to the same development or ProgramData `.env`. Machine ID, `WASHING_MACHINE` type and dongle license status are derived locally and remain visible before the server is configured or while it is offline. The renderer never receives the machine credential. All signed-in roles can see the status, but Electron re-validates an active DEV/ADMIN session before changing the URL.
 
 ## Registration and credential
 
@@ -64,7 +65,9 @@ Payload:
 }
 ```
 
-The returned credential is encrypted by Electron `safeStorage` and stored under Electron user data. It is passed to the local backend in memory at startup and is never stored in the OCR PostgreSQL configuration table.
+The server creates a `PENDING` request and returns a registration token. Electron encrypts it with `safeStorage`; PostgreSQL stores only non-secret registration state. The local app checks approval every 10 seconds and also provides **Cập nhật trạng thái đăng ký ngay**. Neither action opens WebSocket.
+
+DEV/ADMIN approves or rejects the request on Dongil Server. Approval activates the same token as the machine credential. The first connection still requires the local user to press **Kết nối server**. After that first explicit connection succeeds, later application launches may reconnect automatically.
 
 If the one-time credential is lost after registration, automatic registration cannot reveal it again. Use the controlled credential rotation/recovery flow on Dongil Server.
 
@@ -141,22 +144,24 @@ Local tables:
 
 ## One-machine pilot checklist
 
-1. Open Settings → General → Dongil Server, test `http://192.168.3.4:3979`, then Save and connect.
-2. Start the local application with a valid physical dongle.
-3. Confirm the machine appears on Dongil Server with the expected `machine_id`.
-4. Assign the correct washing-machine product/profile/model tuple on the server.
-5. Restart or wait for the next 30-second bootstrap/config refresh.
-6. Run one known OK and one known NG PLC cycle.
-7. Confirm the local outbox reaches `SENT`.
-8. Confirm server raw results show exactly one OK and one NG, and washing statistics match the known ROI OK/NG quantities.
-9. Disconnect LAN, run additional cycles, reconnect, and confirm offline results replay without duplicates.
-10. Close the local app normally and confirm `SHUTDOWN`; restart, then interrupt the LAN and confirm `CONNECTION_LOST` followed by automatic `ONLINE` recovery.
+1. Open Settings → General → Dongil Server, enter and test `192.168.3.4`, then save the configuration.
+2. Start the local application with a valid physical dongle and press **Gửi yêu cầu đăng ký**.
+3. Confirm the machine appears in the pending-registration table on Dongil Server with the expected `machine_id`.
+4. Approve it on the server, then wait up to 10 seconds or press **Cập nhật trạng thái đăng ký ngay** on local.
+5. Press **Kết nối server** on local; approval alone must not connect automatically.
+6. Assign the correct washing-machine product/profile/model tuple on the server.
+7. Run one known OK and one known NG PLC cycle.
+8. Confirm the local outbox reaches `SENT`.
+9. Confirm server raw results show exactly one OK and one NG, and washing statistics match the known ROI OK/NG quantities.
+10. Disconnect LAN, run additional cycles, reconnect, and confirm offline results replay without duplicates.
+11. Close the local app normally and confirm `SHUTDOWN`; restart, then interrupt the LAN and confirm `CONNECTION_LOST` followed by automatic `ONLINE` recovery.
 
 ## Diagnostics
 
 Electron terminal logs use the `[dongil]` prefix and never include the credential. Local outbox error fields contain sanitized server error codes/messages. Important recovery states:
 
-- `NEEDS_CREDENTIAL_RECOVERY`;
+- `REGISTRATION_PENDING`, `REGISTRATION_APPROVED`, `REGISTRATION_REJECTED`;
+- missing/lost credential for an already approved machine requires controlled recovery on Dongil Server; public registration never exposes the existing secret;
 - `MACHINE_CONFIG_NOT_AVAILABLE`;
 - `BLOCKED_CONFIG`;
 - `DONGIL_SERVER_UNAVAILABLE`.
