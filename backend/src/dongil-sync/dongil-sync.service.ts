@@ -78,6 +78,8 @@ export class DongilSyncService implements OnModuleInit, OnModuleDestroy {
       localResultId: string;
       productCode: string;
       result: 'OK' | 'NG';
+      okCount: number;
+      ngCount: number;
       localSessionId: string;
       inspectedAt: Date;
     },
@@ -92,6 +94,8 @@ export class DongilSyncService implements OnModuleInit, OnModuleDestroy {
         profileVersion: assignment?.profileVersion,
         modelVersion: assignment?.modelVersion,
         result: input.result,
+        okCount: input.okCount,
+        ngCount: input.ngCount,
         localSessionId: input.localSessionId,
         inspectedAt: input.inspectedAt,
         status: assignment
@@ -348,38 +352,81 @@ export class DongilSyncService implements OnModuleInit, OnModuleDestroy {
         where: { id: { in: ids } },
         data: { status: DongilSyncOutboxStatus.SENDING },
       });
-      try {
-        const response = await new DongilApiClient(this.runtime.serverUrl).sendBatch(
-          this.runtime.machineId,
-          this.runtime.credential,
-          {
+      const client = new DongilApiClient(this.runtime.serverUrl);
+      const washingRows = rows.filter((row) => row.okCount !== null && row.ngCount !== null);
+      const legacyRows = rows.filter((row) => row.okCount === null || row.ngCount === null);
+      if (washingRows.length > 0) {
+        const keepRunning = await this.sendOutboxGroup(washingRows, () =>
+          client.sendWashingBatch(this.runtime!.machineId, this.runtime!.credential, {
             localBatchId: randomUUID(),
-            items: rows.map((row) => ({
-              localResultId: row.localResultId,
-              productCode: row.productCode,
-              profileVersion: row.profileVersion!,
-              modelVersion: row.modelVersion!,
-              result: row.result === 'OK' ? 'OK' : 'NG',
-              localSessionId: row.localSessionId ?? undefined,
-              inspectedAt: row.inspectedAt.toISOString(),
+            items: washingRows.map((row) => ({
+              ...this.toResultPayload(row),
+              okCount: row.okCount!,
+              ngCount: row.ngCount!,
             })),
-          },
+          }),
         );
-        const outcomes = new Map(response.items.map((item) => [item.localResultId, item]));
-        for (const row of rows) {
-          await this.applyOutcome(row.id, row.attemptCount, outcomes.get(row.localResultId));
-        }
-      } catch (error) {
-        const message = error instanceof Error ? error.message : 'Dongil batch request failed';
-        const code = error instanceof DongilApiError ? error.code : 'DONGIL_SERVER_UNAVAILABLE';
-        await this.markBatchFailed(ids, rows[0]?.attemptCount ?? 0, code, message);
-        if (error instanceof DongilApiError && [401, 403].includes(error.status)) {
-          this.disconnectSocket();
-          this.runtime = null;
-        }
+        if (!keepRunning) return;
+      }
+      if (legacyRows.length > 0) {
+        await this.sendOutboxGroup(legacyRows, () =>
+          client.sendBatch(this.runtime!.machineId, this.runtime!.credential, {
+            localBatchId: randomUUID(),
+            items: legacyRows.map((row) => this.toResultPayload(row)),
+          }),
+        );
       }
     } finally {
       this.workerRunning = false;
+    }
+  }
+
+  private toResultPayload(row: {
+    localResultId: string;
+    productCode: string;
+    profileVersion: number | null;
+    modelVersion: string | null;
+    result: string;
+    localSessionId: string | null;
+    inspectedAt: Date;
+  }) {
+    return {
+      localResultId: row.localResultId,
+      productCode: row.productCode,
+      profileVersion: row.profileVersion!,
+      modelVersion: row.modelVersion!,
+      result: row.result === 'OK' ? ('OK' as const) : ('NG' as const),
+      localSessionId: row.localSessionId ?? undefined,
+      inspectedAt: row.inspectedAt.toISOString(),
+    };
+  }
+
+  private async sendOutboxGroup(
+    rows: Array<{ id: string; localResultId: string; attemptCount: number }>,
+    send: () => Promise<{ items: DongilBatchItem[] }>,
+  ): Promise<boolean> {
+    try {
+      const response = await send();
+      const outcomes = new Map(response.items.map((item) => [item.localResultId, item]));
+      for (const row of rows) {
+        await this.applyOutcome(row.id, row.attemptCount, outcomes.get(row.localResultId));
+      }
+      return true;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Dongil batch request failed';
+      const code = error instanceof DongilApiError ? error.code : 'DONGIL_SERVER_UNAVAILABLE';
+      await this.markBatchFailed(
+        rows.map((row) => row.id),
+        rows[0]?.attemptCount ?? 0,
+        code,
+        message,
+      );
+      if (error instanceof DongilApiError && [401, 403].includes(error.status)) {
+        this.disconnectSocket();
+        this.runtime = null;
+        return false;
+      }
+      return true;
     }
   }
 

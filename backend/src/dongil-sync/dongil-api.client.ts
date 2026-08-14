@@ -34,6 +34,16 @@ export type DongilBatchResponse = {
   items: DongilBatchItem[];
 };
 
+type DongilResultPayload = {
+  localResultId: string;
+  productCode: string;
+  profileVersion: number;
+  modelVersion: string;
+  result: 'OK' | 'NG';
+  localSessionId?: string;
+  inspectedAt: string;
+};
+
 type ApiEnvelope<T> = {
   status: number;
   data: T | null;
@@ -79,15 +89,7 @@ export class DongilApiClient {
     credential: string,
     payload: {
       localBatchId: string;
-      items: Array<{
-        localResultId: string;
-        productCode: string;
-        profileVersion: number;
-        modelVersion: string;
-        result: 'OK' | 'NG';
-        localSessionId?: string;
-        inspectedAt: string;
-      }>;
+      items: DongilResultPayload[];
     },
   ) {
     return this.request<DongilBatchResponse>('/api/v1/inspection-results/batches', {
@@ -98,6 +100,27 @@ export class DongilApiClient {
         'content-type': 'application/json',
       },
     });
+  }
+
+  sendWashingBatch(
+    machineId: string,
+    credential: string,
+    payload: {
+      localBatchId: string;
+      items: Array<DongilResultPayload & { okCount: number; ngCount: number }>;
+    },
+  ) {
+    return this.request<DongilBatchResponse>(
+      '/api/v1/machine-types/washing/inspection-results/batches',
+      {
+        method: 'POST',
+        body: JSON.stringify(payload),
+        headers: {
+          ...this.machineHeaders(machineId, credential),
+          'content-type': 'application/json',
+        },
+      },
+    );
   }
 
   private machineHeaders(machineId: string, credential: string) {

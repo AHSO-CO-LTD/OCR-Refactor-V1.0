@@ -2,7 +2,7 @@
 
 ## Purpose
 
-This local washing-machine application is the first Dongil Server machine client. Dongil Server receives machine presence and aggregate production OK/NG results only. Camera, PLC, OCR, Device Tool, images, ROI details, and NG text remain local.
+This local washing-machine application is the first Dongil Server machine client. Dongil Server receives machine presence, the aggregate production OK/NG verdict, and only the per-scan OK/NG quantity totals required for washing statistics. Camera, PLC, OCR, Device Tool, images, individual ROI details, and NG text remain local.
 
 ## Local authorization and identity
 
@@ -90,12 +90,21 @@ One accepted PLC cycle has one `plcCaptureId`. That ID becomes `localResultId`.
 ```text
 aggregate ROI results
 -> final OK or NG
+-> count known ROI results as okCount + ngCount; exclude UNKNOWN
 -> transaction: InspectionLog rows + DongilSyncOutbox row
--> background batch send, max 500
+-> washing-specific background batch send, max 500
 -> ACCEPTED or REPLAYED marks SENT
 ```
 
-ROI rows are not uploaded. `UNKNOWN` is not a completed result and is not queued.
+The washing sender uses:
+
+```http
+POST /api/v1/machine-types/washing/inspection-results/batches
+```
+
+Each item contains the shared scan verdict plus `okCount` and `ngCount`. ROI rows are not uploaded. `UNKNOWN` is not included in either quantity and an aggregate `UNKNOWN` scan is not queued.
+
+Outbox rows created before the quantity migration retain null counts and continue through the generic batch endpoint. The client does not invent missing historical quantities.
 
 The worker runs every 5 seconds. A server/network outage does not block PLC or OCR. Retry uses bounded exponential backoff. Missing assignment metadata creates `BLOCKED_CONFIG` instead of sending invented versions.
 
@@ -116,7 +125,7 @@ Local tables:
 
 - `DongilSyncConfiguration`: non-secret identity/configuration state;
 - `DongilProductAssignment`: last successful exact server assignments;
-- `DongilSyncOutbox`: immutable result payload and delivery state.
+- `DongilSyncOutbox`: immutable result payload, washing OK/NG counts and delivery state.
 
 ## One-machine pilot checklist
 
@@ -127,7 +136,7 @@ Local tables:
 5. Restart or wait for the next 30-second bootstrap/config refresh.
 6. Run one known OK and one known NG PLC cycle.
 7. Confirm the local outbox reaches `SENT`.
-8. Confirm server raw results and summary show exactly one OK and one NG.
+8. Confirm server raw results show exactly one OK and one NG, and washing statistics match the known ROI OK/NG quantities.
 9. Disconnect LAN, run additional cycles, reconnect, and confirm offline results replay without duplicates.
 
 ## Diagnostics

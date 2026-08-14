@@ -622,6 +622,7 @@ POST /inspections/dev-simulate-image
 - Runs the existing OCR and aggregate matching rules.
 - A completed `OK` or `NG` creates normal inspection logs and a Dongil outbox record.
 - `UNKNOWN` is not queued, and this endpoint never emits a PLC result pulse.
+- Completed OK/NG simulations use the same Dongil washing outbox path as real PLC captures, including per-scan `okCount` and `ngCount` totals while excluding `UNKNOWN` positions.
 
 ### Get Current Inspection Status
 

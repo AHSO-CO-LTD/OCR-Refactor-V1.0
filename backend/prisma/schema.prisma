@@ -298,6 +298,8 @@ model DongilSyncOutbox {
   profileVersion   Int?
   modelVersion     String?
   result           InspectionResult
+  okCount          Int?
+  ngCount          Int?
   localSessionId   String?
   inspectedAt      DateTime
   status           DongilSyncOutboxStatus  @default(PENDING)

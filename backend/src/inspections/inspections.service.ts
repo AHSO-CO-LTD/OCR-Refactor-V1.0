@@ -1263,6 +1263,8 @@ export class InspectionsService {
     ) {
       throw new Error('Completed PLC capture did not resolve to OK or NG');
     }
+    const okCount = logs.filter((log) => log.result === InspectionResult.OK).length;
+    const ngCount = logs.filter((log) => log.result === InspectionResult.NG).length;
 
     const dongilSync = this.dongilSync;
     if (!dongilSync) {
@@ -1276,6 +1278,8 @@ export class InspectionsService {
         localResultId: plcCaptureId,
         productCode: product.code,
         result: aggregateResult,
+        okCount,
+        ngCount,
         localSessionId: jobId,
         inspectedAt: capturedAt,
       });
