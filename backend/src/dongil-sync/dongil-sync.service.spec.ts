@@ -24,6 +24,8 @@ describe('DongilSyncService capture outbox', () => {
         productCode: 'IS-35R',
         profileVersion: 3,
         modelVersion: 'washing-v7',
+        okCount: 4,
+        ngCount: 1,
         status: DongilSyncOutboxStatus.PENDING,
         lastErrorCode: null,
       }),
@@ -56,6 +58,8 @@ function captureInput() {
     localResultId: 'result-1',
     productCode: 'IS-35R',
     result: 'OK' as const,
+    okCount: 4,
+    ngCount: 1,
     localSessionId: 'session-1',
     inspectedAt: new Date('2026-08-13T01:02:03.000Z'),
   };
