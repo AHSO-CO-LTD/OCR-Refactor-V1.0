@@ -93,7 +93,7 @@ export class InspectionsController {
     if (user.role !== 'dev') {
       throw new ForbiddenException('Only dev can simulate a production image');
     }
-    return this.inspectionsService.simulateImage(dto);
+    return this.inspectionsService.simulateImage(dto, user);
   }
 
   @ApiOperation({

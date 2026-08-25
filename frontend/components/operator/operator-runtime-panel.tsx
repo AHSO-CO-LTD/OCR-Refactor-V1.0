@@ -1002,11 +1002,6 @@ export function OperatorRuntimePanel() {
     setAnimationState("CHECKING");
 
     try {
-      const inspection = await beginInspectionSession(
-        validated.accessToken,
-        validated.product.id,
-      );
-      currentJobIdRef.current = inspection.data.jobId;
       const imageBase64 = await readImageFileAsDataUrl(file);
       const crops = await cropProductRois(imageBase64, validated.product);
       setCapturedPreviewImageSrc(imageBase64);
@@ -1476,8 +1471,7 @@ export function OperatorRuntimePanel() {
                   disabled={
                     loadingProducts ||
                     scanRunning ||
-                    changingProduct ||
-                    (machineControlsLocked && !machineStopActive)
+                    changingProduct
                   }
                   className="operator-line-form-control h-12 border-[#9db7d8] bg-white px-4 text-xl font-semibold"
                   menuListClassName="py-1"
@@ -1614,7 +1608,6 @@ export function OperatorRuntimePanel() {
               {canSimulateDongilImage ? (
                 <DongilImageSimulationControls
                   disabled={
-                    machineControlsLocked ||
                     runtimeActionsDisabled ||
                     scanRunning
                   }

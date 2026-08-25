@@ -4,8 +4,8 @@ import {
   Injectable,
   Logger,
   NotFoundException,
-  Optional,
 } from '@nestjs/common';
+import { ModuleRef } from '@nestjs/core';
 import { randomUUID } from 'crypto';
 import { mkdir, unlink, writeFile } from 'fs/promises';
 import { basename, dirname, extname, join, resolve } from 'path';
@@ -100,7 +100,7 @@ export class InspectionsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly deviceToolService: DeviceToolService,
-    @Optional() private readonly dongilSync?: DongilSyncService,
+    private readonly moduleRef?: ModuleRef,
   ) {}
 
   async startInspection(
@@ -661,87 +661,98 @@ export class InspectionsService {
     };
   }
 
-  async simulateImage(dto: SimulateInspectionImageDto) {
+  async simulateImage(
+    dto: SimulateInspectionImageDto,
+    user: { id: string; username: string; role: string },
+  ) {
     const product = await this.getActiveProductForScan(dto.productId);
-    const job = await this.prisma.inspectionJob.findFirst({
-      where: { status: InspectionStatus.running },
-      orderBy: { createdAt: 'desc' },
+    const lineResultSettings = await this.ensureLineResultSettings();
+    // A simulation is deliberately independent from a live camera session.
+    const job = await this.prisma.inspectionJob.create({
+      data: {
+        productId: product.id,
+        operatorId: user.id,
+        status: InspectionStatus.pending,
+        startedAt: new Date(),
+        note: 'DEV_DONGIL_IMAGE_SIMULATION',
+        resultSaveFolderPath: lineResultSettings.saveFolderPath ?? null,
+        resultSavePolicy: lineResultSettings.savePolicy ?? null,
+      },
     });
 
-    if (!job || job.productId !== product.id) {
-      throw new BadRequestException(
-        'A running inspection job for the selected product is required',
+    try {
+      const scan = await this.deviceToolService.inspectProductImage({
+        modelPath: product.modelPath!,
+        crops: dto.crops,
+        roiRegions: product.roiRegions.map((region) => ({
+          index: region.index,
+          x: region.x,
+          y: region.y,
+          width: region.width,
+          height: region.height,
+          rotation: Number(region.rotation),
+        })),
+        thresholdAccept: Number(product.thresholdAccept),
+        thresholdMns: Number(product.thresholdMns),
+        rowThreshold: product.rowThreshold,
+        rotateImageClockwise: product.rotateTestImageClockwise,
+      });
+      const result = resolveInspectionResults(
+        scan.results,
+        product.code.trim().toUpperCase(),
+        product.ocrAcceptedVariants,
       );
-    }
 
-    const scan = await this.deviceToolService.inspectProductImage({
-      modelPath: product.modelPath!,
-      crops: dto.crops,
-      roiRegions: product.roiRegions.map((region) => ({
-        index: region.index,
-        x: region.x,
-        y: region.y,
-        width: region.width,
-        height: region.height,
-        rotation: Number(region.rotation),
-      })),
-      thresholdAccept: Number(product.thresholdAccept),
-      thresholdMns: Number(product.thresholdMns),
-      rowThreshold: product.rowThreshold,
-      rotateImageClockwise: product.rotateTestImageClockwise,
-    });
-    const result = resolveInspectionResults(
-      scan.results,
-      product.code.trim().toUpperCase(),
-      product.ocrAcceptedVariants,
-    );
+      if (result === InspectionResult.OK || result === InspectionResult.NG) {
+        const capturedAt = new Date();
+        const imagePath = await this.savePlcCaptureFrame({
+          job,
+          productCode: product.code,
+          imageBase64: dto.originalImageBase64,
+          capturedAt,
+        });
+        const simulatedScan = {
+          ...scan,
+          processedRoiCrops: dto.crops,
+        };
 
-    if (result !== InspectionResult.OK && result !== InspectionResult.NG) {
+        await this.persistPlcCaptureLogs({
+          jobId: job.id,
+          product,
+          scan: simulatedScan,
+          imagePath,
+          capturedAt,
+        });
+        await this.saveTrainingRoiImages({
+          capturedAt,
+          product,
+          roiRegions: product.roiRegions,
+          scan: {
+            processedRoiCrops: dto.crops,
+            results: scan.results,
+          },
+        });
+      }
+
+      await this.prisma.inspectionJob.update({
+        where: { id: job.id },
+        data: { status: InspectionStatus.completed, stoppedAt: new Date() },
+      });
+
       return {
         data: {
-          latched: false,
+          latched: result === InspectionResult.OK || result === InspectionResult.NG,
           result,
           inspection: await this.buildInspectionState(job.id),
         },
       };
+    } catch (error) {
+      await this.prisma.inspectionJob.update({
+        where: { id: job.id },
+        data: { status: InspectionStatus.failed, stoppedAt: new Date() },
+      });
+      throw error;
     }
-
-    const capturedAt = new Date();
-    const imagePath = await this.savePlcCaptureFrame({
-      job,
-      productCode: product.code,
-      imageBase64: dto.originalImageBase64,
-      capturedAt,
-    });
-    const simulatedScan = {
-      ...scan,
-      processedRoiCrops: dto.crops,
-    };
-
-    await this.persistPlcCaptureLogs({
-      jobId: job.id,
-      product,
-      scan: simulatedScan,
-      imagePath,
-      capturedAt,
-    });
-    await this.saveTrainingRoiImages({
-      capturedAt,
-      product,
-      roiRegions: product.roiRegions,
-      scan: {
-        processedRoiCrops: dto.crops,
-        results: scan.results,
-      },
-    });
-
-    return {
-      data: {
-        latched: true,
-        result,
-        inspection: await this.buildInspectionState(job.id),
-      },
-    };
   }
 
   async createTestSessionReport(
@@ -1266,7 +1277,7 @@ export class InspectionsService {
     const okCount = logs.filter((log) => log.result === InspectionResult.OK).length;
     const ngCount = logs.filter((log) => log.result === InspectionResult.NG).length;
 
-    const dongilSync = this.dongilSync;
+    const dongilSync = this.getDongilSync();
     if (!dongilSync) {
       await this.prisma.inspectionLog.createMany({ data: logs });
       return;
@@ -1284,6 +1295,10 @@ export class InspectionsService {
         inspectedAt: capturedAt,
       });
     });
+  }
+
+  private getDongilSync() {
+    return this.moduleRef?.get(DongilSyncService, { strict: false });
   }
 
   private async savePlcCaptureFrame({
