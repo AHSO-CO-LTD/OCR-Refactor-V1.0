@@ -84,19 +84,11 @@ If the one-time credential is lost after registration, automatic registration ca
 - The navbar server icon polls real local connection state every 5 seconds: green is connected, amber is connecting/retrying, red is disabled/error/unauthorized.
 - OK/NG results are not sent through WebSocket.
 
-## Product/version assignment
+## Product identity
 
-The backend loads `GET /api/v1/machine-config/current` and caches the exact server assignment per local `Product.code`.
+Result delivery uses the local `Product.code` and `Product.name`; it does not depend on `GET /api/v1/machine-config/current`, profile assignment, or model metadata. If the product is missing on Dongil Server, the authenticated washing result creates it automatically inside `WASHING_MACHINE` with profile `v1 {}`.
 
-Before running production inspection, Dongil Server must contain and assign:
-
-1. matching machine type;
-2. product with the same code as the local product;
-3. immutable profile version;
-4. immutable model version;
-5. active machine/profile/model assignment.
-
-The cached tuple is captured into the outbox at inspection time. Version values are never derived from local timestamps or model paths.
+The configuration endpoint and local assignment cache remain only for transition compatibility and possible future capabilities. They do not gate production capture.
 
 ## OK/NG outbox
 
@@ -121,7 +113,7 @@ Each item contains the shared scan verdict plus `okCount` and `ngCount`. ROI row
 
 Outbox rows created before the quantity migration retain null counts and continue through the generic batch endpoint. The client does not invent missing historical quantities.
 
-The worker runs every 5 seconds. A server/network outage does not block PLC or OCR. Retry uses bounded exponential backoff. Missing assignment metadata creates `BLOCKED_CONFIG` instead of sending invented versions.
+The worker runs every 5 seconds. A server/network outage does not block PLC or OCR. Retry uses bounded exponential backoff. Missing server product/profile/model metadata never creates a new `BLOCKED_CONFIG` row.
 
 ### DEV uploaded-image simulation
 
@@ -134,13 +126,13 @@ uploaded image -> ROI crop -> real OCR -> aggregate OK/NG
 
 This development path does not force an OK/NG verdict, does not pulse the PLC, and does not upload the image to Dongil Server. An `UNKNOWN` OCR outcome is shown locally and is not queued.
 
-When configuration becomes available, a blocked row is released automatically only if the server assignment already existed at that row's `inspectedAt`. Results older than the assignment remain blocked because applying a later version would corrupt historical reporting.
+On startup, legacy `BLOCKED_CONFIG` rows are returned to `PENDING` with their original `localResultId`, product identity, quantities, and inspection time. Server idempotency prevents duplicate results.
 
 Local tables:
 
 - `DongilSyncConfiguration`: non-secret identity/configuration state;
-- `DongilProductAssignment`: last successful exact server assignments;
-- `DongilSyncOutbox`: immutable result payload, washing OK/NG counts and delivery state.
+- `DongilProductAssignment`: transition cache for legacy/future server configuration;
+- `DongilSyncOutbox`: immutable product identity, result payload, washing OK/NG counts and delivery state.
 
 ## One-machine pilot checklist
 
@@ -149,12 +141,13 @@ Local tables:
 3. Confirm the machine appears in the pending-registration table on Dongil Server with the expected `machine_id`.
 4. Approve it on the server, then wait up to 10 seconds or press **Cập nhật trạng thái đăng ký ngay** on local.
 5. Press **Kết nối server** on local; approval alone must not connect automatically.
-6. Assign the correct washing-machine product/profile/model tuple on the server.
+6. Select a local product that does not yet exist on Dongil Server.
 7. Run one known OK and one known NG PLC cycle.
-8. Confirm the local outbox reaches `SENT`.
-9. Confirm server raw results show exactly one OK and one NG, and washing statistics match the known ROI OK/NG quantities.
-10. Disconnect LAN, run additional cycles, reconnect, and confirm offline results replay without duplicates.
-11. Close the local app normally and confirm `SHUTDOWN`; restart, then interrupt the LAN and confirm `CONNECTION_LOST` followed by automatic `ONLINE` recovery.
+8. Confirm Dongil Server automatically creates the matching product and profile `v1 {}`.
+9. Confirm the local outbox reaches `SENT`.
+10. Confirm server raw results show exactly one OK and one NG, and washing statistics match the known ROI OK/NG quantities.
+11. Disconnect LAN, run additional cycles, reconnect, and confirm offline results replay without duplicates.
+12. Close the local app normally and confirm `SHUTDOWN`; restart, then interrupt the LAN and confirm `CONNECTION_LOST` followed by automatic `ONLINE` recovery.
 
 ## Diagnostics
 
@@ -162,6 +155,5 @@ Electron terminal logs use the `[dongil]` prefix and never include the credentia
 
 - `REGISTRATION_PENDING`, `REGISTRATION_APPROVED`, `REGISTRATION_REJECTED`;
 - missing/lost credential for an already approved machine requires controlled recovery on Dongil Server; public registration never exposes the existing secret;
-- `MACHINE_CONFIG_NOT_AVAILABLE`;
-- `BLOCKED_CONFIG`;
+- legacy `BLOCKED_CONFIG` rows are automatically requeued;
 - `DONGIL_SERVER_UNAVAILABLE`.

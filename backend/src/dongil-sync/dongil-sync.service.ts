@@ -25,13 +25,6 @@ import type { RegistrationStatusDto } from './dto/registration-status.dto';
 const CONFIGURATION_ID = 'default';
 const WORKER_INTERVAL_MS = 5_000;
 const DEFAULT_HEARTBEAT_INTERVAL_MS = 10_000;
-const CONFIGURATION_ERROR_CODES = new Set([
-  'PRODUCT_NOT_FOUND',
-  'PROFILE_VERSION_NOT_FOUND',
-  'MODEL_VERSION_NOT_FOUND',
-  'MODEL_VERSION_AMBIGUOUS',
-]);
-
 function describeError(error: unknown) {
   return error instanceof Error ? error.message : 'Unknown Dongil Server error';
 }
@@ -112,10 +105,19 @@ export class DongilSyncService implements OnModuleInit, OnModuleDestroy {
 
   async onModuleInit() {
     await this.prisma.dongilSyncOutbox.updateMany({
-      where: { status: DongilSyncOutboxStatus.SENDING },
+      where: {
+        status: {
+          in: [
+            DongilSyncOutboxStatus.SENDING,
+            DongilSyncOutboxStatus.BLOCKED_CONFIG,
+          ],
+        },
+      },
       data: {
         status: DongilSyncOutboxStatus.PENDING,
         nextAttemptAt: new Date(),
+        lastErrorCode: null,
+        lastErrorMessage: null,
       },
     });
     this.workerTimer = setInterval(
@@ -367,6 +369,7 @@ export class DongilSyncService implements OnModuleInit, OnModuleDestroy {
     input: {
       localResultId: string;
       productCode: string;
+      productName?: string;
       result: 'OK' | 'NG';
       okCount: number;
       ngCount: number;
@@ -374,27 +377,21 @@ export class DongilSyncService implements OnModuleInit, OnModuleDestroy {
       inspectedAt: Date;
     },
   ) {
-    const assignment = await transaction.dongilProductAssignment.findUnique({
-      where: { productCode: input.productCode },
-    });
     await transaction.dongilSyncOutbox.create({
       data: {
         localResultId: input.localResultId,
         productCode: input.productCode,
-        profileVersion: assignment?.profileVersion,
-        modelVersion: assignment?.modelVersion,
+        productName: input.productName?.trim() || input.productCode,
+        profileVersion: null,
+        modelVersion: null,
         result: input.result,
         okCount: input.okCount,
         ngCount: input.ngCount,
         localSessionId: input.localSessionId,
         inspectedAt: input.inspectedAt,
-        status: assignment
-          ? DongilSyncOutboxStatus.PENDING
-          : DongilSyncOutboxStatus.BLOCKED_CONFIG,
-        lastErrorCode: assignment ? null : 'MACHINE_CONFIG_NOT_AVAILABLE',
-        lastErrorMessage: assignment
-          ? null
-          : 'No server-assigned profile/model tuple was available at inspection time.',
+        status: DongilSyncOutboxStatus.PENDING,
+        lastErrorCode: null,
+        lastErrorMessage: null,
       },
     });
   }
@@ -512,23 +509,6 @@ export class DongilSyncService implements OnModuleInit, OnModuleDestroy {
             syncedAt: new Date(),
           },
         });
-        await transaction.dongilSyncOutbox.updateMany({
-          where: {
-            productCode: assignment.product.code,
-            status: DongilSyncOutboxStatus.BLOCKED_CONFIG,
-            profileVersion: null,
-            modelVersion: null,
-            inspectedAt: { gte: assignedAt },
-          },
-          data: {
-            profileVersion: assignment.profile.version,
-            modelVersion: assignment.model.version,
-            status: DongilSyncOutboxStatus.PENDING,
-            nextAttemptAt: new Date(),
-            lastErrorCode: null,
-            lastErrorMessage: null,
-          },
-        });
       }
     });
   }
@@ -634,8 +614,6 @@ export class DongilSyncService implements OnModuleInit, OnModuleDestroy {
             in: [DongilSyncOutboxStatus.PENDING, DongilSyncOutboxStatus.FAILED],
           },
           nextAttemptAt: { lte: new Date() },
-          profileVersion: { not: null },
-          modelVersion: { not: null },
         },
         orderBy: [{ inspectedAt: 'asc' }, { id: 'asc' }],
         take: 500,
@@ -686,8 +664,7 @@ export class DongilSyncService implements OnModuleInit, OnModuleDestroy {
   private toResultPayload(row: {
     localResultId: string;
     productCode: string;
-    profileVersion: number | null;
-    modelVersion: string | null;
+    productName: string | null;
     result: string;
     localSessionId: string | null;
     inspectedAt: Date;
@@ -695,8 +672,7 @@ export class DongilSyncService implements OnModuleInit, OnModuleDestroy {
     return {
       localResultId: row.localResultId,
       productCode: row.productCode,
-      profileVersion: row.profileVersion!,
-      modelVersion: row.modelVersion!,
+      productName: row.productName ?? row.productCode,
       result: row.result === 'OK' ? ('OK' as const) : ('NG' as const),
       localSessionId: row.localSessionId ?? undefined,
       inspectedAt: row.inspectedAt.toISOString(),
@@ -767,13 +743,10 @@ export class DongilSyncService implements OnModuleInit, OnModuleDestroy {
       return;
     }
     const code = outcome?.error?.code || 'DONGIL_ITEM_FAILED';
-    const blocked = CONFIGURATION_ERROR_CODES.has(code);
     await this.prisma.dongilSyncOutbox.update({
       where: { id },
       data: {
-        status: blocked
-          ? DongilSyncOutboxStatus.BLOCKED_CONFIG
-          : DongilSyncOutboxStatus.FAILED,
+        status: DongilSyncOutboxStatus.FAILED,
         attemptCount: { increment: 1 },
         nextAttemptAt: this.nextRetryAt(attemptCount + 1),
         lastErrorCode: code,

@@ -1288,6 +1288,7 @@ export class InspectionsService {
       await dongilSync.enqueueCapture(transaction, {
         localResultId: plcCaptureId,
         productCode: product.code,
+        productName: product.name,
         result: aggregateResult,
         okCount,
         ngCount,

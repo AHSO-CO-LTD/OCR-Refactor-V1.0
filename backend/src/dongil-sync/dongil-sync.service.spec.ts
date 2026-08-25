@@ -19,16 +19,9 @@ describe('Dongil runtime state normalization', () => {
 });
 
 describe('DongilSyncService capture outbox', () => {
-  it('snapshots the assigned profile/model tuple when the inspection is created', async () => {
+  it('queues product identity without requiring a server profile/model assignment', async () => {
     const create = jest.fn().mockResolvedValue(undefined);
     const transaction = {
-      dongilProductAssignment: {
-        findUnique: jest.fn().mockResolvedValue({
-          productCode: 'IS-35R',
-          profileVersion: 3,
-          modelVersion: 'washing-v7',
-        }),
-      },
       dongilSyncOutbox: { create },
     } as unknown as Prisma.TransactionClient;
     const service = new DongilSyncService({} as PrismaService, {} as never);
@@ -38,32 +31,13 @@ describe('DongilSyncService capture outbox', () => {
     expect(create).toHaveBeenCalledWith({
       data: expect.objectContaining({
         productCode: 'IS-35R',
-        profileVersion: 3,
-        modelVersion: 'washing-v7',
+        productName: 'IS-35R product',
+        profileVersion: null,
+        modelVersion: null,
         okCount: 4,
         ngCount: 1,
         status: DongilSyncOutboxStatus.PENDING,
         lastErrorCode: null,
-      }),
-    });
-  });
-
-  it('blocks the outbox item instead of guessing versions when config is unavailable', async () => {
-    const create = jest.fn().mockResolvedValue(undefined);
-    const transaction = {
-      dongilProductAssignment: { findUnique: jest.fn().mockResolvedValue(null) },
-      dongilSyncOutbox: { create },
-    } as unknown as Prisma.TransactionClient;
-    const service = new DongilSyncService({} as PrismaService, {} as never);
-
-    await service.enqueueCapture(transaction, captureInput());
-
-    expect(create).toHaveBeenCalledWith({
-      data: expect.objectContaining({
-        profileVersion: undefined,
-        modelVersion: undefined,
-        status: DongilSyncOutboxStatus.BLOCKED_CONFIG,
-        lastErrorCode: 'MACHINE_CONFIG_NOT_AVAILABLE',
       }),
     });
   });
@@ -73,6 +47,7 @@ function captureInput() {
   return {
     localResultId: 'result-1',
     productCode: 'IS-35R',
+    productName: 'IS-35R product',
     result: 'OK' as const,
     okCount: 4,
     ngCount: 1,

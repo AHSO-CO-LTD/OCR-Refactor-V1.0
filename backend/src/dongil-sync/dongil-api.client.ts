@@ -45,8 +45,7 @@ export type DongilBatchResponse = {
 type DongilResultPayload = {
   localResultId: string;
   productCode: string;
-  profileVersion: number;
-  modelVersion: string;
+  productName?: string;
   result: 'OK' | 'NG';
   localSessionId?: string;
   inspectedAt: string;

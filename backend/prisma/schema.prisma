@@ -297,6 +297,7 @@ model DongilSyncOutbox {
   id               String                  @id @default(cuid())
   localResultId    String                  @unique
   productCode      String
+  productName      String?
   profileVersion   Int?
   modelVersion     String?
   result           InspectionResult
