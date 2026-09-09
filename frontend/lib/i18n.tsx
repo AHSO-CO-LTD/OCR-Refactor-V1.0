@@ -580,6 +580,15 @@ const translations = {
     "settings.dongilSaved":
       "Dongil Server configuration was saved. No connection was started.",
     "settings.dongilSaveFailed": "Could not save Dongil Server settings.",
+    "settings.dongilReset": "Reset server configuration",
+    "settings.dongilResetting": "Resetting...",
+    "settings.dongilResetDone":
+      "Dongil Server configuration was reset. Pending results were kept.",
+    "settings.dongilResetFailed":
+      "Could not reset Dongil Server configuration.",
+    "settings.dongilResetConfirmTitle": "Reset server configuration?",
+    "settings.dongilResetConfirmDescription":
+      "This disconnects now and removes the saved server address, local registration state, and local credential. Pending results are kept and will not send until a server is configured and connected again.",
     "settings.dongilStatus": "Connection status",
     "settings.dongilPending": "Pending results",
     "settings.dongilRuntime": "Machine operation",
@@ -2090,6 +2099,15 @@ const translations = {
     "settings.dongilSaved":
       "Đã lưu cấu hình Dongil Server, chưa thực hiện kết nối.",
     "settings.dongilSaveFailed": "Không thể lưu cấu hình Dongil Server.",
+    "settings.dongilReset": "Reset cấu hình server",
+    "settings.dongilResetting": "Đang reset...",
+    "settings.dongilResetDone":
+      "Đã reset cấu hình Dongil Server. Kết quả đang chờ vẫn được giữ lại.",
+    "settings.dongilResetFailed":
+      "Không thể reset cấu hình Dongil Server.",
+    "settings.dongilResetConfirmTitle": "Reset cấu hình server?",
+    "settings.dongilResetConfirmDescription":
+      "Thao tác này ngắt kết nối ngay và xóa địa chỉ server đã lưu, trạng thái đăng ký cục bộ và thông tin xác thực cục bộ. Kết quả đang chờ vẫn được giữ và sẽ chưa gửi cho đến khi cấu hình, kết nối lại server.",
     "settings.dongilStatus": "Trạng thái kết nối",
     "settings.dongilPending": "Kết quả đang chờ",
     "settings.dongilRuntime": "Trạng thái vận hành",

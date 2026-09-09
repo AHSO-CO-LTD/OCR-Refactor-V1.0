@@ -41,6 +41,7 @@ DEV/ADMIN can also open **Settings → General → Dongil Server** to:
 - enter only `<server-ip>`; Electron derives `http://<server-ip>:3979`;
 - test `/api/v1/health` without changing the saved value;
 - save the server configuration without registering or connecting;
+- reset the server configuration, which disconnects immediately and clears the saved URL, local registration state, credential, and assignment cache while retaining pending outbox results;
 - send a registration request, refresh its state immediately, and explicitly connect only after server approval;
 - view machine ID/type, connection state, runtime state, pending outbox count, last heartbeat and last error.
 

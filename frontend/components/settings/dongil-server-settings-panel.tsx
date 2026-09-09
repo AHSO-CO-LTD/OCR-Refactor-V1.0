@@ -2,6 +2,7 @@
 
 import {
   Activity,
+  RotateCcw,
   Link2,
   PlugZap,
   RefreshCw,
@@ -42,6 +43,8 @@ export function DongilServerSettingsPanel() {
   const [refreshingRegistration, setRefreshingRegistration] = useState(false);
   const [connecting, setConnecting] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
+  const [resetConfirmOpen, setResetConfirmOpen] = useState(false);
+  const [resetting, setResetting] = useState(false);
   const role = getStoredUser()?.role;
   const canManage = role === "dev" || role === "admin";
 
@@ -179,6 +182,26 @@ export function DongilServerSettingsPanel() {
     }
   }
 
+  async function resetConfiguration() {
+    const bridge = getDesktopBridge();
+    const accessToken = getAccessToken();
+    if (!bridge || !accessToken || !canManage) return;
+    setResetting(true);
+    try {
+      await bridge.resetDongilSettings(accessToken);
+      setServerIpDraft(null);
+      setResetConfirmOpen(false);
+      await refresh();
+      toast.success(t("settings.dongilResetDone"));
+    } catch (cause) {
+      toast.error(
+        cause instanceof Error ? cause.message : t("settings.dongilResetFailed"),
+      );
+    } finally {
+      setResetting(false);
+    }
+  }
+
   const online = status?.state === "ONLINE" && status.socketConnected;
   return (
     <section className="grid gap-5 xl:grid-cols-[minmax(0,1.35fr)_minmax(20rem,0.65fr)]">
@@ -247,6 +270,18 @@ export function DongilServerSettingsPanel() {
               >
                 <Save className="h-4 w-4" aria-hidden="true" />
                 {t("settings.dongilSave")}
+              </Button>
+            ) : null}
+            {canManage ? (
+              <Button
+                type="button"
+                variant="outline"
+                className="border-red-300 text-red-700 hover:bg-red-50 hover:text-red-800"
+                disabled={!savedIp || resetting}
+                onClick={() => setResetConfirmOpen(true)}
+              >
+                <RotateCcw className="h-4 w-4" aria-hidden="true" />
+                {t("settings.dongilReset")}
               </Button>
             ) : null}
             {canManage ? (
@@ -395,6 +430,19 @@ export function DongilServerSettingsPanel() {
         loading={saving}
         onConfirm={() => void saveConfiguration()}
         onCancel={() => setConfirmOpen(false)}
+      />
+      <ConfirmModal
+        open={resetConfirmOpen}
+        title={t("settings.dongilResetConfirmTitle")}
+        description={t("settings.dongilResetConfirmDescription")}
+        confirmLabel={
+          resetting ? t("settings.dongilResetting") : t("settings.dongilReset")
+        }
+        cancelLabel={t("common.cancel")}
+        loading={resetting}
+        destructive
+        onConfirm={() => void resetConfiguration()}
+        onCancel={() => setResetConfirmOpen(false)}
       />
     </section>
   );

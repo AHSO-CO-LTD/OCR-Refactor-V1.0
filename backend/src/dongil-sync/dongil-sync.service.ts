@@ -295,6 +295,24 @@ export class DongilSyncService implements OnModuleInit, OnModuleDestroy {
     };
   }
 
+  async resetConfiguration() {
+    this.disconnectSocket();
+    this.runtime = null;
+    this.connectionState = 'DISABLED';
+    this.lastConnectedAt = null;
+    this.lastHeartbeatAckAt = null;
+    this.lastErrorMessage = null;
+
+    await this.prisma.$transaction([
+      this.prisma.dongilSyncConfiguration.deleteMany({
+        where: { id: CONFIGURATION_ID },
+      }),
+      this.prisma.dongilProductAssignment.deleteMany(),
+    ]);
+
+    return { data: { state: this.connectionState } };
+  }
+
   async requestRegistration(dto: BootstrapDongilSyncDto) {
     await this.configure(dto);
     if (dto.licenseStatus !== 'LICENSED') {

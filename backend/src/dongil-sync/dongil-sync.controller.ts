@@ -37,6 +37,12 @@ export class DongilSyncController {
     return this.dongilSync.configure(dto);
   }
 
+  @Post('reset')
+  reset(@Headers('x-desktop-internal-token') providedToken?: string) {
+    this.assertInternalToken(providedToken);
+    return this.dongilSync.resetConfiguration();
+  }
+
   @Post('registration-request')
   registrationRequest(
     @Body() dto: BootstrapDongilSyncDto,

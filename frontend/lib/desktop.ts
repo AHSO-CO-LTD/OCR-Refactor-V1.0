@@ -220,6 +220,9 @@ export type DesktopBridge = {
     serverUrl: string;
     status: { data?: DesktopDongilStatus };
   }>;
+  resetDongilSettings(
+    accessToken: string,
+  ): Promise<{ status: { data?: DesktopDongilStatus } }>;
   requestDongilRegistration(
     accessToken: string,
   ): Promise<{

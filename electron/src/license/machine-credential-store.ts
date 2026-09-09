@@ -1,5 +1,11 @@
 import { app, safeStorage } from "electron";
-import { existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  readFileSync,
+  renameSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
 import path from "node:path";
 
 type StoredMachineCredential = {
@@ -52,4 +58,9 @@ export function saveMachineCredential(
   };
   writeFileSync(temporaryPath, JSON.stringify(stored), { encoding: "utf8", mode: 0o600 });
   renameSync(temporaryPath, filePath);
+}
+
+export function clearMachineCredential() {
+  const filePath = credentialPath();
+  if (existsSync(filePath)) unlinkSync(filePath);
 }

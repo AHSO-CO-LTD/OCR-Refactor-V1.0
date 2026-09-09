@@ -24,6 +24,7 @@ import {
   type LocalMachineIdentity,
 } from "./license/local-machine-identity";
 import {
+  clearMachineCredential,
   loadMachineCredential,
   saveMachineCredential,
 } from "./license/machine-credential-store";
@@ -60,6 +61,10 @@ type DesktopTestStorageSettings = {
 type SaveDongilSettingsPayload = {
   accessToken: string;
   serverIp: string;
+};
+
+type ResetDongilSettingsPayload = {
+  accessToken: string;
 };
 
 type DesktopLanguage = "en" | "vi";
@@ -327,6 +332,20 @@ function registerDesktopIpc() {
         serverUrl,
         status: await getDongilStatusWithLocalIdentity(),
       };
+    },
+  );
+  ipcMain.handle(
+    "desktop:reset-dongil-settings",
+    async (event, payload: ResetDongilSettingsPayload) => {
+      assertMainRendererSender(event.sender);
+      if (!serviceManager)
+        throw new Error("Local service manager is unavailable.");
+      await serviceManager.assertDongilSettingsAccess(payload.accessToken);
+      await serviceManager.resetDongilSync();
+      clearMachineCredential();
+      removeRuntimeEnvValue("DONGIL_SERVER_URL");
+      delete process.env.DONGIL_SERVER_URL;
+      return { status: await getDongilStatusWithLocalIdentity() };
     },
   );
   ipcMain.handle(
@@ -951,13 +970,7 @@ function buildDongilServerUrl(value: string) {
 function persistRuntimeEnvValue(key: string, value: string) {
   if (/\r|\n/.test(value))
     throw new Error("Environment value contains an invalid newline.");
-  const runtimeRoot = getRuntimeRoot();
-  const envPath = app.isPackaged
-    ? join(getProgramDataRoot(), ".env")
-    : join(runtimeRoot, "backend", ".env");
-  if (!existsSync(envPath)) {
-    throw new Error(`Runtime environment file was not found: ${envPath}`);
-  }
+  const envPath = getMutableRuntimeEnvPath();
   const content = readFileSync(envPath, "utf8");
   const escapedKey = key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const linePattern = new RegExp(`^\\s*${escapedKey}\\s*=.*$`, "m");
@@ -980,6 +993,46 @@ function persistRuntimeEnvValue(key: string, value: string) {
     }
     throw error;
   }
+}
+
+function removeRuntimeEnvValue(key: string) {
+  const envPath = getMutableRuntimeEnvPath();
+  const content = readFileSync(envPath, "utf8");
+  const escapedKey = key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const linePattern = new RegExp(`^\\s*${escapedKey}\\s*=.*(?:\\r?\\n|$)`, "gm");
+  const nextContent = content.replace(linePattern, "");
+  const temporaryPath = `${envPath}.${randomUUID()}.tmp`;
+  try {
+    writeFileSync(temporaryPath, nextContent, {
+      encoding: "utf8",
+      flush: true,
+    });
+    renameSync(temporaryPath, envPath);
+  } catch (error) {
+    try {
+      if (existsSync(temporaryPath)) unlinkSync(temporaryPath);
+    } catch {
+      // Preserve the original write error; stale temporary files are non-authoritative.
+    }
+    throw error;
+  }
+}
+
+function getMutableRuntimeEnvPath() {
+  if (app.isPackaged) return join(getProgramDataRoot(), ".env");
+
+  const runtimeRoot = getRuntimeRoot();
+  const candidates = [
+    join(runtimeRoot, ".env"),
+    join(runtimeRoot, "backend", ".env"),
+  ];
+  const envPath = candidates.find((candidate) => existsSync(candidate));
+  if (!envPath) {
+    throw new Error(
+      `Runtime environment file was not found: ${candidates.join(", ")}`,
+    );
+  }
+  return envPath;
 }
 
 function assertMainRendererSender(sender: WebContents) {

@@ -49,6 +49,9 @@ contextBridge.exposeInMainWorld("ocrDesktop", {
   saveDongilSettings(settings: { accessToken: string; serverIp: string }) {
     return ipcRenderer.invoke("desktop:save-dongil-settings", settings);
   },
+  resetDongilSettings(accessToken: string) {
+    return ipcRenderer.invoke("desktop:reset-dongil-settings", { accessToken });
+  },
   requestDongilRegistration(accessToken: string) {
     return ipcRenderer.invoke(
       "desktop:request-dongil-registration",

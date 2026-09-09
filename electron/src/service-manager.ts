@@ -395,6 +395,10 @@ export class ServiceManager {
     return this.postDongilRuntime("configure", payload);
   }
 
+  async resetDongilSync(): Promise<DongilSyncBootstrapResult> {
+    return this.postDongilRuntime("reset");
+  }
+
   async requestDongilRegistration(
     payload: DongilSyncBootstrapPayload,
   ): Promise<DongilSyncBootstrapResult> {
@@ -410,8 +414,8 @@ export class ServiceManager {
   }
 
   private async postDongilRuntime(
-    action: "configure" | "registration-request" | "registration-status",
-    payload: object,
+    action: "configure" | "reset" | "registration-request" | "registration-status",
+    payload?: object,
   ): Promise<DongilSyncBootstrapResult> {
     const response = await fetch(
       `http://127.0.0.1:${this.getServicePort("backend")}/api/internal/dongil-sync/${action}`,
@@ -421,7 +425,7 @@ export class ServiceManager {
           "content-type": "application/json",
           "x-desktop-internal-token": this.desktopInternalToken,
         },
-        body: JSON.stringify(payload),
+        ...(payload ? { body: JSON.stringify(payload) } : {}),
         signal: AbortSignal.timeout(20_000),
       },
     );
