@@ -43,6 +43,12 @@ export class DongilSyncController {
     return this.dongilSync.resetConfiguration();
   }
 
+  @Post('disconnect')
+  disconnect(@Headers('x-desktop-internal-token') providedToken?: string) {
+    this.assertInternalToken(providedToken);
+    return this.dongilSync.disconnect();
+  }
+
   @Post('registration-request')
   registrationRequest(
     @Body() dto: BootstrapDongilSyncDto,

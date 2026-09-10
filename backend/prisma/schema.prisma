@@ -74,6 +74,27 @@ enum DongilSyncOutboxStatus {
   FAILED
 }
 
+enum DongilDeliveryDisposition {
+  ACCEPTED
+  REPLAYED
+}
+
+enum DongilHistorySyncRunState {
+  PREPARING
+  RUNNING
+  PAUSED
+  BLOCKED
+  CANCELLED
+  COMPLETED
+}
+
+enum DongilHistorySyncItemStatus {
+  PENDING
+  SENDING
+  CONFIRMED
+  FAILED
+}
+
 model User {
   id                  String              @id @default(cuid())
   username            String              @unique
@@ -285,6 +306,20 @@ model DongilSyncConfiguration {
   updatedAt               DateTime @updatedAt
 }
 
+model DongilMachineInfo {
+  id           String   @id @default("default")
+  serverUrl    String
+  machineId    String
+  displayName  String?
+  isActive     Boolean
+  factoryName  String?
+  lineName     String?
+  stationName  String?
+  lastSyncedAt DateTime
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
 model DongilProductAssignment {
   productCode    String   @id
   profileVersion Int
@@ -310,12 +345,116 @@ model DongilSyncOutbox {
   nextAttemptAt    DateTime                @default(now())
   lastErrorCode    String?
   lastErrorMessage String?
+  deliveryDisposition DongilDeliveryDisposition?
   sentAt           DateTime?
+  verifiedAt       DateTime?
   createdAt        DateTime                @default(now())
   updatedAt        DateTime                @updatedAt
 
   @@index([status, nextAttemptAt, createdAt])
+  @@index([verifiedAt, status, inspectedAt])
   @@index([inspectedAt])
+}
+
+model DongilHistorySyncRun {
+  id                 String                   @id @default(cuid())
+  state              DongilHistorySyncRunState @default(RUNNING)
+  snapshotTotal      Int
+  snapshotConfirmed  Int                      @default(0)
+  uploadTotal        Int                      @default(0)
+  acceptedCount      Int                      @default(0)
+  replayedCount      Int                      @default(0)
+  failedCount        Int                      @default(0)
+  currentBatch       Int                      @default(0)
+  totalBatches       Int
+  lastBatchId        String?
+  lastRetryAt        DateTime?
+  checkpointedAt     DateTime?
+  uploadCompletedAt  DateTime?
+  verificationStartedAt DateTime?
+  verificationCompletedAt DateTime?
+  startedById        String?
+  startedAt          DateTime                 @default(now())
+  pausedAt           DateTime?
+  cancelledAt        DateTime?
+  completedAt        DateTime?
+  lastErrorCode      String?
+  lastErrorMessage   String?
+  createdAt          DateTime                 @default(now())
+  updatedAt          DateTime                 @updatedAt
+  items              DongilHistorySyncItem[]
+  scopes             DongilHistorySyncScope[]
+
+  @@index([state, startedAt])
+}
+
+model DongilHistorySyncScope {
+  id                    String               @id @default(cuid())
+  runId                 String
+  scope                 String
+  scopeKey              String
+  total                 Int
+  ok                    Int
+  ng                    Int
+  counterMatched        Boolean?
+  counterReconciledAt   DateTime?
+  idsVerifiedAt         DateTime?
+  completedAt           DateTime?
+  lastErrorCode         String?
+  lastErrorMessage      String?
+  createdAt             DateTime             @default(now())
+  updatedAt             DateTime             @updatedAt
+  run                   DongilHistorySyncRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+
+  @@unique([runId, scope, scopeKey])
+  @@index([runId, completedAt])
+}
+
+model DongilHistorySyncItem {
+  id                  String                      @id @default(cuid())
+  runId               String
+  outboxId            String
+  localResultId       String
+  inspectedAt         DateTime
+  localSessionId      String?
+  productCode         String
+  result              InspectionResult
+  okCount             Int
+  ngCount             Int
+  sequence            Int
+  status              DongilHistorySyncItemStatus @default(PENDING)
+  localBatchId        String?
+  deliveryDisposition DongilDeliveryDisposition?
+  attemptCount        Int                         @default(0)
+  nextAttemptAt       DateTime                    @default(now())
+  lastErrorCode       String?
+  lastErrorMessage    String?
+  confirmedAt         DateTime?
+  verifiedAt          DateTime?
+  createdAt           DateTime                    @default(now())
+  updatedAt           DateTime                    @updatedAt
+  run                 DongilHistorySyncRun        @relation(fields: [runId], references: [id], onDelete: Cascade)
+
+  @@unique([runId, outboxId])
+  @@unique([runId, sequence])
+  @@index([runId, status, sequence])
+  @@index([runId, localSessionId, inspectedAt])
+}
+
+model DongilHistorySyncInvalidItem {
+  id           String   @id @default(cuid())
+  sourceLogId  String   @unique
+  plcCaptureId String?
+  reason       String
+  capturedAt   DateTime
+  createdAt    DateTime @default(now())
+}
+
+model DongilSyncWorkerLease {
+  id        String   @id @default("default")
+  ownerId   String?
+  expiresAt DateTime?
+  updatedAt DateTime @updatedAt
 }
 
 model LineResultSettings {

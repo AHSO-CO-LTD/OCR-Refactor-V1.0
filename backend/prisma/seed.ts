@@ -29,6 +29,16 @@ const permissions = [
   { key: 'report.view', name: 'View reports', group: 'report' },
   { key: 'system.shutdown', name: 'Shutdown system', group: 'system' },
   { key: 'license.view', name: 'View license state', group: 'system' },
+  {
+    key: 'dongil.history-sync.view',
+    name: 'View Dongil history synchronization',
+    group: 'dongil',
+  },
+  {
+    key: 'dongil.history-sync.manage',
+    name: 'Manage Dongil history synchronization',
+    group: 'dongil',
+  },
   { key: 'system.debug', name: 'Debug system', group: 'system', devOnly: true },
 ];
 
@@ -47,11 +57,13 @@ const rolePermissionMap: Record<RoleCode, string[]> = {
     'plc.operate',
     'inspection.test',
     'report.view',
+    'dongil.history-sync.view',
   ],
   operator: [
     'inspection.start',
     'inspection.stop',
     'plc.operate',
+    'dongil.history-sync.view',
   ],
 };
 

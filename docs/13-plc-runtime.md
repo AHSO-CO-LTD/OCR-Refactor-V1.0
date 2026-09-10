@@ -179,8 +179,9 @@ OK từ `captureTrigger` phát `okResult` một lần. NG chỉ phát `errorPuls
 
 ## Vòng đời session Line
 
-- Đổi mã sản phẩm trong lúc máy đang chạy: kết thúc session hiện tại với `product_change`, sau đó mở session mới và tiếp tục flow hiện hành.
-- Đổi mã sản phẩm trong lúc đang chờ PLC START: kết thúc session hiện tại với `product_change`, giữ nguyên `idle_machine_stop` và màn STOP, chỉ ghi nhận mã mới đang chờ. Không gọi start/stop machine, không kết nối camera và không chạy model. Khi nhận `startTrigger`, session mã mới được mở trước khi camera/model tiếp tục vận hành.
+- Đổi mã sản phẩm trong lúc máy đang chạy: lấy session hiện hành từ backend, kết thúc session đó với `product_change`, mở ngay session mới rồi mới cập nhật mã và bộ đếm trên giao diện.
+- Đổi mã sản phẩm trong lúc đang chờ PLC START: kết thúc session hiện tại với `product_change`, mở ngay session mới cho mã vừa chọn nhưng vẫn giữ nguyên `idle_machine_stop` và màn STOP. Không gọi start/stop machine, không kết nối camera và không chạy model cho đến khi nhận `startTrigger`.
+- Session bị thay thế bởi `product_change` được xóa nếu hoàn toàn rỗng: không có inspection log, kết quả/outbox đồng bộ hoặc artifact báo cáo. Session đã có bất kỳ dữ liệu nào vẫn được đóng và lưu lịch sử như trước.
 - Reset bộ đếm: kết thúc session đếm hiện tại và mở ngay session mới cho cùng mã sản phẩm; không gọi dừng machine runtime, không ngắt PLC/camera và không làm gián đoạn việc nhận trigger.
 - Nút dừng Line: kết thúc session với `line_stop`.
 - PLC dừng máy: tạm nghỉ nhưng giữ nguyên session; PLC Start tiếp tục cùng `jobId` sau khi camera trả được một frame thật, trừ trường hợp mã sản phẩm đã được đổi trong lúc STOP.

@@ -349,6 +349,17 @@ function registerDesktopIpc() {
     },
   );
   ipcMain.handle(
+    "desktop:disconnect-dongil-server",
+    async (event, accessToken: string) => {
+      assertMainRendererSender(event.sender);
+      if (!serviceManager)
+        throw new Error("Local service manager is unavailable.");
+      await serviceManager.assertDongilSettingsAccess(accessToken);
+      await serviceManager.disconnectDongilSync();
+      return { status: await getDongilStatusWithLocalIdentity() };
+    },
+  );
+  ipcMain.handle(
     "desktop:request-dongil-registration",
     async (event, accessToken: string) => {
       assertMainRendererSender(event.sender);
@@ -699,7 +710,10 @@ async function performDongilLifecycleRefresh() {
       current = await serviceManager.getDongilSyncStatus();
     }
     if (!credential) return;
-    const response = current.data?.autoConnectEnabled
+    const shouldBootstrap =
+      current.data?.autoConnectEnabled === true &&
+      (current.data.state !== "ONLINE" || current.data.socketConnected !== true);
+    const response = shouldBootstrap
       ? await serviceManager.bootstrapDongilSync({
           ...buildDongilPayload(identity, serverUrl),
           credential,

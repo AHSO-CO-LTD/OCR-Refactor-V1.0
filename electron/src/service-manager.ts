@@ -63,6 +63,14 @@ export type DongilSyncStatusResult = {
     machineId?: string | null;
     machineTypeCode?: string | null;
     assignedMachineTypeCode?: string | null;
+    machineInfo?: {
+      displayName?: string | null;
+      isActive?: boolean;
+      factoryName?: string | null;
+      lineName?: string | null;
+      stationName?: string | null;
+      lastSyncedAt?: string | null;
+    } | null;
     registrationStatus?: "PENDING" | "APPROVED" | "REJECTED" | null;
     autoConnectEnabled?: boolean;
     licenseStatus?: string | null;
@@ -399,6 +407,10 @@ export class ServiceManager {
     return this.postDongilRuntime("reset");
   }
 
+  async disconnectDongilSync(): Promise<DongilSyncBootstrapResult> {
+    return this.postDongilRuntime("disconnect");
+  }
+
   async requestDongilRegistration(
     payload: DongilSyncBootstrapPayload,
   ): Promise<DongilSyncBootstrapResult> {
@@ -414,7 +426,12 @@ export class ServiceManager {
   }
 
   private async postDongilRuntime(
-    action: "configure" | "reset" | "registration-request" | "registration-status",
+    action:
+      | "configure"
+      | "disconnect"
+      | "reset"
+      | "registration-request"
+      | "registration-status",
     payload?: object,
   ): Promise<DongilSyncBootstrapResult> {
     const response = await fetch(

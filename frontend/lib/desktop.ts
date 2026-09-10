@@ -142,6 +142,14 @@ export type DesktopDongilStatus = {
   machineId: string | null;
   machineTypeCode: string | null;
   assignedMachineTypeCode: string | null;
+  machineInfo: {
+    displayName: string | null;
+    isActive: boolean;
+    factoryName: string | null;
+    lineName: string | null;
+    stationName: string | null;
+    lastSyncedAt: string | null;
+  } | null;
   registrationStatus: "PENDING" | "APPROVED" | "REJECTED" | null;
   autoConnectEnabled: boolean;
   licenseStatus: string | null;
@@ -221,6 +229,9 @@ export type DesktopBridge = {
     status: { data?: DesktopDongilStatus };
   }>;
   resetDongilSettings(
+    accessToken: string,
+  ): Promise<{ status: { data?: DesktopDongilStatus } }>;
+  disconnectDongilServer(
     accessToken: string,
   ): Promise<{ status: { data?: DesktopDongilStatus } }>;
   requestDongilRegistration(

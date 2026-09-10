@@ -41,7 +41,8 @@ DEV/ADMIN can also open **Settings → General → Dongil Server** to:
 - enter only `<server-ip>`; Electron derives `http://<server-ip>:3979`;
 - test `/api/v1/health` without changing the saved value;
 - save the server configuration without registering or connecting;
-- reset the server configuration, which disconnects immediately and clears the saved URL, local registration state, credential, and assignment cache while retaining pending outbox results;
+- reset the server configuration, which disconnects immediately and clears the saved URL, local registration state, credential, and assignment cache while retaining pending outbox results and the last synchronized machine-information cache;
+- disconnect the current server without clearing its configuration; this disables automatic reconnection until a DEV/ADMIN explicitly connects again;
 - send a registration request, refresh its state immediately, and explicitly connect only after server approval;
 - view machine ID/type, connection state, runtime state, pending outbox count, last heartbeat and last error.
 
@@ -68,7 +69,7 @@ Payload:
 
 The server creates a `PENDING` request and returns a registration token. Electron encrypts it with `safeStorage`; PostgreSQL stores only non-secret registration state. The local app checks approval every 10 seconds and also provides **Cập nhật trạng thái đăng ký ngay**. Neither action opens WebSocket.
 
-DEV/ADMIN approves or rejects the request on Dongil Server. Approval activates the same token as the machine credential. The first connection still requires the local user to press **Kết nối server**. After that first explicit connection succeeds, later application launches may reconnect automatically.
+DEV/ADMIN approves or rejects the request on Dongil Server. Approval activates the same token as the machine credential. After a successful connection, later application launches reconnect automatically unless a local DEV/ADMIN explicitly selects **Ngắt kết nối server**.
 
 If the one-time credential is lost after registration, automatic registration cannot reveal it again. Use the controlled credential rotation/recovery flow on Dongil Server.
 
@@ -132,8 +133,65 @@ On startup, legacy `BLOCKED_CONFIG` rows are returned to `PENDING` with their or
 Local tables:
 
 - `DongilSyncConfiguration`: non-secret identity/configuration state;
+- `DongilMachineInfo`: latest server-confirmed display name, activation state, and factory/line/station metadata for this local machine; it is retained across disconnect/reset and changes only when a later registration-status response differs;
 - `DongilProductAssignment`: transition cache for legacy/future server configuration;
 - `DongilSyncOutbox`: immutable product identity, result payload, washing OK/NG counts and delivery state.
+
+## Historical washing-result synchronization
+
+DEV/ADMIN can start **Đồng bộ lịch sử máy rửa** from the Dongil Server
+settings panel once the machine is connected. The action creates an immutable
+local snapshot before any historical result is uploaded. It is intended for a
+machine that has accumulated local data while offline for a long period.
+
+- Every snapshot item uses its existing stable `localResultId` and original
+  `inspectedAt`. The client never generates a replacement ID for old data and
+  never substitutes the server receipt time for the inspection time.
+- The worker sends no more than 500 items to
+  `POST /api/v1/machine-types/washing/inspection-results/batches`, with the
+  current `Machine` credential and `X-Machine-Id` header. `ACCEPTED` and
+  `REPLAYED` are both durable delivery confirmations; a failed item remains
+  local with its last error and retry state.
+- The snapshot, batch ID, per-item delivery result, retry timing and checkpoint
+  are stored in PostgreSQL. A restart returns in-flight items to a retryable
+  state and resumes the same snapshot after reconnecting.
+- Successful verification is persisted on the outbox record. Later runs include
+  only new, changed, unconfirmed or unverified results. A changed or newly
+  imported result invalidates its previous verification and makes its
+  day/session eligible again.
+- Upload and reconciliation have separate durable completion timestamps. The UI
+  reports upload success immediately, then reconciliation starts automatically.
+  A reconciliation error does not turn the completed upload phase into an
+  upload failure.
+- Counter reconciliation uses the complete local total for each affected
+  day/session. If a counter differs, that scope expands to verify every stable
+  local result ID before the final counter check.
+- Starting another run when no result needs upload or verification returns a
+  successful no-op. The local UI reports that data is already current and shows
+  the most recent completed verification time instead of presenting an error.
+- New PLC captures continue to be stored in `InspectionLog` and the ordinary
+  outbox first. They are deliberately outside the historical snapshot and are
+  sent only after that snapshot no longer owns the delivery worker.
+- The historical worker reconciles each local session (or Asia/Ho_Chi_Minh day
+  where no session exists) with `POST /api/v1/sync/reconcile`, then verifies
+  every `localResultId` in groups of at most 500 through
+  `POST /api/v1/sync/reconcile/result-ids`. Missing IDs are requeued and
+  rechecked. A final counter mismatch after all IDs are present blocks the run
+  for manual investigation instead of claiming completion.
+- A result reconstructed from older `InspectionLog` data is eligible only when
+  it has an existing `plcCaptureId`, related product and usable OK/NG counts.
+  Records that lack a stable historical identity are saved to the local manual
+  review list; no ID is fabricated.
+- The Processing screen shows batch/result progress, newly accepted, replayed
+  and failed counts, the latest batch/retry/checkpoint and manual-review count.
+  **Tiếp tục vận hành** only hides this screen; it does not pause the backend
+  worker. All signed-in operational roles with the view permission can see
+  progress. The manage permission is required to start, pause, resume or retry
+  failures.
+
+`DongilSyncWorkerLease` is a shared database lease: the normal outbox sender
+and historical sender cannot post batches concurrently for the same machine.
+No local inspection data is deleted after server confirmation.
 
 ## One-machine pilot checklist
 

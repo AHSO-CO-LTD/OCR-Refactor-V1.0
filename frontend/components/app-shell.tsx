@@ -6,6 +6,10 @@ import { Fragment, ReactNode, useCallback, useEffect, useRef, useState } from "r
 import { toast } from "sonner";
 import { AccountMenu } from "@/components/account-menu";
 import { BrandLogo } from "@/components/brand/brand-logo";
+import {
+  DONGIL_HISTORY_SYNC_NAVBAR_SLOT_ID,
+  DongilHistorySyncProcessing,
+} from "@/components/dongil/dongil-history-sync-processing";
 import { DevPlcSimulator } from "@/components/plc/dev-plc-simulator";
 import { MachineRuntimeOverlay } from "@/components/plc/machine-runtime-overlay";
 import { useMachineUserActivity } from "@/components/plc/use-machine-user-activity";
@@ -310,6 +314,12 @@ export function AppShell({ children }: AppShellProps) {
   );
   const canManageDesktopSettings = true;
   const usesSidebar = displayUser?.role === "dev" || displayUser?.role === "admin";
+  const canViewDongilHistorySync =
+    user?.isDev === true ||
+    user?.permissions.includes("dongil.history-sync.view") === true;
+  const canManageDongilHistorySync =
+    user?.isDev === true ||
+    user?.permissions.includes("dongil.history-sync.manage") === true;
   const showNavbar = !usesSidebar && visibleMenuItems.length > 1;
   const visibleAdminGroups = navGroups
     .map((group) => ({
@@ -414,6 +424,14 @@ export function AppShell({ children }: AppShellProps) {
                 priority
                 variant="factory"
               />
+              {dongilStatus?.machineInfo?.displayName ? (
+                <span
+                  className="ml-3 flex h-9 max-w-40 items-center truncate border border-sky-200 bg-sky-50 px-3 text-sm font-semibold text-sky-950 sm:max-w-56"
+                  title={dongilStatus.machineInfo.displayName}
+                >
+                  {dongilStatus.machineInfo.displayName}
+                </span>
+              ) : null}
             </div>
             {usesSidebar ? (
               <div
@@ -501,7 +519,11 @@ export function AppShell({ children }: AppShellProps) {
                 </div>
               </div>
             ) : null}
-            <div className="app-shell-account col-start-2 row-start-1 flex min-w-0 items-center justify-end text-sm min-[1180px]:col-start-3">
+            <div className="app-shell-account col-start-2 row-start-1 flex min-w-0 items-center justify-end gap-2 text-sm min-[1180px]:col-start-3">
+              <div
+                id={DONGIL_HISTORY_SYNC_NAVBAR_SLOT_ID}
+                className="min-w-0 shrink-0"
+              />
               <AccountMenu
                 canManageDesktopSettings={canManageDesktopSettings}
                 canPreviewRoles={user?.isDev === true}
@@ -564,6 +586,10 @@ export function AppShell({ children }: AppShellProps) {
         {user?.role === "dev" ? (
           <DevPlcSimulator userId={user.id} />
         ) : null}
+        <DongilHistorySyncProcessing
+          enabled={canViewDongilHistorySync}
+          canManage={canManageDongilHistorySync}
+        />
       </div>
     </main>
   );

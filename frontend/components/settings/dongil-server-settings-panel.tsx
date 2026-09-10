@@ -2,7 +2,10 @@
 
 import {
   Activity,
+  CheckCircle2,
+  CloudUpload,
   RotateCcw,
+  Unplug,
   Link2,
   PlugZap,
   RefreshCw,
@@ -22,6 +25,11 @@ import {
 } from "@/components/ui/card";
 import { ConfirmModal } from "@/components/ui/confirm-modal";
 import { Input } from "@/components/ui/input";
+import {
+  getDongilHistorySyncCurrent,
+  startDongilHistorySync,
+  type DongilHistorySyncRun,
+} from "@/lib/api";
 import { getDesktopBridge } from "@/lib/desktop";
 import {
   buildDongilServerUrl,
@@ -45,8 +53,17 @@ export function DongilServerSettingsPanel() {
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [resetConfirmOpen, setResetConfirmOpen] = useState(false);
   const [resetting, setResetting] = useState(false);
-  const role = getStoredUser()?.role;
+  const [disconnecting, setDisconnecting] = useState(false);
+  const [historySyncRun, setHistorySyncRun] =
+    useState<DongilHistorySyncRun | null>(null);
+  const [historySyncStarting, setHistorySyncStarting] = useState(false);
+  const [historySyncConfirmOpen, setHistorySyncConfirmOpen] = useState(false);
+  const storedUser = getStoredUser();
+  const role = storedUser?.role;
   const canManage = role === "dev" || role === "admin";
+  const canManageHistorySync =
+    storedUser?.isDev === true ||
+    storedUser?.permissions.includes("dongil.history-sync.manage") === true;
 
   const savedIp = status?.serverUrl
     ? (getDongilServerIp(status.serverUrl) ?? "")
@@ -71,6 +88,29 @@ export function DongilServerSettingsPanel() {
     window.addEventListener("beforeunload", handleBeforeUnload);
     return () => window.removeEventListener("beforeunload", handleBeforeUnload);
   }, [dirty]);
+
+  useEffect(() => {
+    if (!canManageHistorySync) return;
+    let cancelled = false;
+
+    async function loadHistoryRun() {
+      const accessToken = getAccessToken();
+      if (!accessToken) return;
+      try {
+        const response = await getDongilHistorySyncCurrent(accessToken);
+        if (!cancelled) setHistorySyncRun(response.data);
+      } catch {
+        // The processing surface presents its own recoverable status message.
+      }
+    }
+
+    void loadHistoryRun();
+    const timer = window.setInterval(() => void loadHistoryRun(), 5_000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [canManageHistorySync]);
 
   async function testConnection() {
     const bridge = getDesktopBridge();
@@ -162,7 +202,7 @@ export function DongilServerSettingsPanel() {
     if (
       !bridge ||
       !accessToken ||
-      status?.state !== "REGISTRATION_APPROVED" ||
+      status?.registrationStatus !== "APPROVED" ||
       !canManage
     )
       return;
@@ -202,7 +242,55 @@ export function DongilServerSettingsPanel() {
     }
   }
 
+  async function disconnectServer() {
+    const bridge = getDesktopBridge();
+    const accessToken = getAccessToken();
+    if (!bridge || !accessToken || !canManage) return;
+    setDisconnecting(true);
+    try {
+      await bridge.disconnectDongilServer(accessToken);
+      await refresh();
+      toast.success(t("settings.dongilDisconnected"));
+    } catch (cause) {
+      toast.error(
+        cause instanceof Error
+          ? cause.message
+          : t("settings.dongilDisconnectFailed"),
+      );
+    } finally {
+      setDisconnecting(false);
+    }
+  }
+
+  async function startHistorySynchronization() {
+    const accessToken = getAccessToken();
+    if (!accessToken || !canManageHistorySync || !online || dirty) return;
+    setHistorySyncStarting(true);
+    try {
+      const response = await startDongilHistorySync(accessToken);
+      setHistorySyncRun(response.data);
+      setHistorySyncConfirmOpen(false);
+      toast.success(
+        t(
+          response.alreadyVerified
+            ? "historySync.alreadyVerified"
+            : "historySync.startSuccess",
+        ),
+      );
+    } catch (cause) {
+      toast.error(
+        cause instanceof Error ? cause.message : t("historySync.startFailed"),
+      );
+    } finally {
+      setHistorySyncStarting(false);
+    }
+  }
+
   const online = status?.state === "ONLINE" && status.socketConnected;
+  const historySyncActive =
+    historySyncRun !== null &&
+    historySyncRun.state !== "COMPLETED" &&
+    historySyncRun.state !== "CANCELLED";
   return (
     <section className="grid gap-5 xl:grid-cols-[minmax(0,1.35fr)_minmax(20rem,0.65fr)]">
       <Card>
@@ -276,6 +364,22 @@ export function DongilServerSettingsPanel() {
               <Button
                 type="button"
                 variant="outline"
+                disabled={!savedIp || status?.state === "DISABLED" || disconnecting}
+                onClick={() => void disconnectServer()}
+              >
+                <Unplug
+                  className={cn("h-4 w-4", disconnecting && "animate-pulse")}
+                  aria-hidden="true"
+                />
+                {disconnecting
+                  ? t("settings.dongilDisconnecting")
+                  : t("settings.dongilDisconnect")}
+              </Button>
+            ) : null}
+            {canManage ? (
+              <Button
+                type="button"
+                variant="outline"
                 className="border-red-300 text-red-700 hover:bg-red-50 hover:text-red-800"
                 disabled={!savedIp || resetting}
                 onClick={() => setResetConfirmOpen(true)}
@@ -310,7 +414,7 @@ export function DongilServerSettingsPanel() {
               <Button
                 type="button"
                 disabled={
-                  status?.state !== "REGISTRATION_APPROVED" ||
+                  status?.registrationStatus !== "APPROVED" ||
                   online ||
                   connecting
                 }
@@ -326,6 +430,60 @@ export function DongilServerSettingsPanel() {
               </Button>
             ) : null}
           </div>
+
+          {canManageHistorySync ? (
+            <div className="border border-cyan-200 bg-cyan-50 p-4">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <p className="font-semibold text-cyan-950">
+                    {t("historySync.startTitle")}
+                  </p>
+                  <p className="mt-1 text-sm leading-6 text-cyan-900">
+                    {historySyncActive
+                      ? t("historySync.alreadyRunning")
+                      : t("historySync.startDescription")}
+                  </p>
+                  {historySyncRun?.lastSuccessfulVerificationAt ? (
+                    <p className="mt-2 flex items-center gap-2 text-sm font-medium text-emerald-800">
+                      <CheckCircle2
+                        className="h-4 w-4 shrink-0"
+                        aria-hidden="true"
+                      />
+                      {t("historySync.lastSuccessfulSync").replace(
+                        "{time}",
+                        formatTimestamp(
+                          historySyncRun.lastSuccessfulVerificationAt,
+                        ) ?? "",
+                      )}
+                    </p>
+                  ) : null}
+                </div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="border-cyan-300 bg-white text-cyan-950 hover:bg-cyan-100"
+                  disabled={
+                    !online ||
+                    dirty ||
+                    historySyncStarting ||
+                    historySyncActive
+                  }
+                  onClick={() => setHistorySyncConfirmOpen(true)}
+                >
+                  <CloudUpload
+                    className={cn(
+                      "h-4 w-4",
+                      historySyncStarting && "animate-pulse",
+                    )}
+                    aria-hidden="true"
+                  />
+                  {historySyncStarting
+                    ? t("historySync.starting")
+                    : t("historySync.start")}
+                </Button>
+              </div>
+            </div>
+          ) : null}
         </CardContent>
       </Card>
 
@@ -381,6 +539,32 @@ export function DongilServerSettingsPanel() {
           <StatusRow
             label={t("settings.dongilRegistrationStatus")}
             value={status?.registrationStatus}
+          />
+          <StatusRow
+            label={t("settings.dongilMachineName")}
+            value={status?.machineInfo?.displayName}
+          />
+          <StatusRow
+            label={t("settings.dongilMachineActive")}
+            value={
+              status?.machineInfo
+                ? status.machineInfo.isActive
+                  ? t("settings.dongilActive")
+                  : t("settings.dongilInactive")
+                : null
+            }
+          />
+          <StatusRow
+            label={t("settings.dongilFactory")}
+            value={status?.machineInfo?.factoryName}
+          />
+          <StatusRow
+            label={t("settings.dongilLine")}
+            value={status?.machineInfo?.lineName}
+          />
+          <StatusRow
+            label={t("settings.dongilStation")}
+            value={status?.machineInfo?.stationName}
           />
           <Button
             type="button"
@@ -443,6 +627,18 @@ export function DongilServerSettingsPanel() {
         destructive
         onConfirm={() => void resetConfiguration()}
         onCancel={() => setResetConfirmOpen(false)}
+      />
+      <ConfirmModal
+        open={historySyncConfirmOpen}
+        title={t("historySync.startConfirmTitle")}
+        description={t("historySync.startConfirmDescription")}
+        confirmLabel={
+          historySyncStarting ? t("historySync.starting") : t("historySync.start")
+        }
+        cancelLabel={t("common.cancel")}
+        loading={historySyncStarting}
+        onConfirm={() => void startHistorySynchronization()}
+        onCancel={() => setHistorySyncConfirmOpen(false)}
       />
     </section>
   );

@@ -5,7 +5,12 @@ import {
   type OnModuleInit,
 } from '@nestjs/common';
 import { ModuleRef } from '@nestjs/core';
-import { DongilSyncOutboxStatus, Prisma } from '@prisma/client';
+import {
+  DongilDeliveryDisposition,
+  DongilHistorySyncRunState,
+  DongilSyncOutboxStatus,
+  Prisma,
+} from '@prisma/client';
 import { randomUUID } from 'node:crypto';
 import { io, type Socket } from 'socket.io-client';
 import { PrismaService } from '../database/prisma.service';
@@ -18,6 +23,7 @@ import {
   DongilApiError,
   type DongilBatchItem,
   type DongilMachineConfig,
+  type DongilRegistrationStatus,
 } from './dongil-api.client';
 import type { BootstrapDongilSyncDto } from './dto/bootstrap-dongil-sync.dto';
 import type { RegistrationStatusDto } from './dto/registration-status.dto';
@@ -25,6 +31,8 @@ import type { RegistrationStatusDto } from './dto/registration-status.dto';
 const CONFIGURATION_ID = 'default';
 const WORKER_INTERVAL_MS = 5_000;
 const DEFAULT_HEARTBEAT_INTERVAL_MS = 10_000;
+const OUTBOX_WORKER_LEASE_ID = 'default';
+const OUTBOX_WORKER_LEASE_MS = 120_000;
 function describeError(error: unknown) {
   return error instanceof Error ? error.message : 'Unknown Dongil Server error';
 }
@@ -86,6 +94,7 @@ export function normalizeDongilOperationalStatus(
 @Injectable()
 export class DongilSyncService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(DongilSyncService.name);
+  private readonly workerLeaseOwnerId = randomUUID();
   private runtime: RuntimeConfiguration | null = null;
   private socket: Socket | null = null;
   private socketIdentityKey: string | null = null;
@@ -168,23 +177,27 @@ export class DongilSyncService implements OnModuleInit, OnModuleDestroy {
   }
 
   async getStatus() {
-    const [configuration, pendingSyncCount, latestFailure] = await Promise.all([
-      this.prisma.dongilSyncConfiguration.findUnique({
-        where: { id: CONFIGURATION_ID },
-      }),
-      this.prisma.dongilSyncOutbox.count({
-        where: { status: { not: DongilSyncOutboxStatus.SENT } },
-      }),
-      this.prisma.dongilSyncOutbox.findFirst({
-        where: { lastErrorMessage: { not: null } },
-        orderBy: { updatedAt: 'desc' },
-        select: {
-          lastErrorCode: true,
-          lastErrorMessage: true,
-          updatedAt: true,
-        },
-      }),
-    ]);
+    const [configuration, machineInfo, pendingSyncCount, latestFailure] =
+      await Promise.all([
+        this.prisma.dongilSyncConfiguration.findUnique({
+          where: { id: CONFIGURATION_ID },
+        }),
+        this.prisma.dongilMachineInfo.findUnique({
+          where: { id: CONFIGURATION_ID },
+        }),
+        this.prisma.dongilSyncOutbox.count({
+          where: { status: { not: DongilSyncOutboxStatus.SENT } },
+        }),
+        this.prisma.dongilSyncOutbox.findFirst({
+          where: { lastErrorMessage: { not: null } },
+          orderBy: { updatedAt: 'desc' },
+          select: {
+            lastErrorCode: true,
+            lastErrorMessage: true,
+            updatedAt: true,
+          },
+        }),
+      ]);
     const machineRuntime = this.getMachineRuntimeStatus();
     return {
       data: {
@@ -197,6 +210,16 @@ export class DongilSyncService implements OnModuleInit, OnModuleDestroy {
           configuration?.machineTypeCode ??
           null,
         assignedMachineTypeCode: configuration?.assignedMachineTypeCode ?? null,
+        machineInfo: machineInfo
+          ? {
+              displayName: machineInfo.displayName,
+              isActive: machineInfo.isActive,
+              factoryName: machineInfo.factoryName,
+              lineName: machineInfo.lineName,
+              stationName: machineInfo.stationName,
+              lastSyncedAt: machineInfo.lastSyncedAt,
+            }
+          : null,
         registrationStatus: configuration?.registrationStatus ?? null,
         autoConnectEnabled: configuration?.autoConnectEnabled ?? false,
         licenseStatus:
@@ -295,6 +318,15 @@ export class DongilSyncService implements OnModuleInit, OnModuleDestroy {
     };
   }
 
+  getRuntimeForHistorySync() {
+    if (!this.runtime) return null;
+    return {
+      serverUrl: this.runtime.serverUrl,
+      machineId: this.runtime.machineId,
+      credential: this.runtime.credential,
+    };
+  }
+
   async resetConfiguration() {
     this.disconnectSocket();
     this.runtime = null;
@@ -310,6 +342,18 @@ export class DongilSyncService implements OnModuleInit, OnModuleDestroy {
       this.prisma.dongilProductAssignment.deleteMany(),
     ]);
 
+    return { data: { state: this.connectionState } };
+  }
+
+  async disconnect() {
+    this.disconnectSocket();
+    this.runtime = null;
+    this.connectionState = 'DISABLED';
+    this.lastErrorMessage = null;
+    await this.prisma.dongilSyncConfiguration.updateMany({
+      where: { id: CONFIGURATION_ID },
+      data: { autoConnectEnabled: false },
+    });
     return { data: { state: this.connectionState } };
   }
 
@@ -353,6 +397,11 @@ export class DongilSyncService implements OnModuleInit, OnModuleDestroy {
     const registration = await new DongilApiClient(
       serverUrl,
     ).getRegistrationStatus(dto.machineId, dto.registrationToken);
+    await this.persistMachineInfo({
+      serverUrl,
+      machineId: dto.machineId,
+      registration,
+    });
     const state: DongilConnectionState =
       registration.registrationStatus === 'APPROVED'
         ? registration.credentialReady
@@ -438,6 +487,11 @@ export class DongilSyncService implements OnModuleInit, OnModuleDestroy {
       dto.machineId,
       credential,
     );
+    await this.persistMachineInfo({
+      serverUrl,
+      machineId: dto.machineId,
+      registration,
+    });
     if (
       registration.registrationStatus !== 'APPROVED' ||
       !registration.credentialReady
@@ -484,6 +538,10 @@ export class DongilSyncService implements OnModuleInit, OnModuleDestroy {
       data: {
         assignedMachineTypeCode: config.assignedMachineType.code,
         registrationStatus: 'APPROVED',
+        // A successful credential/config bootstrap is enough to resume HTTP
+        // synchronization after restart; WebSocket acknowledgement is not a
+        // prerequisite for the history worker.
+        autoConnectEnabled: true,
         lastRegisteredAt: new Date(),
         lastConfigSyncAt: new Date(),
       },
@@ -497,6 +555,49 @@ export class DongilSyncService implements OnModuleInit, OnModuleDestroy {
         assignmentCount: config.assignments.length,
       },
     };
+  }
+
+  private async persistMachineInfo(input: {
+    serverUrl: string;
+    machineId: string;
+    registration: DongilRegistrationStatus;
+  }) {
+    const existing = await this.prisma.dongilMachineInfo.findUnique({
+      where: { id: CONFIGURATION_ID },
+    });
+    const next = {
+      serverUrl: input.serverUrl,
+      machineId: input.machineId,
+      displayName: input.registration.displayName,
+      isActive: input.registration.isActive,
+      factoryName: input.registration.factoryName,
+      lineName: input.registration.lineName,
+      stationName: input.registration.stationName,
+    };
+    const changed =
+      !existing ||
+      existing.serverUrl !== next.serverUrl ||
+      existing.machineId !== next.machineId ||
+      existing.displayName !== next.displayName ||
+      existing.isActive !== next.isActive ||
+      existing.factoryName !== next.factoryName ||
+      existing.lineName !== next.lineName ||
+      existing.stationName !== next.stationName;
+
+    if (!changed) return;
+
+    await this.prisma.dongilMachineInfo.upsert({
+      where: { id: CONFIGURATION_ID },
+      create: {
+        id: CONFIGURATION_ID,
+        ...next,
+        lastSyncedAt: new Date(),
+      },
+      update: {
+        ...next,
+        lastSyncedAt: new Date(),
+      },
+    });
   }
 
   private async persistAssignments(config: DongilMachineConfig) {
@@ -623,9 +724,25 @@ export class DongilSyncService implements OnModuleInit, OnModuleDestroy {
   }
 
   private async flushOutbox() {
-    if (this.workerRunning || !this.runtime) return;
-    this.workerRunning = true;
+    const runtime = this.runtime;
+    if (this.workerRunning || !runtime) return;
+    if (!(await this.acquireOutboxWorkerLease())) return;
     try {
+      const historyRun = await this.prisma.dongilHistorySyncRun.findFirst({
+        where: {
+          state: {
+            in: [
+              DongilHistorySyncRunState.PREPARING,
+              DongilHistorySyncRunState.RUNNING,
+              DongilHistorySyncRunState.PAUSED,
+              DongilHistorySyncRunState.BLOCKED,
+            ],
+          },
+        },
+        select: { id: true },
+      });
+      if (historyRun) return;
+      this.workerRunning = true;
       const rows = await this.prisma.dongilSyncOutbox.findMany({
         where: {
           status: {
@@ -642,7 +759,7 @@ export class DongilSyncService implements OnModuleInit, OnModuleDestroy {
         where: { id: { in: ids } },
         data: { status: DongilSyncOutboxStatus.SENDING },
       });
-      const client = new DongilApiClient(this.runtime.serverUrl);
+      const client = new DongilApiClient(runtime.serverUrl);
       const washingRows = rows.filter(
         (row) => row.okCount !== null && row.ngCount !== null,
       );
@@ -652,8 +769,8 @@ export class DongilSyncService implements OnModuleInit, OnModuleDestroy {
       if (washingRows.length > 0) {
         const keepRunning = await this.sendOutboxGroup(washingRows, () =>
           client.sendWashingBatch(
-            this.runtime!.machineId,
-            this.runtime!.credential,
+            runtime.machineId,
+            runtime.credential,
             {
               localBatchId: randomUUID(),
               items: washingRows.map((row) => ({
@@ -668,7 +785,7 @@ export class DongilSyncService implements OnModuleInit, OnModuleDestroy {
       }
       if (legacyRows.length > 0) {
         await this.sendOutboxGroup(legacyRows, () =>
-          client.sendBatch(this.runtime!.machineId, this.runtime!.credential, {
+          client.sendBatch(runtime.machineId, runtime.credential, {
             localBatchId: randomUUID(),
             items: legacyRows.map((row) => this.toResultPayload(row)),
           }),
@@ -676,6 +793,7 @@ export class DongilSyncService implements OnModuleInit, OnModuleDestroy {
       }
     } finally {
       this.workerRunning = false;
+      await this.releaseOutboxWorkerLease();
     }
   }
 
@@ -752,6 +870,10 @@ export class DongilSyncService implements OnModuleInit, OnModuleDestroy {
         where: { id },
         data: {
           status: DongilSyncOutboxStatus.SENT,
+          deliveryDisposition:
+            outcome.disposition === 'ACCEPTED'
+              ? DongilDeliveryDisposition.ACCEPTED
+              : DongilDeliveryDisposition.REPLAYED,
           attemptCount: { increment: 1 },
           sentAt: new Date(),
           lastErrorCode: null,
@@ -795,6 +917,30 @@ export class DongilSyncService implements OnModuleInit, OnModuleDestroy {
   private nextRetryAt(attempt: number) {
     const base = Math.min(5_000 * 2 ** Math.min(attempt, 7), 10 * 60_000);
     return new Date(Date.now() + base + Math.floor(Math.random() * 2_000));
+  }
+
+  private async acquireOutboxWorkerLease() {
+    const now = new Date();
+    const expiresAt = new Date(now.getTime() + OUTBOX_WORKER_LEASE_MS);
+    const result = await this.prisma.dongilSyncWorkerLease.updateMany({
+      where: {
+        id: OUTBOX_WORKER_LEASE_ID,
+        OR: [
+          { expiresAt: null },
+          { expiresAt: { lte: now } },
+          { ownerId: this.workerLeaseOwnerId },
+        ],
+      },
+      data: { ownerId: this.workerLeaseOwnerId, expiresAt },
+    });
+    return result.count === 1;
+  }
+
+  private async releaseOutboxWorkerLease() {
+    await this.prisma.dongilSyncWorkerLease.updateMany({
+      where: { id: OUTBOX_WORKER_LEASE_ID, ownerId: this.workerLeaseOwnerId },
+      data: { ownerId: null, expiresAt: null },
+    });
   }
 
   private clearHeartbeat() {

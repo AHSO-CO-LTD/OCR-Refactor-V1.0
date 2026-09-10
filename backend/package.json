@@ -23,6 +23,7 @@
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
     "prisma:seed": "prisma db seed",
+    "prisma:seed:history-sample": "ts-node prisma/seed-history-sync-sample.ts",
     "db:studio": "prisma studio"
   },
   "prisma": {

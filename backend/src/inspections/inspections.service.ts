@@ -1189,6 +1189,21 @@ export class InspectionsService {
       throw new NotFoundException('Inspection job not found');
     }
 
+    if (
+      endReason === LineSessionEndReason.product_change &&
+      this.latestCompletedLineDetection?.jobId === jobId
+    ) {
+      this.latestCompletedLineDetection = null;
+    }
+
+    if (
+      endReason === LineSessionEndReason.product_change &&
+      job.status === InspectionStatus.running &&
+      (await this.deleteEmptyProductChangeSession(jobId))
+    ) {
+      return { data: null, emptySessionDeleted: true };
+    }
+
     const nextStatus =
       job.status === InspectionStatus.failed
         ? InspectionStatus.failed
@@ -1210,6 +1225,57 @@ export class InspectionsService {
     await this.writeLineResultSession(jobId);
 
     return { data: await this.buildInspectionState(jobId) };
+  }
+
+  private async deleteEmptyProductChangeSession(jobId: string) {
+    return this.prisma.$transaction(
+      async (transaction) => {
+        const job = await transaction.inspectionJob.findUnique({
+          where: { id: jobId },
+          select: {
+            resultSavedAt: true,
+            resultSessionFolderName: true,
+            status: true,
+          },
+        });
+
+        if (
+          !job ||
+          job.status !== InspectionStatus.running ||
+          job.resultSavedAt ||
+          job.resultSessionFolderName
+        ) {
+          return false;
+        }
+
+        const [logCount, outboxCount, historyItemCount] = await Promise.all([
+          transaction.inspectionLog.count({ where: { jobId } }),
+          transaction.dongilSyncOutbox.count({
+            where: { localSessionId: jobId },
+          }),
+          transaction.dongilHistorySyncItem.count({
+            where: { localSessionId: jobId },
+          }),
+        ]);
+
+        if (logCount > 0 || outboxCount > 0 || historyItemCount > 0) {
+          return false;
+        }
+
+        const deleted = await transaction.inspectionJob.deleteMany({
+          where: {
+            id: jobId,
+            status: InspectionStatus.running,
+            resultSavedAt: null,
+            resultSessionFolderName: null,
+            logs: { none: {} },
+          },
+        });
+
+        return deleted.count === 1;
+      },
+      { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+    );
   }
 
   async stopCurrentInspection(endReason: LineSessionEndReason) {

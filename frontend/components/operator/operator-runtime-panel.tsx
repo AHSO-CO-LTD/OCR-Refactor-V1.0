@@ -173,9 +173,14 @@ export function OperatorRuntimePanel() {
   const currentJobIdRef = useRef("");
   const autoRunRef = useRef(false);
   const scanRunningRef = useRef(false);
+  const selectedProductIdRef = useRef(demoProducts[0].id);
+  const queuedProductChangeRef = useRef("");
+  const productChangeRunningRef = useRef(false);
+  const machineStartRequestRef = useRef<Promise<void> | null>(null);
   const lastPlcInspectionSequenceRef = useRef(0);
   const lastLiveInspectionSequenceRef = useRef(0);
   const lastCameraFrameSequenceRef = useRef(0);
+  const runtimeSequencesInitializedRef = useRef(false);
   const runtimeDefaultsAppliedRef = useRef(false);
   const operationStartupProductRef = useRef("");
   const liveRoiFingerprintsRef = useRef<Record<number, string>>({});
@@ -258,6 +263,10 @@ export function OperatorRuntimePanel() {
     machineIdleReason,
   );
   const machineControlsLocked = areMachineControlsLocked(machineRuntimeState);
+
+  useEffect(() => {
+    selectedProductIdRef.current = selectedProductId;
+  }, [selectedProductId]);
 
   useEffect(() => {
     if (!keypadOpen) {
@@ -570,6 +579,7 @@ export function OperatorRuntimePanel() {
     liveRoiStatusesRef.current = {};
     liveRoiLabelsRef.current = {};
     setAnimationState("UNKNOWN");
+    setBatchQuantity(0);
     setActiveRoiIndexes([]);
     setRoiStatuses({});
     setRoiDetectedTextLabels({});
@@ -583,6 +593,13 @@ export function OperatorRuntimePanel() {
     setBatchCount(inspection.batch);
     setOkCount(inspection.okCount);
     setNgCount(inspection.ngCount);
+  }
+
+  function applyRuntimeSequenceBaseline(status: MachineRuntimeStatus) {
+    lastPlcInspectionSequenceRef.current = status.lastPlcInspectionSequence;
+    lastLiveInspectionSequenceRef.current = status.liveInspectionSequence;
+    lastCameraFrameSequenceRef.current = status.cameraFrameSequence;
+    runtimeSequencesInitializedRef.current = true;
   }
 
   function handleRoiChange(newRois: typeof selectedProduct.roiRegions) {
@@ -635,63 +652,151 @@ export function OperatorRuntimePanel() {
     }
   }
 
-  async function handleProductChange(nextProductId: string) {
+  async function applyProductChange(nextProductId: string) {
+    const accessToken = getAccessToken();
+    const nextProduct = products.find(
+      (product) => product.id === nextProductId,
+    );
+
+    if (!accessToken) {
+      toast.error(t("users.missingSession"));
+      return;
+    }
+    if (!nextProduct) return;
+
+    try {
+      const [currentResponse, runtimeResponse] = await Promise.all([
+        getCurrentInspection(accessToken),
+        getMachineRuntimeStatus(accessToken),
+      ]);
+      const currentInspection = currentResponse.data;
+      const runtime = runtimeResponse.data;
+      const waitForPlcStart = isPlcStopAwaitingStart(
+        runtime.state,
+        runtime.idleReason,
+      );
+
+      applyRuntimeSequenceBaseline(runtime);
+
+      if (
+        currentInspection &&
+        currentInspection.productId !== nextProductId
+      ) {
+        await stopInspection(
+          accessToken,
+          currentInspection.jobId,
+          "product_change",
+        );
+        currentJobIdRef.current = "";
+      }
+
+      const inspection =
+        currentInspection?.productId === nextProductId
+          ? currentInspection
+          : (await beginInspectionSession(accessToken, nextProductId)).data;
+
+      currentJobIdRef.current = inspection.jobId;
+      operationStartupProductRef.current = nextProductId;
+      pendingProductStartRef.current = "";
+      pendingProductSessionErrorRef.current = "";
+      pendingProductSessionRetryAtRef.current = 0;
+      selectedProductIdRef.current = nextProductId;
+      setSelectedProductId(nextProductId);
+      setKeypadOpen(false);
+      applyInspectionCounters(inspection);
+      resetAnimationState();
+      setMachineRuntimeState(runtime.state);
+      applyRuntimeControls(runtime);
+
+      if (waitForPlcStart) {
+        autoRunRef.current = false;
+        setAutoRunning(false);
+        toast.info(t("operator.productChangedWaitingStart"));
+      } else if (
+        runtime.state === "running" ||
+        runtime.state === "resuming" ||
+        runtime.state === "waiting_camera"
+      ) {
+        const machineIsRunning = runtime.state === "running";
+        autoRunRef.current = machineIsRunning;
+        setAutoRunning(machineIsRunning);
+        toast.info(t("operator.productChangedSessionRestarted"));
+      } else if (
+        runtime.state === "stopping" ||
+        runtime.state === "idle_machine_stop" ||
+        runtime.state === "idle_capture_timeout" ||
+        runtime.state === "restart_required"
+      ) {
+        autoRunRef.current = false;
+        setAutoRunning(false);
+        toast.info(t("operator.productChangedSessionRestarted"));
+      } else {
+        toast.info(t("operator.productChangedSessionRestarted"));
+
+        if (!machineStartRequestRef.current) {
+          const request = startMachineOperation(accessToken)
+            .then((response) => {
+              const startedRuntime = response.data;
+              const machineIsRunning = startedRuntime.state === "running";
+              autoRunRef.current = machineIsRunning;
+              setAutoRunning(machineIsRunning);
+              setMachineRuntimeState(startedRuntime.state);
+              applyRuntimeControls(startedRuntime);
+            })
+            .catch((cause: unknown) => {
+              toast.error(
+                cause instanceof ApiError
+                  ? cause.message
+                  : t("lineAnimationTest.realTestFailed"),
+              );
+            })
+            .finally(() => {
+              machineStartRequestRef.current = null;
+            });
+          machineStartRequestRef.current = request;
+        }
+      }
+    } catch (cause) {
+      toast.error(
+        cause instanceof ApiError
+          ? cause.message
+          : t("lineAnimationTest.realTestFailed"),
+      );
+    }
+  }
+
+  async function processProductChangeQueue() {
+    if (productChangeRunningRef.current) return;
+
+    productChangeRunningRef.current = true;
+    setChangingProduct(true);
+    try {
+      while (queuedProductChangeRef.current) {
+        const nextProductId = queuedProductChangeRef.current;
+        queuedProductChangeRef.current = "";
+        if (nextProductId === selectedProductIdRef.current) continue;
+        await applyProductChange(nextProductId);
+      }
+    } finally {
+      productChangeRunningRef.current = false;
+      setChangingProduct(false);
+      if (queuedProductChangeRef.current) {
+        void processProductChangeQueue();
+      }
+    }
+  }
+
+  function handleProductChange(nextProductId: string) {
+    if (scanRunningRef.current) return;
     if (
-      nextProductId === selectedProductId ||
-      changingProduct ||
-      scanRunningRef.current
+      nextProductId === selectedProductIdRef.current &&
+      !productChangeRunningRef.current
     ) {
       return;
     }
 
-    const wasAutoRunning = autoRunRef.current || autoRunning;
-    const waitForPlcStart = isPlcStopAwaitingStart(
-      machineRuntimeState,
-      machineIdleReason,
-    );
-    setChangingProduct(true);
-    autoRunRef.current = false;
-    setAutoRunning(false);
-
-    try {
-      if (currentJobIdRef.current) {
-        const stopped = await stopCurrentInspection({
-          endReason: "product_change",
-          showToast: false,
-          stopMachine: !wasAutoRunning && !waitForPlcStart,
-        });
-        if (!stopped) return;
-      }
-
-      pendingProductStartRef.current = waitForPlcStart ? nextProductId : "";
-      pendingProductSessionErrorRef.current = "";
-      pendingProductSessionRetryAtRef.current = 0;
-      if (wasAutoRunning || waitForPlcStart) {
-        operationStartupProductRef.current = nextProductId;
-      }
-      setSelectedProductId(nextProductId);
-      const nextProduct =
-        products.find((product) => product.id === nextProductId) ??
-        demoProducts[0];
-      setBatchSize(nextProduct.batchSize || 1);
-      setBatchDraft(String(nextProduct.batchSize || 1));
-      setKeypadOpen(false);
-      setOkCount(0);
-      setNgCount(0);
-      setBatchCount(0);
-      setBatchQuantity(0);
-      setScanCount(0);
-      resetAnimationState();
-
-      if (waitForPlcStart) {
-        toast.info(t("operator.productChangedWaitingStart"));
-      } else if (wasAutoRunning) {
-        toast.info(t("operator.productChangedSessionRestarted"));
-        void ensureMachineOperation(nextProduct);
-      }
-    } finally {
-      setChangingProduct(false);
-    }
+    queuedProductChangeRef.current = nextProductId;
+    void processProductChangeQueue();
   }
 
   function adjustBatchDraft(delta: number) {
@@ -881,6 +986,7 @@ export function OperatorRuntimePanel() {
 
     liveRoiStatusesRef.current = { ...animation.finalStatuses };
     liveRoiLabelsRef.current = { ...animation.finalLabels };
+    setBatchQuantity(inspection.quantity);
     setActiveRoiIndexes(animation.regions.map((region) => region.index));
     setRoiStatuses({ ...animation.finalStatuses });
     setRoiDetectedTextLabels({ ...animation.finalLabels });
@@ -1178,7 +1284,7 @@ export function OperatorRuntimePanel() {
         toast.success(t("operator.runStopped"));
       }
 
-      if (response.data.resultSaveError) {
+      if (response.data?.resultSaveError) {
         toast.warning(
           apiError(
             response.data.resultSaveError,
@@ -1238,6 +1344,7 @@ export function OperatorRuntimePanel() {
     }
 
     lastLiveInspectionSequenceRef.current = status.liveInspectionSequence;
+    setBatchQuantity(inspection.quantity);
     const slotByIndex = new Map(
       inspection.slots
         .filter((slot) => typeof slot.slotIndex === "number")
@@ -1407,8 +1514,12 @@ export function OperatorRuntimePanel() {
           setScanRunning(false);
           clearTimers();
         }
-        liveInspectionHandlerRef.current(status);
-        await plcInspectionHandlerRef.current(status);
+        if (!runtimeSequencesInitializedRef.current) {
+          applyRuntimeSequenceBaseline(status);
+        } else {
+          liveInspectionHandlerRef.current(status);
+          await plcInspectionHandlerRef.current(status);
+        }
       } catch {
         if (active) setPlcConnected(false);
         // The shared shell watchdog surfaces backend connectivity errors.
@@ -1460,27 +1571,31 @@ export function OperatorRuntimePanel() {
 
             <div className="operator-line-product-form grid gap-3">
               <div className="operator-line-product-field grid gap-2">
-                <label className="text-sm font-semibold text-[#274d7d]">
-                  {t("products.code")}
-                </label>
+                <div className="flex min-h-5 items-center justify-between gap-3">
+                  <label className="text-sm font-semibold text-[#274d7d]">
+                    {t("products.code")}
+                  </label>
+                  {changingProduct ? (
+                    <span
+                      role="status"
+                      className="text-xs font-semibold text-[#274d7d]"
+                    >
+                      {t("operator.changingProduct")}
+                    </span>
+                  ) : null}
+                </div>
                 <Select
                   aria-label={t("products.code")}
                   value={selectedProduct.id}
                   portalled
                   viewportFittedMenu
-                  disabled={
-                    loadingProducts ||
-                    scanRunning ||
-                    changingProduct
-                  }
+                  disabled={loadingProducts || scanRunning}
                   className="operator-line-form-control h-12 border-[#9db7d8] bg-white px-4 text-xl font-semibold"
                   menuListClassName="py-1"
                   optionClassName="min-h-11 items-center border-b border-[#c9d6e5] px-4 py-2 last:border-b-0 active:bg-slate-200"
                   optionLabelClassName="text-xl font-semibold"
                   activeOptionClassName="border-[#8ab6df] bg-[#d5eaff] text-[#123f73] shadow-[inset_4px_0_0_#1670b9] hover:bg-[#c5e1ff]"
-                  onChange={(event) =>
-                    void handleProductChange(event.target.value)
-                  }
+                  onChange={(event) => handleProductChange(event.target.value)}
                 >
                   {products.map((product) => (
                     <option key={product.id} value={product.id}>
@@ -1570,8 +1685,11 @@ export function OperatorRuntimePanel() {
                 className="operator-line-info-tile border-[#f0a53b] bg-white text-slate-950"
               />
               <InfoTile
-                label={t("operator.quantity")}
-                value={batchQuantity}
+                label={t("operator.recognition")}
+                value={`${Math.min(
+                  Math.max(0, batchQuantity),
+                  selectedProduct.roiRegions.length,
+                )}/${selectedProduct.roiRegions.length}`}
                 className="operator-line-info-tile border-[#f0a53b] bg-white text-slate-950"
               />
               <InfoTile
