@@ -1,147 +1,77 @@
 # Business Rules
 
-## Role Model
+## Roles And Permissions
 
-The system uses four top-level roles:
+- `dev` is the highest authority, hidden from other roles, and used for protected support and diagnostics.
+- `admin` manages operational users, permissions, settings, updates, and integrations but cannot obtain dev-only permissions.
+- `engineer` focuses on product, camera, OCR, ROI, PLC configuration, tests, and reports according to assigned permissions.
+- `operator` focuses on Line operation according to assigned permissions.
+- Backend permissions are authoritative; frontend visibility is not authorization.
+- When a user has explicit permissions, they replace the role-derived list in the current implementation.
 
-- `dev`
-- `admin`
-- `engineer`
-- `operator`
+## Account Safety
 
-These roles describe default behavior, but the actual permission set is not hard-coded by role alone.
+- Passwords are bcrypt hashes.
+- A user cannot delete the currently signed-in account.
+- Non-dev users cannot create, edit, or delete `dev` users.
+- The system blocks deletion, deactivation, or demotion that would remove the last active admin.
+- Production seed creates a hidden support dev; the customer creates the first admin explicitly.
 
-## Permission Model
+## Product And ROI
 
-Each role or user has a permission list.
+- Product code and product name are unique.
+- Product profiles contain batch quantity, AI thresholds, accepted OCR variants,
+  camera settings, and indexed ROI regions.
+- Products may be created before ROI configuration is complete.
+- Product profile templates may copy approved camera/ROI settings to selected products.
+- Overlapping ROI regions are rejected before persistence.
+- ROI coordinates use center-based application geometry.
+- Current runtime crop rotation supports 90-degree increments; free-angle editor
+  geometry must not be assumed to match the current Tool crop contract.
 
-Permissions can be:
+## Inspection Results
 
-- assigned by role
-- overridden by user
-- added or removed by admin
+- One Line session belongs to one selected product at a time.
+- Product change closes the current session and opens a new session while preserving machine stop state.
+- Per-capture ROI logs retain expected text, matched text, OCR rows, result, image path, error, and capture time as available.
+- Aggregate `UNKNOWN` is not latched, counted, saved as a production capture, or sent to PLC.
+- Manual Grab and Line Test are diagnostic flows and do not emit production OK/NG PLC pulses.
+- Result and training-image saving follow their configured policies and folders.
 
-This allows one shared UI with different visible actions depending on who is logged in.
+## PLC
 
-## Role Definitions
+- Supported protocols are Modbus TCP and Mitsubishi SLMP.
+- Protocol selection is explicit; connection failure does not fall back to another protocol.
+- Fixed signal addresses are optional and skipped independently when unset.
+- Modbus logical M addresses are converted to the configured coil offset; SLMP uses M addresses directly.
+- OK and NG pulse durations are independently configurable.
+- Camera live off preserves the last frame without requiring a physical disconnect.
+- Manual camera disconnect suppresses automatic reconnect until explicit reconnect.
+- PLC simulator is dev-only and must be authorized in backend.
 
-### Dev
+## Inactivity And Recovery
 
-The dev role is the highest level.
+- Automatic inactivity pause defaults to enabled with a 300-second timeout.
+- PLC capture, manual Grab attempt, and active renderer interaction reset inactivity.
+- Disabling inactivity pause does not change PLC stop/start behavior.
+- Only admin/dev may change inactivity settings.
+- Hardware/service reconnect resumes only after readiness checks; state is not silently declared healthy.
 
-Properties:
+## Dongil
 
-- hidden from all other roles
-- full system access
-- used for technical override and maintenance
-- should not be assignable by normal admin flow unless explicitly allowed
+- A valid local dongle is required before machine identity and registration.
+- Registration and connection are explicit operations.
+- Only aggregate washing OK/NG quantities and product identity are synchronized.
+- Images, ROI detail, OCR rows, camera data, and PLC internals remain local.
+- Results persist locally before transmission.
+- `ACCEPTED` and `REPLAYED` are successful delivery dispositions.
+- Retry preserves stable local IDs and original inspection timestamps.
+- Historical synchronization never deletes local results.
 
-### Admin
+## Language And Display
 
-Admin has broad system control.
-
-Expected abilities:
-
-- full or near-full operational access
-- manage users
-- manage roles and permissions
-- assign permissions per user and per role
-- manage system settings
-- manage products and operational configuration
-
-### Engineer
-
-Engineer is the technical production role.
-
-Default focus:
-
-- product management
-- image/camera parameters
-- inspection tuning
-- ROI and OCR-related settings
-
-Actual permissions should still be configurable by admin.
-
-### Operator
-
-Operator is the floor user role.
-
-Default focus:
-
-- open machine
-- select product
-- start/stop production
-- handle exceptions
-- adjust ROI during runtime if permitted
-
-## Shared UI Rule
-
-All roles use the same application shell and screen structure.
-
-What changes is:
-
-- which menus are visible
-- which buttons are enabled
-- which forms are read-only
-- which operations are blocked by backend authorization
-
-## Language Rule
-
-The application must support English and Vietnamese.
-
-Rules:
-
-- all user-facing UI text should be translatable
-- permission keys remain technical identifiers
-- permission display names should support both languages
-- backend should prefer stable error codes so frontend can localize messages
-
-## Permission Enforcement Rule
-
-Permissions must be enforced in two places:
-
-1. Frontend for usability
-2. Backend for security
-
-Frontend hiding alone is never enough.
-
-## Recommended Permission Categories
-
-- `dashboard.view`
-- `user.manage`
-- `role.manage`
-- `permission.manage`
-- `product.manage`
-- `camera.manage`
-- `roi.edit`
-- `inspection.start`
-- `inspection.stop`
-- `inspection.override`
-- `history.view`
-- `report.view`
-- `system.shutdown`
-- `system.debug`
-- `license.view`
-
-## Data Safety Rules
-
-- passwords must be hashed
-- sensitive hardware secrets must not be exposed to the browser
-- dongle logic should stay in desktop/native/backend layer
-- audit logs should capture administrative changes
-
-## Operational Rules
-
-- operator actions during production should be traceable
-- product change and parameter change should be versioned or logged
-- emergency overrides should be visible in history
-- locked users should be handled by attempt policy
-- Manual/Auto, live camera, and real-time AI are independent runtime controls.
-- Manual ignores PLC capture for production; Auto disables the app Grab action.
-- App Grab never emits an OK/NG pulse to PLC.
-- With AI off, a trigger can only capture a frame when live camera is off; it must not inspect, latch, change counters, or pulse PLC.
-- An aggregate `UNKNOWN` result must not be latched, counted, logged, or sent to PLC.
-- Automatic inactivity pause defaults to enabled after setup with a 300-second timeout.
-- The inactivity clock is reset by a PLC capture edge, a manual Grab attempt, or active renderer interaction such as scrolling, pointer/touch input, keyboard input, or window focus.
-- Disabling automatic inactivity pause prevents the capture-timeout idle transition without changing PLC stop/start behavior.
-- Only `admin` and `dev` may change automatic inactivity settings.
+- English and Vietnamese are mandatory.
+- Vietnamese text uses proper diacritics.
+- Primary operational viewport is 1280 x 1024 on one touchscreen.
+- Important actions must be visible and usable without hover.
+- Date grouping for production and Dongil business scopes uses GMT+7.

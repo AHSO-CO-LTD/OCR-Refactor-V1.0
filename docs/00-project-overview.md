@@ -2,66 +2,54 @@
 
 ## Purpose
 
-This project refactors an existing monolithic Python desktop application into a modular local desktop system that can be packaged as a Windows `.exe`.
+AHSO OCR Metal Core Washing is a local Windows factory application that combines
+camera capture, product-specific OCR, PLC-driven machine flow, local production
+history, reporting, and optional Dongil Server synchronization.
 
-The original system is an industrial OCR and inspection application used on a production line. It reads camera frames, runs OCR/AI inspection, validates product-specific rules, and stores inspection history and configuration data locally.
+The refactor replaces a Python/PyQt monolith with a modular desktop system while
+retaining Python for device and OCR work behind a versioned local API.
 
-## Main Goals
+## Deployment Context
 
-- Replace the legacy PyQt desktop UI with Electron + Next.js.
-- Move application backend logic into NestJS.
-- Use the Python + FastAPI Device/OCR Tool in `tool/` for camera control and OCR/AI processing.
-- Use PostgreSQL as the local database.
-- Keep the application fully usable offline/local on an industrial PC.
-- Support dongle-based software protection.
-- Support role-based access control with per-user overrides.
-- Support English and Vietnamese UI from the beginning.
-- Package the whole solution into a single deployable desktop application experience.
+- One Windows industrial PC and one touchscreen display.
+- Administrator privilege is required on every packaged launch.
+- PostgreSQL and all application services run locally.
+- Factory network and Internet availability vary.
+- Core inspection and reporting remain local when Dongil Server is unavailable.
+- Internet is needed only for online runtime provisioning or GitHub-based updates when used.
 
-## Scope Of The Refactor
+## System Components
 
-### In scope
+- Electron desktop lifecycle and privileged operations.
+- Next.js/React user interface.
+- NestJS REST and WebSocket backend.
+- PostgreSQL database managed through Prisma migrations.
+- Read-only Python/FastAPI Device Tool for Basler camera, OCR, Modbus TCP, and SLMP.
+- Existing USB dongle implementation for application licensing.
+- Optional Dongil Server machine presence and aggregate result synchronization.
 
-- Login and authentication
-- Role and permission system
-- User management
-- Product management
-- Camera and ROI configuration
-- Inspection start/stop flow
-- Exception handling during runtime
-- History and reporting
-- Local service orchestration
-- Dongle/license check
-- Desktop packaging into `.exe`
+## Implemented Scope
 
-### Out of scope for the first phase
+- Authentication, users, roles, permissions, and first-run admin setup.
+- Product, AI, OCR variant, camera, camera identity, and ROI configuration.
+- Line operation, test workflows, PLC runtime, result persistence, reports, and export.
+- License startup gate and remembered-session physical-dongle requirement.
+- Electron startup/shutdown, watchdog, NSIS installer, updater, and recovery.
+- Dongil registration, heartbeat, live outbox, and historical reconciliation.
 
-- Full AI rewrite
-- Deep camera SDK rewrite
-- Advanced training tooling
-- Cloud deployment
-- Multi-machine centralized management
+## Deliberate Boundaries
 
-## Source Project
+- Frontend calls backend only.
+- Backend owns business decisions, permissions, persistence, and Tool adaptation.
+- Device Tool source is not modified from application tasks.
+- Original license source and binaries are not modified without specific approval.
+- Raw camera and ROI details remain local and are not sent to Dongil Server.
 
-The original project lives in:
+## Current Maturity
 
-- `D:\OCR\OCR-Metal-Core-Washing`
+The source is beyond the original scaffold and foundation phases. Version 1.4.0
+has historical release evidence. Production readiness still requires explicit
+target-machine validation covering database, installer, updater, dongle, camera,
+PLC, OCR, offline recovery, and Dongil behavior.
 
-Useful reference assets in the source project:
-
-- Existing PyQt UI forms
-- Legacy Python modules
-- SQL schema script
-- Runtime AI artifacts and model files
-- Dongle check logic
-
-## Guiding Principles
-
-- Keep the app local-first.
-- Make FE depend only on REST APIs and permission data.
-- Keep business rules in the backend, not in the UI.
-- Treat the Device/OCR Tool as a replaceable local module behind backend APIs.
-- Prefer additive migration over big-bang rewrite.
-- Use the same UI shell for all roles, but change visible actions according to permission.
-- Keep user-facing text ready for English and Vietnamese translation.
+Use [../PROJECT_PROFILE.md](../PROJECT_PROFILE.md) for the central current profile.

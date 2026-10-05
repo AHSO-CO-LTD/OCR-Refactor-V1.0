@@ -1,5 +1,14 @@
 # Release Setup Notes
 
+Status: Current release-script reference for application version `1.4.0`.
+
+Last source review: `2026-10-05`. This documentation pass did not execute a
+release build, installer, uninstall or publish workflow.
+
+The release process may stage an approved encrypted Tool bundle and compiled
+license artifacts. It must not modify `tool/` or original license source and
+binaries.
+
 The Windows setup is built with Electron Builder NSIS.
 
 Production bootstrap writes machine-local secrets to:

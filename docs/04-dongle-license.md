@@ -1,79 +1,60 @@
-# Dongle / License Security
+# Dongle And License
 
-## Login startup contract
+## Boundary
 
-The login startup flow has two independent paths:
+This document describes application integration only. Original license source,
+`System8.dll`, compiled license helpers, and the fallback Python dongle script
+are protected and are not modified by ordinary application work.
 
-1. API, license, and the physical USB dongle are checked first.
-2. A valid remembered session may auto-login immediately after those checks. PLC and camera checks never gate this auto-login path.
-3. If manual login is needed, the desktop app performs best-effort hardware preparation before showing the credential form: PLC connection, camera power, camera light, then camera connection with a real frame.
-4. Missing PLC configuration, omitted PLC output addresses, or camera errors are displayed as skipped/unavailable and do not block manual login.
+## Current Integration
 
-Dongle mock mode may still support explicit development login, but it is not accepted for remembered-session auto-login. Auto-login requires the real dongle result code `DONGLE_OK`.
+- Backend `DongleCheckerService` invokes the native helper when available.
+- Development may use the Python helper only outside production or when explicitly allowed.
+- The helper receives the configured DLL path, retry count, retry interval, and timeout.
+- Backend normalizes the result into `DONGLE_OK`, mock, missing DLL/helper, return-code, or execution-error states.
+- Persisted checks create `LicenseLog` records without storing dongle secrets.
 
-## Purpose
+## Startup Contract
 
-The project uses a USB dongle mechanism to protect the desktop application.
+- Electron starts required local services before calling backend license status.
+- License and physical dongle failure block application entry.
+- Startup hardware preparation may run concurrently but is cleaned up if licensing blocks startup.
+- Machine identity is derived only after the physical license succeeds.
 
-The dongle is part of the local trust chain and is used to decide whether the application is allowed to run normally.
+## Login Contract
 
-## Why It Belongs In The Desktop Layer
+- Manual login requires the ordinary license gate.
+- Development dongle mock mode may pass manual login.
+- Remembered-session restore requires physical `DONGLE_OK`; mock mode is rejected.
+- Authenticated license status can be refreshed through backend.
 
-The dongle check should be placed in the desktop runtime layer, not in the browser UI.
+## Configuration
 
-Reasoning:
+Relevant backend environment keys include:
 
-- browser UI should not access hardware directly
-- desktop main process can start early and block the app before the UI is usable
-- native integration is easier to manage in Electron main or a dedicated local helper
+- `DONGLE_MOCK_MODE`
+- `DONGLE_DLL_PATH`
+- `DONGLE_HELPER_PATH`
+- `DONGLE_ALLOW_PYTHON_HELPER`
+- `DONGLE_PYTHON_COMMAND`
+- `DONGLE_RETRY_COUNT`
+- `DONGLE_RETRY_INTERVAL_MS`
+- `DONGLE_CHECK_TIMEOUT_MS`
 
-## Existing Legacy Pattern
+Never commit real secrets or machine-specific protected values.
 
-The legacy Python application uses a retry-based dongle check similar to:
+## Current Limitations
 
-- set default key values
-- call dongle SDK
-- retry several times
-- write logs for failures and successes
-- return a boolean state
+- Periodic full-runtime dongle removal protection is not documented as a complete production acceptance result.
+- Source and historical release evidence do not prove behavior with the target physical dongle.
+- Dongle error messages must remain useful without exposing key material or SDK internals.
 
-This behavior should be preserved conceptually in the new architecture.
+## Acceptance
 
-## Recommended New Flow
+Validate on the target PC:
 
-1. Electron starts.
-2. Dongle module checks the USB key.
-3. If valid, app startup continues.
-4. If invalid, the app is blocked or limited.
-5. The app re-checks periodically while running.
-6. If the dongle is removed, the app transitions to a protected state.
-
-## Recommended Responsibilities
-
-### Electron main
-
-- load native dongle integration
-- perform boot-time license check
-- relay license state to renderer and backend
-
-### NestJS backend
-
-- receive license state if needed
-- expose license status endpoints for UI
-- log license failures or transitions
-
-### Next.js frontend
-
-- show license state
-- block normal screens when unlicensed
-
-## Security Notes
-
-- avoid hard-coding secrets in frontend code
-- keep dongle secrets in native/backend layer
-- production builds should use the compiled `native/dongle-checker.exe` helper
-  instead of shipping the plaintext Python helper
-- keep `backend/scripts/check-dongle.py` for development/debug fallback only
-- limit diagnostic exposure
-- log failures without leaking implementation details
-
+- valid, absent, removed, reinserted, and SDK-error states;
+- retry and timeout behavior;
+- remembered-session rejection under mock mode;
+- Electron blocked-startup recovery and hardware cleanup;
+- license logging without secret disclosure.

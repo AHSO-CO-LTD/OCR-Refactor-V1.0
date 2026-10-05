@@ -1,36 +1,68 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Frontend workspace
 
-## Getting Started
+Next.js 16 and React 19 renderer for the local AHSO OCR desktop application.
+It is designed for Electron and the factory workstation first, not as an
+independent public website.
 
-First, run the development server:
+## Runtime
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+- Workspace: `@ocr/frontend`
+- Default development URL: `http://localhost:3970`
+- Primary target viewport: `1280x1024`
+- Languages: English and Vietnamese
+- Styling: Tailwind CSS 4 plus project primitives
+- Notifications: Sonner
+- Charts: Recharts
+
+The renderer calls only the NestJS backend. Browser-side code must not call the
+Device/OCR Tool, PLC or Dongil Server directly.
+
+## Routes
+
+Public/startup routes:
+
+- `/startup`
+- `/login`
+- `/setup`
+
+Authenticated routes include the dashboard, Line operation, products, camera,
+camera identities/debug, PLC configuration, users, roles, reports, Line Test,
+test reports and settings under `/dashboard`.
+
+Route access is driven by backend permissions. Hiding a control or route is not
+an authorization boundary.
+
+## UI constraints
+
+- Keep application chrome fixed; only the active content pane scrolls.
+- Avoid page-level horizontal overflow at `1280x1024`.
+- Design operational controls for a single touchscreen and virtual keyboard.
+- All user-facing text, validation, empty/error states, dialogs and
+  notifications must use the i18n layer.
+- Preserve the existing visual system; theme switching is not currently an
+  implemented product capability.
+- Use custom confirmation UI; do not use browser `alert`, `confirm` or
+  `prompt`.
+
+## Commands
+
+Run from the repository root:
+
+```powershell
+npm run dev -w @ocr/frontend
 ```
 
-Open [http://localhost:3969](http://localhost:3969) with your browser to see the result.
+Optional verification commands:
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+```powershell
+npm run typecheck -w @ocr/frontend
+npm run lint -w @ocr/frontend
+npm run build -w @ocr/frontend
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+Check port `3970` before starting development. A temporary process must be
+stopped after verification.
 
-## Learn More
-
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+See [`../docs/09-i18n.md`](../docs/09-i18n.md),
+[`../docs/10-frontend-ui-stack.md`](../docs/10-frontend-ui-stack.md), and
+[`../docs/16-development.md`](../docs/16-development.md).

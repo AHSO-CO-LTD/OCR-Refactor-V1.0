@@ -1,6 +1,11 @@
 # Dongil washing-history synchronization
 
-Status: In Progress
+Status: Implemented; verification pending
+
+Implementation status reviewed against source on `2026-10-05`. The migration,
+worker, API, permissions and Processing UI are present. Focused automated tests
+and validation against a connected Dongil Server were not rerun as part of the
+documentation refresh.
 
 ## Objective
 

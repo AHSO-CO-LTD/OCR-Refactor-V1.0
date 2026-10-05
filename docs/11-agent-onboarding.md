@@ -1,299 +1,89 @@
-# Agent Onboarding Guide
-
-## Purpose
-
-This file tells a new agent or developer where to start when entering this project.
-
-Read this first before changing code.
-
-## Project In One Paragraph
-
-This is a local industrial OCR inspection desktop app refactor. The old project was a Python/PyQt monolith. The new system is a local-first app with Next.js frontend, NestJS backend, PostgreSQL, the Python/FastAPI Device/OCR Tool in `tool/`, Electron packaging, and USB dongle boot protection.
+# Agent Onboarding
 
 ## Read Order
 
-1. `README.md`
-2. `docs/00-project-overview.md`
-3. `docs/01-architecture.md`
-4. `docs/07-repo-structure.md`
+1. `AGENTS.md`
+2. `PROJECT_PROFILE.md`
+3. `docs/00-project-overview.md`
+4. `docs/01-architecture.md`
 5. `docs/03-business-rules.md`
 6. `docs/06-api-contracts.md`
-7. `docs/08-planner.md`
-8. `docs/09-i18n.md`
-9. `docs/10-frontend-ui-stack.md`
-10. this file again
+7. task-relevant database, security, PLC, Dongil, release, or ADR documents
 
-## Current Repo Structure
+## First Inspection
 
-```text
-frontend/  Next.js UI, future Electron shell
-backend/   NestJS REST API
-tool/      API-Tool-v1 Device/OCR API used by backend through /tool/v1
-tool-test/ Archived previous Device Tool implementation for reference only
-shared/    future shared contracts
-docs/      project source of truth
-infra/     future local env/deploy helpers
-scripts/   future automation scripts
-```
+Before proposing changes:
 
-## Current Progress
+- inspect Git branch and worktree;
+- inspect the current implementation and all consumers;
+- inspect Prisma schema/migrations for data work;
+- inspect accepted ADRs for architecture work;
+- distinguish documented intent from current source behavior;
+- identify what must not change.
 
-### Done
+Do not assume older status snapshots describe the current repository.
 
-- Repo structure created.
-- Next.js frontend scaffolded without `src/`; app router lives at `frontend/app`.
-- NestJS backend scaffolded.
-- PostgreSQL connected through Prisma.
-- Prisma schema and first migration created.
-- Seed creates default roles, permissions, `dev`, and `admin`.
-- Login API works.
-- JWT auth guard works.
-- Permission guard works.
-- Role permission management API works.
-- User list API works.
-- User creation API works.
-- User update/delete APIs work.
-- Admin cannot create or manage `dev` users; only `dev` can.
-- Normal admin cannot view or manage `admin/dev` role permissions; only `dev` can manage protected roles.
-- Backend prevents deleting, deactivating, or demoting the last active admin account.
-- Swagger API documentation is available at `/api/docs`.
-- Frontend login works.
-- Frontend dashboard shell exists.
-- Frontend login shows API/license/dongle startup status and disables sign-in until the backend confirms a valid dongle.
-- Frontend role permission UI exists.
-- Frontend users page lists users.
-- Basic shadcn-style components added.
-- Sonner installed and wired.
-- Recharts installed and dashboard chart added.
-- English/Vietnamese i18n layer added.
-- Frontend user management create/edit/delete UI is implemented.
-- User status quick-change dropdown is implemented.
-- Shared confirm modal is implemented for account update/delete/status confirmations.
-- User form validation, required markers, advanced fields, and inline errors are implemented.
-- Sonner notifications are language-aware and visually vary by notification type.
-- 404/not-found/error screens exist with retry/home/report actions and language-aware copy.
-- Operator runtime dashboard foundation exists on `/dashboard` with product selector, API/demo product loading, persisted batch-size save, ROI preview, and OK/NG/batch counters.
-- Operator runtime counter semantics are:
-  `count` = the number of products/ROI recognized in the current scan,
-  `quantity` = the accumulated checked quantity inside the current batch,
-  `batch` = the completed package count; when `quantity` reaches `packSize`, it rolls over to the next batch and carries any remainder.
-- Product profile backend/frontend foundation is implemented.
-- Product profiles store product code, model path, per-batch quantity, camera settings, and ROI regions per product.
-- Product profile template apply flow can copy camera/ROI from one product to all products or selected product codes.
-- Product profile form allows creating a profile without ROI, then filling ROI later or applying a template profile.
-- Product profile ROI editor currently supports draw/move/resize/rotate, multi-select with `Shift`, copy/paste, undo/redo, alignment/equal-spacing/straight-angle assists, overlap validation, and simulated camera preview background.
-- Backend inspection foundation now includes a Device Tool client plus `/api/inspections/start`, `/api/inspections/current`, and `/api/inspections/:jobId/stop` with per-ROI inspection logs.
-- Backend camera foundation now proxies Device Tool status, device discovery, connect, grab, and live stream through `/api/camera/status`, `/api/camera/devices`, `/api/camera/connect`, `/api/camera/grab`, and `/api/camera/stream`.
-- The active `tool/` directory now uses the API-Tool-v1 Device/OCR API. Backend access is routed through configurable `DEVICE_TOOL_API_PREFIX`, defaulting to `/tool/v1`; camera control and AI/yolo_ocr OCR runtime live there. The previous Device Tool was renamed to `tool-test/` for reference.
-- Backend license foundation now checks the USB dongle through the legacy `System8.dll` flow, records `license_logs`, exposes `/api/system/license/public` for login and `/api/system/license` for authenticated status, and blocks login when the dongle is missing unless `DONGLE_MOCK_MODE=true`.
-- Dedicated Camera page exists at `/dashboard/camera` with product-profile selection, Device Tool status/device discovery, connect/grab/live controls, view adjustment persistence, and manual refresh for camera status/devices.
-- The unified Configuration page has separate Product, AI settings, ROI, Camera, camera identity, and developer diagnostics tabs. AI model path and OCR thresholds are no longer edited in the basic Product form.
-- The same Configuration page includes a saved-profile-only inspection test: Manual runs one test, Auto reacts to the PLC capture trigger, and the source can be the connected camera or an uploaded image. The test is diagnostic only and does not save production logs/counters or pulse OK/NG back to the PLC.
-- AppShell warms up camera status/device discovery in the background for users with camera or inspection permissions.
+## Architecture Summary
 
-### In Progress
+Electron is the elevated Windows entry point. Next.js renders UI. NestJS owns
+business logic, authentication, authorization, persistence, and integrations.
+PostgreSQL is authoritative. Device Tool is a separate read-only FastAPI
+submodule for camera, OCR, Modbus TCP, and SLMP. Dongil synchronization is optional and durable.
 
-- `dev/admin` use sidebar and `engineer/operator` use navbar.
-- Frontend responsive behavior is being standardized around the 1280x1024 factory-machine viewport while still supporting smaller and larger screens.
-- Existing dashboard, roles, users, and products screens need a final responsive verification pass at 1280x1024.
-- Dedicated Camera page still needs verification with a real running Device Tool and connected hardware.
-- Operator runtime still mixes real product-profile data with demo fallback; backend Device Tool integration has started, but the frontend runtime is not wired to the new inspection endpoints yet.
+## Protected Boundaries
 
-### Not Started
+- Do not modify `tool/`.
+- Do not modify original license code or binaries.
+- Do not expose secrets in commands, logs, diffs, or documentation.
+- Do not start or stop user-owned services.
+- Do not commit, push, tag, publish, migrate, or run verification suites without authorization.
 
-- Dedicated ROI config screen/module.
-- Dedicated history/reports screens and query flows.
-- Full end-to-end inspection runtime orchestration beyond the initial backend Device Tool integration.
-- Full Electron boot-time dongle gate, periodic runtime recheck, and production packaging validation.
-- User-level permission override UI.
+## Current Entry Points
 
-### Electron MVP
-
-- `electron/` now contains the first desktop main process and preload bridge.
-- `npm run dev:desktop` launches the development desktop shell.
-- The shell enforces single instance, reuses existing healthy local services, auto-selects fallback ports for Device Tool/backend/frontend when default ports are occupied or unhealthy, waits for health checks, and shuts down only owned child processes.
-- Production installer generation and bundled service artifacts are not implemented yet.
-
-## Current Backend Entry Points
-
-Important files:
+Backend:
 
 - `backend/src/main.ts`
 - `backend/src/app.module.ts`
 - `backend/prisma/schema.prisma`
-- `backend/prisma/seed.ts`
-- `backend/src/auth/auth.controller.ts`
-- `backend/src/auth/auth.service.ts`
-- `backend/src/auth/jwt-auth.guard.ts`
-- `backend/src/auth/permissions.guard.ts`
-- `backend/src/users/users.controller.ts`
-- `backend/src/users/users.service.ts`
-- `backend/src/roles/roles.controller.ts`
-- `backend/src/roles/roles.service.ts`
-- `backend/src/permissions/permissions.controller.ts`
-- `backend/src/products/products.controller.ts`
-- `backend/src/products/products.service.ts`
-
-Important APIs:
-
-```text
-GET  /api/health
-GET  /api/docs
-GET  /api/docs-json
-POST /api/auth/login
-GET  /api/auth/me
-GET  /api/users
-POST /api/users
-PATCH /api/users/:id
-DELETE /api/users/:id
-GET  /api/users/assignable-roles
-GET  /api/roles
-PUT  /api/roles/:code/permissions
-GET  /api/permissions
-GET  /api/products
-POST /api/products
-PATCH /api/products/:id
-PATCH /api/products/:id/batch-size
-DELETE /api/products/:id
-POST /api/products/apply-profile
-```
-
-Default seeded accounts:
-
-```text
-dev / admin123
-admin / admin123
-```
-
-## Current Frontend Entry Points
-
-Important files:
-
-- `frontend/app/layout.tsx`
-- `frontend/app/login/page.tsx`
-- `frontend/app/dashboard/page.tsx`
-- `frontend/app/dashboard/roles/page.tsx`
-- `frontend/app/dashboard/users/page.tsx`
-- `frontend/app/dashboard/products/page.tsx`
-- `frontend/components/app-shell.tsx`
-- `frontend/components/operator/operator-runtime-panel.tsx`
-- `frontend/components/products/product-profiles-panel.tsx`
-- `frontend/lib/api.ts`
-- `frontend/lib/session.ts`
-- `frontend/lib/i18n.tsx`
-
-Current UI behavior:
-
-- Login is centered and simple.
-- Language toggle appears inside login form header.
-- `dev/admin` should use sidebar.
-- `engineer/operator` should use navbar.
-- Menu items are filtered by permissions.
-- 1280x1024 is the primary factory-machine viewport for frontend validation.
-- The target factory machine uses one touchscreen only; setup and runtime screens must be touch-first and virtual-keyboard-friendly.
-- Screens should avoid page-level horizontal overflow at 1280x1024; dense tables should scroll inside their own containers when needed.
-- Header, sidebar, and navbar are fixed app chrome; only the active content pane should scroll.
-- User-facing pages, modals, empty/error states, validation messages, and notifications must use the current selected language.
-- Normal admin must only see/manage `engineer/operator` on role permission screens; `admin/dev` are protected for `dev`.
-- `/dashboard` currently hosts the operator runtime foundation instead of a separate dedicated runtime module route.
-- On the operator runtime screen, `quantity` should be shown before `count` because `quantity` is the batch-progress number and `count` is only the current-scan recognized amount.
-- `roi`, `history`, and `reports` are present in menu permissions but do not have their own pages yet.
-- Camera operations now have a dedicated page at `/dashboard/camera`; the page still depends on the Device Tool running locally, usually at `http://localhost:8668`.
-- Product preview uses `frontend/public/preview-background.png` to simulate camera output when no live camera preview is available.
-- Product profile save must reject overlapping ROI regions.
-
-## Local Commands
-
-Run backend:
-
-```powershell
-npm run dev -w @ocr/backend
-```
-
-Before starting backend, check whether port `3979` is already owned by a user process:
-
-```powershell
-Get-NetTCPConnection -LocalPort 3979 -ErrorAction SilentlyContinue
-```
-
-Swagger:
-
-```text
-http://localhost:3979/api/docs
-```
-
-Run frontend:
-
-```powershell
-npm run dev -w @ocr/frontend
-```
-
-Before starting frontend, check whether port `3969` is already owned by a user process:
-
-```powershell
-Get-NetTCPConnection -LocalPort 3969 -ErrorAction SilentlyContinue
-```
-
-Agent-started dev servers must be stopped immediately after testing. Never leave a backend/frontend server running after verification unless the user explicitly asked for it.
-
-Run checks:
-
-```powershell
-npm run typecheck
-npm run lint -w @ocr/backend
-npm run lint -w @ocr/frontend
-npm run test -w @ocr/backend
-```
-
-Prisma:
-
-```powershell
-npm run prisma:migrate -w @ocr/backend
-npm run prisma:seed -w @ocr/backend
-```
-
-## Environment Files
-
-Backend:
-
-```text
-backend/.env
-backend/.env.example
-```
+- domain controllers and services under `backend/src/`
 
 Frontend:
 
-```text
-frontend/.env
-frontend/.env.example
-```
+- `frontend/app/layout.tsx`
+- `frontend/components/app-shell.tsx`
+- `frontend/components/operator/operator-runtime-panel.tsx`
+- `frontend/components/camera/camera-live-view-panel.tsx`
+- `frontend/lib/api.ts`
+- `frontend/lib/i18n.tsx`
 
-Frontend env key:
+Electron:
 
-```text
-NEXT_PUBLIC_API_BASE_URL=http://localhost:3979/api
-```
+- `electron/src/main.ts`
+- `electron/src/service-manager.ts`
+- `electron/src/preload.ts`
+- `electron/src/auto-updater.ts`
+- `electron/src/update-recovery.ts`
 
-## Non-Negotiable Rules
+## Development Defaults
 
-- Vietnamese UI copy must always use proper Vietnamese diacritics.
-- The app must support English and Vietnamese.
-- Frontend must call backend only.
-- Backend calls the Python/FastAPI Device/OCR Tool in `tool/` through `/tool/v1`.
-- `dev` is hidden from normal roles.
-- Normal admin must not manage `dev`.
-- Authorization must be enforced in backend, not only by hiding UI.
-- Dongle check must eventually happen immediately when Electron starts.
-- Prefer shadcn-style UI components, Sonner, and Recharts for frontend.
-- Optimize every frontend screen first for the 1280x1024 factory display, then verify mobile/tablet/laptop/wide-desktop responsiveness.
-- Never occupy or reuse a port already being used by the user. Always check target ports before starting dev servers, and stop any agent-started test server immediately after verification.
+- Frontend `3970`
+- Backend `3980`
+- Device Tool `8668`
+- Swagger `/api/docs`
 
-## Suggested Next Task
+Check actual environment configuration and port ownership before starting anything.
 
-Continue frontend hardening:
+## Verification Language
 
-1. Finish standard responsive pass across existing dashboard, roles, and users screens.
-2. Verify 1280x1024 does not produce page-level horizontal overflow.
-3. Restart backend/frontend dev servers when validating role/user permission changes, to avoid stale dev-server state.
-4. Finish Product module hardening, Camera page verification, and persisted product profile verification.
-5. Create dedicated ROI/History/Reports pages and move the dashboard runtime foundation toward a real inspection flow.
+Report source inspection, static checks, build, unit tests, runtime checks,
+hardware checks, installer checks, and production acceptance separately. Never
+collapse them into one unqualified “verified” claim.
+
+## Current Engineering Risks
+
+- ROI free-angle/runtime crop mismatch.
+- Incomplete session security and audit coverage.
+- Local Tool network exposure.
+- CR-only runtime `.env` parsing.
+- Large cross-domain modules and inactive shared contracts.
+- Hardware and update acceptance still require explicit target-machine evidence.

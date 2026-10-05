@@ -1,112 +1,78 @@
 # Runtime Flow
 
-## Boot Flow
+## Packaged Startup
 
-### 1. User launches the `.exe`
+1. User launches the installed application.
+2. Electron requests Administrator if the process is not elevated.
+3. Electron acquires the single-instance lock and loads ProgramData `.env`.
+4. Electron starts or reuses Device Tool and backend.
+5. Backend database migration deployment completes before backend readiness.
+6. Electron starts or reuses the frontend.
+7. Electron checks setup state and physical dongle license while preparing PLC and camera hardware.
+8. License failure blocks entry and cleans up partially prepared hardware.
+9. PLC or camera preparation failure produces a startup warning rather than hiding manual diagnostics.
+10. Electron opens `/setup` when no active admin exists; otherwise it opens `/login`.
 
-The desktop executable starts the Electron main process.
+## Login And Restore
 
-### 2. Electron performs environment checks
+- Manual login checks dongle, user activity, and bcrypt password.
+- Backend returns a JWT and current effective permissions.
+- A remembered session is restored only after the real `DONGLE_OK` result.
+- Dongle mock mode can support explicit development login but cannot restore a remembered session.
+- Current frontend stores temporary sessions in `sessionStorage` and remembered sessions in application-owned `localStorage` keys.
 
-Electron should verify:
+## Line Operation
 
-- single instance lock
-- required local files exist
-- dongle/license state
-- backend startup readiness
-- database connection readiness
+1. Select an active product profile.
+2. Backend creates or restores the product inspection session.
+3. Machine runtime enters its current stopped, starting, running, paused, or recovery state.
+4. Camera readiness loads the configured identity, frame settings, model, and ROI.
+5. Manual or valid PLC capture obtains a completed OCR result.
+6. Backend matches recognized rows against product rules.
+7. A known aggregate result may be latched and persisted.
+8. PLC result output is emitted only for an eligible PLC-driven production capture.
+9. Dongil aggregate data is queued locally after the production result is durable.
 
-### 3. Dongle/license validation
+`UNKNOWN` is never treated as an eligible production latch.
 
-Before the full UI becomes available, the app checks the USB dongle.
+## Machine Controls
 
-If the dongle check fails:
+- Manual/Auto, live camera, and realtime AI are independent controls.
+- Manual Grab never sends a PLC result pulse.
+- With realtime AI disabled, capture may preserve a frame but cannot invent an inspection result.
+- PLC connection failure does not block manual camera/OCR diagnosis.
+- Configured inactivity may pause capture until explicit resume.
+- PLC stop follows configured delay and optional camera-power behavior.
 
-- block normal app entry
-- display a clear license error screen
-- optionally allow limited diagnostics only
+## Dongil Runtime
 
-If the dongle check succeeds:
+- Electron derives local machine identity after a valid dongle check.
+- Registration is requested explicitly and must be approved by Dongil Server.
+- Heartbeat runs independently of result delivery.
+- Live results are delivered from a durable outbox.
+- Historical synchronization uses a persistent snapshot and resumes after restart.
+- Local production is never rolled back because Dongil is offline.
 
-- continue startup
-- launch or connect to local services
-- open the main UI
+## Shutdown
 
-### 4. Local backend startup
+Default app-and-hardware shutdown:
 
-Electron starts or attaches to the local NestJS service.
+1. End the active Line session when possible.
+2. Disconnect camera/OCR.
+3. Turn off configured camera outputs after safe delay.
+4. Clear remaining PLC outputs and disconnect PLC.
+5. Send Dongil shutdown notification.
+6. Stop only Electron-owned services.
+7. Quit Electron.
 
-NestJS then:
+If hardware cleanup fails, the application reports the incomplete stage and
+continues closing rather than hanging indefinitely.
 
-- connects to PostgreSQL
-- loads app config
-- prepares auth and permission rules
-- exposes REST endpoints
-- optionally opens websocket channels
+## Update Flow
 
-### 5. UI load
-
-Next.js renders the initial page:
-
-- login screen if no session
-- dashboard if a valid session exists
-- role-aware menus and controls based on the session payload
-
-## Login Flow
-
-1. User enters username and password.
-2. Frontend sends credentials to NestJS.
-3. NestJS verifies:
-   - user exists
-   - active status
-   - password hash
-   - attempt lock rules
-4. Backend resolves the effective permission list.
-5. Backend returns session data.
-6. Frontend stores minimal session state and renders the permitted UI.
-
-## Operation Flow
-
-Typical runtime sequence:
-
-1. User chooses product or line profile.
-2. User starts inspection.
-3. Backend records a job/session.
-4. Backend requests ROI OCR from the Python/FastAPI Device/OCR Tool in `tool/`.
-5. Device/OCR Tool returns OCR/detection result.
-6. NestJS validates result against product rules.
-7. Result is persisted to PostgreSQL.
-8. UI updates dashboard and history view.
-
-## Exception Flow
-
-If the operator needs to intervene:
-
-- mark the exception
-- adjust allowed runtime settings
-- re-align ROI if permission is granted
-- continue or stop the inspection job
-
-All exception and override actions should be logged.
-
-## Shutdown Flow
-
-On exit or shutdown:
-
-1. stop live inspection
-2. close active sessions
-3. flush pending logs
-4. stop local services if the desktop policy requires it
-5. shut down Electron
-
-## Dongle Monitoring Flow
-
-The dongle check should not be a one-time event only.
-
-Recommended behavior:
-
-- check on startup
-- re-check periodically while the app is running
-- if the dongle is removed, transition the app into a protected state
-
-The protected state should be defined explicitly in the UI and backend.
+1. Authorized admin/dev checks for an update.
+2. User separately confirms download and installation.
+3. Electron creates configuration and PostgreSQL recovery checkpoints.
+4. Owned services stop and the NSIS updater runs.
+5. New version startup begins validation.
+6. Successful startup marks the update healthy; failure can restore the checkpoint and prior installer.

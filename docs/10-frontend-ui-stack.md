@@ -1,98 +1,63 @@
 # Frontend UI Stack
 
-## Requirement
+## Technology
 
-The frontend should prioritize:
+- Next.js 16 App Router and React 19.
+- TypeScript and Tailwind CSS 4.
+- Local shadcn-style primitives.
+- Sonner notifications.
+- Recharts for charts.
+- Lucide icons.
+- `react-simple-keyboard` for touch entry.
 
-- shadcn/ui style components
-- sonner for toast notifications
-- Recharts for charts
-- shadcn chart patterns for chart wrappers and dashboard visualization
-- responsive layouts that are optimized first for the factory machine screen size: 1280x1024
-- single-screen touchscreen workflows with virtual-keyboard-friendly inputs and large touch targets
+## Route Map
 
-## Current Setup
+| Route | Purpose |
+| --- | --- |
+| `/setup` | First customer admin and result-folder setup |
+| `/login` | License-aware sign-in and remembered session restore |
+| `/dashboard/line` | Primary operator Line workspace |
+| `/dashboard/line-test` | Diagnostic image/camera batch test |
+| `/dashboard/line-animation-test` | DEV animation/runtime diagnostic |
+| `/dashboard/configuration` | Product, AI, ROI, camera, identity, and diagnostics tabs |
+| `/dashboard/configuration/plc` | PLC configuration |
+| `/dashboard/reports` | Production result reporting |
+| `/dashboard/test-reports` | Test-session failure reporting |
+| `/dashboard/users` | User management |
+| `/dashboard/roles` | Operational role permissions |
+| `/dashboard/settings` | General, operation, result, Dongil, update, desktop, and DEV settings |
 
-The project has started a local shadcn-style setup instead of relying on opaque generated code.
+Legacy camera, camera-debug, camera-identity, and product routes redirect to the
+matching Configuration tab. `/dashboard` currently redirects to the Line workspace.
 
-Current frontend additions:
+## Layout
 
-- `components.json`
-- `lib/utils.ts`
-- `components/ui/button.tsx`
-- `components/ui/card.tsx`
-- `components/ui/badge.tsx`
-- `components/ui/sonner.tsx`
-- `components/ui/input.tsx`
-- `components/ui/select.tsx`
-- `components/ui/confirm-modal.tsx`
-- `components/inspection-trend-chart.tsx`
-- `components/app-shell.tsx`
-- `components/users/*`
-- `components/system/error-screen.tsx`
+- Primary target: 1280 x 1024 factory touchscreen.
+- Secondary checks: 1024 x 768, 1366 x 768, 1536 x 864, 1920 x 1080,
+  tablet portrait, and supported mobile layouts.
+- App chrome remains fixed while active content scrolls.
+- `dev/admin` use sidebar; operational roles use navbar.
+- Dense tables use internal horizontal scrolling, never page-level overflow.
 
-Current frontend status:
+## Interaction
 
-- Login, dashboard, role permissions, and user management screens exist.
-- User management supports create, edit, delete, and quick status changes.
-- User create/edit flows use inline validation and confirmation for sensitive actions.
-- Role permissions hide `admin/dev` from normal admin users; only `dev` can manage protected roles.
-- Sonner notifications follow the selected language and use visual variants by type.
-- 404/not-found/error screens use shared UI with retry/home/report actions.
-- AppShell keeps header/sidebar/navbar fixed while only the active content pane scrolls.
-- Product profile management exists with template apply flow, preview background simulation, and interactive ROI editing.
-- Product ROI editor supports draw/move/resize/rotate, undo/redo, copy/paste, multi-select, and overlap validation.
-- Dedicated Camera page exists at `/dashboard/camera` with product selection, backend-proxied Device Tool status/device discovery, connect/grab/live controls, view adjustment persistence, and manual refresh for camera status/devices.
-- Unified Configuration now separates Product, AI settings, ROI, Camera, camera identity, and developer diagnostics into dedicated tabs. Product editing contains only code, name, batch size, import, lifecycle actions, and template application; model path and OCR thresholds live in AI settings.
-- Unified Configuration also provides an isolated inline inspection test below the live view. Manual mode runs one saved-profile test on demand; Auto mode listens for the PLC capture edge and tests the current real-camera or uploaded-image source. This path uses `/api/inspections/test-image`, never updates production counters/history, automatically drives the waiting/checking output while active, and emits OK/NG PLC pulses only when the user enables its test-pulse option.
-- Opening the Operation screen with an active product automatically creates or restores its inspection session, starts the machine runtime in the existing default Auto + live camera + real-time AI state, and synchronizes the PLC waiting/checking output. PLC stop and capture-timeout states remain gated by their existing resume flows.
-- Settings includes an admin/dev-only Inactivity tab. It controls the persisted automatic pause toggle and timeout, while global throttled user interaction keeps an active operation awake. The PLC configuration form no longer duplicates the timeout field.
-- AppShell warms up camera status/device discovery in the background for users with camera or inspection permissions.
-- Factory deployment assumptions now include a single touchscreen display, so setup/runtime screens must avoid hover-only interaction and support on-screen keyboard entry.
-- Responsive hardening is still being finalized, with 1280x1024 as the primary validation viewport.
+- Critical actions are visible and do not depend on hover.
+- Inputs support the Windows or in-app virtual keyboard.
+- Validation is inline and focuses the first invalid field.
+- Manual Save, destructive actions, sensitive settings, and dirty exit use custom confirmation dialogs.
+- Sonner is reserved for meaningful asynchronous success, error, warning, and system events.
+- Loading is localized to the affected control or region.
 
-## Rules
+## Runtime State
 
-- Prefer reusable UI primitives under `frontend/components/ui`.
-- Prefer `sonner` for success/error feedback instead of inline-only messages.
-- Prefer `recharts` for production dashboards and reports.
-- Keep charts operational and readable, not decorative.
-- Keep Vietnamese UI copy accented.
-- Every user-facing page, modal, error screen, validation message, empty state, and notification must use the i18n layer and follow the user's previously selected language.
-- Treat 1280x1024 as the primary validation viewport for admin and operator screens.
-- At 1280x1024, the application must avoid page-level horizontal scrolling. Wide tables may scroll inside their own bordered container.
-- Header, sidebar, and navbar must stay fixed as application chrome. Only the current page/tab content area should scroll.
-- Use responsive grids with `minmax(0, 1fr)`, `overflow-x-auto` for dense tables, and controlled widths for sidebars/forms.
-- Do not rely only on `xl`/large desktop layouts. Check mobile, tablet, laptop, 1280x1024 factory screen, and wider desktop behavior.
-- Keep action buttons reachable and readable at 1280x1024; avoid layouts where forms and dense tables compete side by side unless enough content width remains.
-- Role/admin screens must not expose protected `admin/dev` permission editing to normal admin users. Frontend hiding is required for UX, but backend authorization remains mandatory.
-- Treat factory setup and runtime screens as touch-first. Important actions must have clear visible buttons, touch targets should be comfortably large, and numeric/text entry should work cleanly with the Windows on-screen keyboard.
+- Machine state is backend-owned and survives route navigation.
+- Frontend polls or uses WebSocket only for presentation and operator actions.
+- The Line workspace uses real product and machine APIs but still contains a demo
+  fallback when product loading fails; production behavior must make that fallback unmistakable or remove it.
+- DEV role preview changes frontend presentation only and does not grant backend authority.
 
-## Immediate Frontend Next Step
+## Accessibility
 
-1. Validate dashboard, roles, users, and products at 1280x1024.
-2. Fix any page-level horizontal overflow; keep table overflow inside table containers.
-3. Re-check mobile, tablet, 1024x768, 1366x768, 1536x864, and 1920x1080.
-4. Finish Product module UI hardening and persisted save/load verification.
-5. Verify the Camera page with a running Device Tool and start dedicated ROI/History/Reports operational screens after product profile behavior is stable.
-
-## Responsive Viewport Priority
-
-Primary target:
-
-```text
-1280x1024
-```
-
-Secondary validation sizes:
-
-```text
-375x812    mobile
-768x1024   tablet portrait
-1024x768   small industrial/laptop screen
-1366x768   common laptop
-1536x864   wide laptop
-1920x1080  full HD desktop
-```
-
-All future UI work should be implemented so the 1280x1024 factory viewport feels intentionally designed, not merely "not broken".
+Use semantic elements, labels, keyboard focus, non-color status cues, sufficient
+contrast, and large touch targets. Status and safety text remain visible even
+when non-critical explanations are moved into tooltips.

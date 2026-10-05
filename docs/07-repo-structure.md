@@ -1,183 +1,66 @@
 # Repository Structure
 
-## Goal
-
-This repository should be organized as a monorepo so that the desktop shell, frontend, backend, Device/OCR Tool, and shared types can evolve independently while still staying aligned.
-
-The structure must support:
-
-- local desktop deployment
-- clear separation of responsibilities
-- shared types and contracts
-- future packaging into `.exe`
-- incremental development without restructuring later
-
-## Recommended Top-Level Layout
-
 ```text
-ocr-metal-core-washing-refactor/
-  frontend/
-  backend/
-  tool/
-  tool-test/
-  shared/
-  docs/
-  infra/
-  scripts/
-  README.md
+backend/                 NestJS API, Prisma schema/migrations, native license runtime
+build/                   tracked NSIS customization
+docs/                    project documentation, ADRs, plans, historical UI notes
+electron/                desktop main, preload, service lifecycle, updater, recovery
+external/license-key/    protected original license reference
+frontend/                Next.js renderer and UI modules
+infra/                   deployment helper boundary
+scripts/                 development and release automation
+shared/                  reserved shared TypeScript contracts
+tool/                    read-only Device Tool submodule
+PROJECT_PROFILE.md       central current project profile
+PRODUCT.md               product purpose and experience principles
+AGENTS.md                repository-specific agent entry rules
 ```
 
-This is a simplified monorepo layout. It keeps the project in one repository while still separating the major system parts clearly.
+## Backend Domains
 
-## Top-Level Folder Responsibilities
+- `auth/`, `users/`, `roles/`, `permissions/`
+- `products/`, `camera/`, `device-tool/`
+- `inspections/`, `plc/`
+- `dongil-sync/`
+- `system/`, `setup/`, `database/`, `common/`
+- `prisma/` for schema, migrations, and seed
 
-### `frontend/`
+## Frontend Domains
 
-Contains the user-facing desktop frontend.
+- `app/` for App Router pages.
+- `components/operator/` for Line and test workspaces.
+- `components/camera/`, `products/`, `plc/`, `reports/`, `settings/`, `users/`.
+- `components/system/`, `update/`, and `ui/` for cross-cutting runtime UI.
+- `lib/api.ts` for current HTTP/WebSocket contracts.
+- `lib/i18n.tsx` for English and Vietnamese copy.
+- `lib/session.ts` for application-owned session storage.
 
-Responsibilities:
+## Electron Domains
 
-- Electron shell
-- Next.js UI
-- login screen
-- dashboard
-- config pages
-- history and reports
-- role-aware rendering
+- `main.ts`: desktop entry and IPC orchestration.
+- `service-manager.ts`: service, migration, watchdog, hardware startup/shutdown, and internal calls.
+- `preload.ts`: restricted renderer bridge.
+- `auto-updater.ts`: user-driven update lifecycle.
+- `update-recovery.ts`: configuration/database checkpoint and rollback.
+- `license/`: local machine identity and credential storage integration.
 
-### `backend/`
-
-Contains the local NestJS API.
-
-Responsibilities:
-
-- auth and session management
-- users, roles, permissions
-- products and system settings
-- inspection orchestration
-- report APIs
-- REST APIs for frontend
-- REST calls to the Device/OCR Tool
-
-### `tool/`
-
-Contains the active Python FastAPI Device/OCR Tool.
-
-Responsibilities:
-
-- camera device discovery and connection
-- camera grab and live stream
-- OCR and image processing
-- OpenCV preprocessing
-- YOLO / model inference
-- structured OCR result output
-
-The previous Device Tool implementation is archived in `tool-test/` for reference only.
-
-### `shared/`
-
-Contains shared contracts between frontend and backend.
-
-Typical contents:
-
-- TypeScript types
-- enums
-- DTO shapes
-- validation schemas
-- shared constants
-
-Purpose:
-
-- keep FE and BE aligned
-- reduce duplicated type definitions
-- define request/response contracts in one place
-
-### `docs/`
-
-Project documentation and source of truth.
-
-Recommended files:
-
-- `00-project-overview.md`
-- `01-architecture.md`
-- `02-runtime-flow.md`
-- `03-business-rules.md`
-- `04-dongle-license.md`
-- `05-implementation-roadmap.md`
-- `06-api-contracts.md`
-- `07-repo-structure.md`
-
-### `infra/`
-
-Environment and deployment helpers.
-
-Possible contents:
-
-- database setup
-- migration helpers
-- environment templates
-- local install helpers
-- build assets
-
-### `scripts/`
-
-Automation scripts for development and packaging.
-
-Possible contents:
+## Dependency Rules
 
 ```text
-- start local services
-- stop local services
-- seed database
-- build desktop app
-- clean generated artifacts
+frontend -> backend API
+backend -> Prisma/PostgreSQL
+backend -> Device Tool HTTP/WebSocket
+backend -> Dongil Server HTTP/Socket.IO
+Electron -> local services and protected backend internal API
 ```
 
-## Dependency Direction Rule
+- Do not import backend implementation into frontend.
+- Do not import Tool implementation into backend.
+- Keep `shared/` framework-neutral when it becomes active.
+- New modules should follow domain ownership rather than expanding already large cross-domain files.
 
-To keep the system maintainable, dependencies should flow in one direction:
+## Generated And Local Data
 
-```text
-frontend -> shared
-backend -> shared
-backend -> tool through HTTP/WebSocket only
-tool -> shared only for compatible contracts, if needed
-```
-
-Rules:
-
-- `frontend` should not import backend implementation code.
-- `backend` should not import frontend UI code.
-- `shared` should remain framework-neutral where possible.
-
-## Naming Conventions
-
-- Use lowercase folder names.
-- Use clear domain-based module names.
-- Keep one responsibility per module.
-- Avoid dumping unrelated files into root folders.
-
-## Why This Structure Works For This Project
-
-This structure fits the project because:
-
-- it matches the way you already think about frontend and backend
-- it keeps the project easy to understand at the start
-- the Device/OCR Tool can evolve behind the backend contract without affecting the frontend
-- shared types prevent FE/BE drift
-- packaging into `.exe` is easier when the desktop shell stays inside `frontend`
-
-## Practical Recommendation
-
-If you want the simplest safe starting point, the first real scaffold should be:
-
-```text
-frontend/
-backend/
-tool/
-shared/
-docs/
-infra/
-```
-
-Then fill in each app gradually.
+Dependencies, builds, `.next`, releases, runtime bundles, coverage, logs, real
+environment files, Python virtual environments, and local databases are ignored.
+Do not treat ignored local outputs as source-of-truth documentation.

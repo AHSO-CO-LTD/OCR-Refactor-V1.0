@@ -1,94 +1,103 @@
-# OCR Metal Core Washing Refactor
+# AHSO OCR Metal Core Washing
 
-This repository is the refactor target for the original Python/PyQt OCR system.
+Local-first Windows desktop software for camera- and PLC-driven OCR inspection
+on an industrial washing line.
 
-Target stack:
+Current source baseline: `v1.4.0`.
 
-- Desktop shell: Electron
-- Frontend: Next.js + React + TypeScript
-- Backend: NestJS
-- Device/OCR Tool: Python + FastAPI in `tool/`
-- Database: PostgreSQL
-- Deployment target: local Windows `.exe`
-
-This repo has moved past the initial documentation-first phase. The backend and frontend foundations are scaffolded, and the documents in `docs/` remain the project source of truth for architecture, runtime flow, business rules, and implementation roadmap.
-
-## Repository Structure
+## Runtime Architecture
 
 ```text
-frontend/  Electron + Next.js UI
-backend/   NestJS local REST API
-tool/      Python + FastAPI Device/OCR Tool used by backend through /tool/v1
-tool-test/ Archived previous Device Tool implementation for reference only
-shared/    shared TypeScript contracts
-docs/      architecture and planning documents
-infra/     local environment and deployment helpers
-scripts/   development and packaging automation
+Electron desktop
+  -> Next.js renderer
+  -> NestJS local API
+       -> PostgreSQL through Prisma
+       -> Device Tool /tool/v1
+       -> Dongil Server when configured
 ```
 
-## First Build Target
+The frontend never calls camera, OCR, PLC, PostgreSQL, or Dongil services directly.
 
-The first implementation milestone is mostly implemented:
+## Workspaces
 
-```text
-backend + PostgreSQL + auth + users + roles + permissions
-```
+| Path | Responsibility |
+| --- | --- |
+| `frontend/` | Next.js UI, i18n, touch-first operational and configuration screens |
+| `backend/` | NestJS auth, permissions, product setup, inspection, PLC, reporting, and synchronization |
+| `electron/` | Elevated desktop lifecycle, service orchestration, installer, updater, and recovery |
+| `shared/` | Reserved framework-neutral contracts; not yet authoritative |
+| `tool/` | Read-only FastAPI camera/OCR/PLC submodule |
+| `scripts/` | Development and Windows release automation |
+| `docs/` | Architecture, contracts, operations, decisions, and approved plans |
 
-This foundation lets the frontend render one shared UI with different features depending on each user's permission list.
+## Implemented Product Areas
 
-Backend API documentation is available through Swagger when the backend is running:
+- JWT login and remembered-session dongle gate.
+- Dynamic role permissions for `dev`, `admin`, `engineer`, and `operator`.
+- User and role-permission administration.
+- Product, AI, OCR variant, camera identity, camera, and ROI configuration.
+- Basler camera connection, live stream, frame capture, and OCR through Device Tool.
+- Modbus TCP and SLMP machine runtime with Manual/Auto, optional signals, inactivity pause, and DEV simulator.
+- Production Line sessions, OK/NG capture logs, result saving, training images, reports, and XLSX export.
+- Dongil machine registration, heartbeat, durable live outbox, and historical result reconciliation.
+- Elevated Electron startup, service watchdog, graceful hardware shutdown, NSIS installer, updater, and rollback checkpoint.
 
-```text
-http://localhost:3979/api/docs
-```
+## Documentation Entry Point
 
-## Current Handoff
+Read [PROJECT_PROFILE.md](PROJECT_PROFILE.md) first, then
+[docs/11-agent-onboarding.md](docs/11-agent-onboarding.md).
 
-Before continuing implementation, read:
+Important references:
 
-- `docs/11-agent-onboarding.md`
-- `docs/12-dongil-server-integration.md`
-- `docs/08-planner.md`
+- [Architecture](docs/01-architecture.md)
+- [Runtime flow](docs/02-runtime-flow.md)
+- [Business rules](docs/03-business-rules.md)
+- [API contracts](docs/06-api-contracts.md)
+- [Dongil integration](docs/12-dongil-server-integration.md)
+- [PLC runtime](docs/13-plc-runtime.md)
+- [Database](docs/14-database.md)
+- [Security](docs/15-security.md)
+- [Development](docs/16-development.md)
+- [Logging](docs/17-logging-and-diagnostics.md)
 
-Current active direction:
+## Development Defaults
 
-```text
-Finish responsive hardening for dashboard/roles/users/products/camera -> Product profile verification -> dedicated ROI/History/Reports screens -> real runtime flow -> Electron + dongle
-```
+| Service | URL |
+| --- | --- |
+| Frontend | `http://localhost:3970` |
+| Backend | `http://localhost:3980/api` |
+| Swagger | `http://localhost:3980/api/docs` |
+| Device Tool | `http://localhost:8668/tool/v1` |
 
-Current implemented foundation:
+Packaged machines use the explicit values written to
+`C:\ProgramData\AHSO OCR\.env`.
 
-- Auth, JWT session, permissions, roles, and users APIs are implemented.
-- Backend Device Tool integration foundation exists with inspection start/current/stop endpoints and per-ROI inspection logging.
-- Backend camera APIs proxy Device Tool status, device discovery, connect, grab, and live stream through the local backend.
-- The active Device Tool is the API-Tool-v1 implementation in `tool/`, exposed to the backend through `/tool/v1` by default; it includes camera control and the current AI/yolo_ocr OCR runtime. The previous implementation is kept in `tool-test/` for reference.
-- Backend license APIs check the legacy `System8.dll` dongle flow, log the result, expose login/dashboard status, and block login when the dongle is missing unless dongle mock mode is enabled.
-- Frontend login, dashboard, role permissions, and user management screens exist.
-- Frontend login shows API/license/dongle startup status before allowing sign-in.
-- User management supports create/edit/delete/status flows with shared confirmation UI.
-- Normal admin cannot manage protected `admin/dev` role permissions; only `dev` can.
-- i18n, Sonner notifications, and error/not-found screens are wired for English/Vietnamese.
-- App shell is being standardized around fixed chrome and the 1280x1024 factory-machine viewport.
-- App shell now warms up camera status/device discovery in the background for camera or inspection users.
-- Product profile management exists with model path, camera config, ROI editor, template apply flow, and simulated preview background.
-- `/dashboard` already hosts an operator runtime foundation with product selector, ROI preview, persisted batch-size save, and OK/NG counters.
-- `/dashboard/camera` exists with product-profile selection, Device Tool status/device discovery, connect/grab/live controls, view adjustment persistence, and manual camera refresh.
-- Dedicated `roi`, `history`, and `reports` pages are not created yet even though their menu permissions exist.
-- Electron MVP shell now exists in `electron/` with single-instance handling, local service health/startup, automatic fallback ports for Device Tool/backend/frontend, renderer launch, and owned-process shutdown for development.
+Before starting any service, check that the target port is free or belongs to a
+healthy service intended for reuse. Never take over a user-owned process.
 
-Run the desktop development shell:
+## Common Commands
 
 ```powershell
+npm ci
+npm run dev -w @ocr/backend
+npm run dev -w @ocr/frontend
 npm run dev:desktop
 ```
 
-## Port Safety Rule
-
-Agents must never take over a port already being used by the user. Before starting local servers, check the target port first:
+Verification commands are run only when explicitly requested:
 
 ```powershell
-Get-NetTCPConnection -LocalPort 3979 -ErrorAction SilentlyContinue
-Get-NetTCPConnection -LocalPort 3969 -ErrorAction SilentlyContinue
+npm run typecheck
+npm run lint -w @ocr/backend
+npm run lint -w @ocr/frontend
+npm run test -w @ocr/backend
+npm run build
 ```
 
-If an agent starts a backend/frontend server only for testing, it must stop that process immediately after verification.
+## Protected Boundaries
+
+- `tool/` is strictly read-only for application work.
+- Original license sources and binaries must not be modified without explicit approval.
+- Real `.env`, credentials, release tokens, and runtime secrets must not enter Git or logs.
+- Source presence and installer publication do not prove live dongle, camera, PLC,
+  database, updater, or Dongil acceptance.

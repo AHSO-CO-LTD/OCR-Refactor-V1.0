@@ -1,176 +1,53 @@
 # Implementation Roadmap
 
-## Delivery Strategy
+## Delivered Foundation
 
-The project should be delivered in phases so the desktop app remains coherent at every stage.
+- npm workspace and local-first component boundaries.
+- NestJS, PostgreSQL, Prisma migrations, Swagger, authentication, and permissions.
+- Next.js shell, English/Vietnamese i18n, touch UI, users, roles, and settings.
+- Product, AI, OCR variant, ROI, camera identity, camera, and test configuration.
+- Inspection sessions, Line runtime, PLC protocols, DEV simulator, result saving, and reports.
+- Electron lifecycle, elevated packaged runtime, service watchdog, and hardware shutdown.
+- Dongle startup integration and first-run customer admin setup.
+- NSIS installer, online prerequisites, updater, recovery checkpoint, and GitHub release workflow.
+- Dongil registration, heartbeat, live outbox, machine information, and historical reconciliation.
 
-The safest order is:
+## Current Hardening Priorities
 
-1. architecture and contracts
-2. backend foundation
-3. frontend shell
-4. desktop packaging
-5. Device/OCR Tool integration
-6. production hardening
+1. Resolve free-angle ROI editing versus 90-degree runtime crop behavior without modifying Tool outside a separately approved Tool task.
+2. Complete target-machine acceptance for camera, PLC, dongle, installer, updater, database backup/restore, and Dongil connectivity loss.
+3. Add complete audit coverage for privileged mutations.
+4. Define and implement JWT expiry, server-side revocation/logout, login lockout, and rate limiting.
+5. Constrain local service network exposure and validate external URL/IPC policy.
+6. Remove or clearly isolate production demo fallback behavior.
+7. Split oversized frontend API, inspection, Electron main, and service-manager modules through approved behavior-preserving refactors.
+8. Promote stable frontend/backend contracts into `shared/` where this reduces real drift.
 
-## Phase 0 - Foundation
+## Documentation Baseline
 
-### Goals
+The documentation refresh plan is tracked in
+[plans/2026-10-05-documentation-baseline-refresh.md](plans/2026-10-05-documentation-baseline-refresh.md).
 
-- confirm repo layout
-- confirm stack choices
-- define data contracts
-- define permission model
-- define local runtime startup strategy
+## Release Acceptance Gate
 
-### Outputs
+A release candidate is not production-ready until explicitly verified for:
 
-- docs
-- shared types
-- service boundaries
-- database schema draft
-- API contract draft
+- clean install, reuse, update, rollback, uninstall, and reinstall;
+- database migration, backup, restore, and preserved configuration;
+- physical dongle startup and runtime failure modes;
+- known-good and known-NG camera/OCR samples;
+- Modbus TCP or SLMP signals used by the target machine;
+- offline production, restart recovery, and Dongil replay/reconciliation;
+- 1280 x 1024 touchscreen workflows and virtual keyboard entry;
+- permission matrix and protected-role behavior;
+- logs and exported diagnostics without secrets.
 
-## Phase 1 - Backend Core
+## Deferred Decisions
 
-### Goals
+- User-level additive/removal permission overrides beyond the current replacement semantics.
+- Tool-side arbitrary-angle ROI crop support.
+- Centralized structured logging and correlation IDs.
+- Formal production log retention automation.
+- Broader shared-contract extraction.
 
-- create NestJS project
-- create PostgreSQL schema
-- implement auth
-- implement users
-- implement roles and permissions
-- implement session handling
-
-### Outputs
-
-- login API
-- permission-aware session payload
-- CRUD for users
-- CRUD for roles and permissions
-- audit logging skeleton
-
-## Phase 2 - Frontend Shell
-
-### Goals
-
-- create Next.js app
-- create app shell
-- create login screen
-- create dashboard shell
-- create shared UI components
-
-### Outputs
-
-- responsive desktop-like UI
-- dynamic menus based on permissions
-- protected routes
-- reusable forms
-
-## Phase 3 - Operational Modules
-
-### Goals
-
-- implement product management
-- implement camera config screens
-- implement ROI config screens
-- implement runtime controls
-- implement history and report screens
-
-### Outputs
-
-- role-aware screens
-- CRUD and stateful workflows
-- production-oriented layouts
-
-## Phase 4 - Electron Desktop Shell
-
-### Goals
-
-- create Electron main process
-- create preload bridge
-- start local services
-- connect renderer to local API
-- handle single instance
-- handle shutdown
-
-### Outputs
-
-- desktop app container
-- local startup orchestration
-- packaging path toward `.exe`
-
-## Phase 5 - Dongle Integration
-
-### Goals
-
-- implement license check module
-- retry logic
-- boot gating
-- runtime recheck
-
-### Outputs
-
-- unlicensed state handling
-- protected app behavior
-- dongle logs
-
-## Phase 6 - Device/OCR Tool Integration
-
-### Goals
-
-- keep the Python/FastAPI `tool/` contract aligned with backend usage
-- define image input and result payloads
-- connect NestJS to the Device/OCR Tool
-
-### Outputs
-
-- OCR pipeline integration point
-- inspection result API
-- model inference workflow
-
-## Phase 7 - Packaging And Hardening
-
-### Goals
-
-- bundle desktop app
-- verify local install behavior
-- test startup/shutdown
-- test permissions
-- test dongle failure modes
-
-### Outputs
-
-- release-ready `.exe`
-- deployment checklist
-- rollback and recovery notes
-
-## Recommended Milestones
-
-### Milestone A
-
-Backend auth, users, permissions, and a basic frontend shell running locally.
-
-### Milestone B
-
-Product, camera, ROI, and history workflows available through REST.
-
-### Milestone C
-
-Electron packaging and dongle gating completed.
-
-### Milestone D
-
-Device/OCR Tool connected and inspection flow operational.
-
-### Milestone E
-
-Stabilization and production release candidate.
-
-## Implementation Rules
-
-- do not create a separate external OCR service
-- keep the UI usable when the Device/OCR Tool is unavailable
-- ship the backend and shell first
-- keep all critical rules server-side
-- preserve offline/local operation
+Each deferred change requires its own inspected and approved plan.

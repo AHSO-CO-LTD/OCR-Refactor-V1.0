@@ -1,8 +1,23 @@
 # Windows Setup And Update Flow
 
+Status: Implemented baseline for application version `1.4.0`.
+
+Last source review: `2026-10-05`. This document describes the checked-in
+installer/release implementation. The current documentation pass did not run an
+installer or publish a release.
+
+Related records: [`../PROJECT_PROFILE.md`](../PROJECT_PROFILE.md),
+[`17-logging-and-diagnostics.md`](17-logging-and-diagnostics.md), and
+[`adr/0006-nsis-update-recovery.md`](adr/0006-nsis-update-recovery.md).
+
 ## Goal
 
 Build one Windows setup file for the local OCR station.
+
+The protected source boundaries remain unchanged during packaging: release
+automation may copy or consume an approved encrypted Tool bundle and compiled
+license artifacts, but application work must not edit `tool/` or the original
+license implementation/binaries.
 
 The setup must install the desktop shell, backend, frontend runtime, Device/OCR
 Tool, local environment, and PostgreSQL database bootstrap. The browser must

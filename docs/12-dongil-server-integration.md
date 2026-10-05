@@ -1,5 +1,12 @@
 # Dongil Server integration
 
+Status: Implemented; connected-server verification remains environment
+dependent.
+
+Last source review: `2026-10-05`. Related architecture records:
+[`adr/0005-dongil-durable-outbox.md`](adr/0005-dongil-durable-outbox.md) and
+[`plans/2026-09-09-dongil-history-sync.md`](plans/2026-09-09-dongil-history-sync.md).
+
 ## Purpose
 
 This local washing-machine application is the first Dongil Server machine client. Dongil Server receives machine presence, the aggregate production OK/NG verdict, and only the per-scan OK/NG quantity totals required for washing statistics. Camera, PLC, OCR, Device Tool, images, individual ROI details, and NG text remain local.
@@ -63,7 +70,7 @@ Payload:
   "machineId": "XXXX-XXXX-XXXX-XXXX",
   "machineTypeCode": "WASHING_MACHINE",
   "licenseStatus": "LICENSED",
-  "appVersion": "1.2.8"
+  "appVersion": "1.4.0"
 }
 ```
 
