@@ -12,6 +12,7 @@ import {
 import { toast } from "sonner";
 import { CameraConnectionOverlay } from "@/components/camera/camera-connection-overlay";
 import { useConnectedCameraPreview } from "@/components/camera/use-connected-camera-preview";
+import { DongilImageSimulationControls } from "@/components/operator/dongil-image-simulation-controls";
 import {
   OperatorRoiEditor,
   type OperatorRoiStatus,
@@ -36,6 +37,7 @@ import {
   getMachineRuntimeStatus,
   grabMachineFrame,
   listProductProfiles,
+  simulateInspectionImage,
   startMachineOperation,
   stopMachineOperation,
   stopInspection,
@@ -51,9 +53,20 @@ import {
 import { useI18n } from "@/lib/i18n";
 import { getInspectionSlotDisplayText } from "@/lib/inspection-slot-display";
 import {
+  cropProductRois,
+  readImageFileAsDataUrl,
+} from "@/lib/inspection-test-image";
+import {
   saveOperatorStartupPreferences,
   selectOperatorStartupProduct,
 } from "@/lib/operator-startup-preferences";
+import {
+  areMachineControlsLocked,
+  areRuntimeControlsActive,
+  canStartPendingProductSession,
+  isCameraRecoveryInProgress,
+  isPlcStopAwaitingStart,
+} from "@/lib/operator-machine-flow";
 import {
   getRuntimeTestSettings,
   subscribeRuntimeTestSettings,
@@ -135,8 +148,8 @@ function isKnownInspectionSlot(
 
 function getVisibleRoiIndexes(statuses: Record<number, OperatorRoiStatus>) {
   return Object.entries(statuses)
-    .filter(([, value]) =>
-      value === "OK" || value === "NG" || value === "CHECKING",
+    .filter(
+      ([, value]) => value === "OK" || value === "NG" || value === "CHECKING",
     )
     .map(([index]) => Number(index));
 }
@@ -152,15 +165,22 @@ function resolveLiveRoiAnimationState(
 
 export function OperatorRuntimePanel() {
   const { apiError, t } = useI18n();
-  const operatorActionButtonsLocked = getStoredUser()?.role === "operator";
+  const currentUserRole = getStoredUser()?.role;
+  const operatorActionButtonsLocked = currentUserRole === "operator";
+  const canSimulateDongilImage = currentUserRole === "dev";
   const timersRef = useRef<number[]>([]);
   const batchEditorRef = useRef<HTMLDivElement | null>(null);
   const currentJobIdRef = useRef("");
   const autoRunRef = useRef(false);
   const scanRunningRef = useRef(false);
+  const selectedProductIdRef = useRef(demoProducts[0].id);
+  const queuedProductChangeRef = useRef("");
+  const productChangeRunningRef = useRef(false);
+  const machineStartRequestRef = useRef<Promise<void> | null>(null);
   const lastPlcInspectionSequenceRef = useRef(0);
   const lastLiveInspectionSequenceRef = useRef(0);
   const lastCameraFrameSequenceRef = useRef(0);
+  const runtimeSequencesInitializedRef = useRef(false);
   const runtimeDefaultsAppliedRef = useRef(false);
   const operationStartupProductRef = useRef("");
   const liveRoiFingerprintsRef = useRef<Record<number, string>>({});
@@ -173,6 +193,13 @@ export function OperatorRuntimePanel() {
   const liveInspectionHandlerRef = useRef<
     (status: MachineRuntimeStatus) => void
   >(() => undefined);
+  const pendingProductStartRef = useRef("");
+  const pendingProductSessionRequestRef = useRef(false);
+  const pendingProductSessionErrorRef = useRef("");
+  const pendingProductSessionRetryAtRef = useRef(0);
+  const pendingProductSessionHandlerRef = useRef<
+    (accessToken: string, status: MachineRuntimeStatus) => Promise<void>
+  >(async () => undefined);
   const [products, setProducts] = useState<ProductProfile[]>(demoProducts);
   const [selectedProductId, setSelectedProductId] = useState(
     demoProducts[0].id,
@@ -190,8 +217,10 @@ export function OperatorRuntimePanel() {
   );
   const [keypadOpen, setKeypadOpen] = useState(false);
   const [savingBatch, setSavingBatch] = useState(false);
+  const [resettingCounters, setResettingCounters] = useState(false);
   const [changingProduct, setChangingProduct] = useState(false);
   const [scanRunning, setScanRunning] = useState(false);
+  const [dongilSimulationRunning, setDongilSimulationRunning] = useState(false);
   const [autoRunning, setAutoRunning] = useState(false);
   const [machineRuntimeState, setMachineRuntimeState] =
     useState<MachineRuntimeStatus["state"]>("inactive");
@@ -200,9 +229,7 @@ export function OperatorRuntimePanel() {
   const [machineStopCountdownSeconds, setMachineStopCountdownSeconds] =
     useState<number | null>(null);
   const [plcConnected, setPlcConnected] = useState(false);
-  const [operationMode, setOperationMode] = useState<"manual" | "auto">(
-    "auto",
-  );
+  const [operationMode, setOperationMode] = useState<"manual" | "auto">("auto");
   const [liveCameraEnabled, setLiveCameraEnabled] = useState(true);
   const [realtimeAiEnabled, setRealtimeAiEnabled] = useState(true);
   const [controlUpdating, setControlUpdating] = useState(false);
@@ -221,33 +248,25 @@ export function OperatorRuntimePanel() {
   );
   const { showNgRecognizedText } = useLineDisplaySettings();
 
-  const runtimeControlsActive = ![
-    "stopping",
-    "idle_machine_stop",
-    "idle_capture_timeout",
-    "resuming",
-    "waiting_camera",
-    "restart_required",
-    "error",
-  ].includes(machineRuntimeState);
-  const effectiveLiveCameraEnabled =
-    runtimeControlsActive && liveCameraEnabled;
-  const effectiveRealtimeAiEnabled =
-    runtimeControlsActive && realtimeAiEnabled;
-  const cameraRecoveryInProgress = [
-    "resuming",
-    "waiting_camera",
-    "restart_required",
-    "error",
-  ].includes(machineRuntimeState);
+  const runtimeControlsActive = areRuntimeControlsActive(machineRuntimeState);
+  const effectiveLiveCameraEnabled = runtimeControlsActive && liveCameraEnabled;
+  const effectiveRealtimeAiEnabled = runtimeControlsActive && realtimeAiEnabled;
+  const cameraRecoveryInProgress =
+    isCameraRecoveryInProgress(machineRuntimeState);
   const previewStreamEnabled =
     liveCameraEnabled &&
     !["stopping", "idle_machine_stop", "idle_capture_timeout"].includes(
       machineRuntimeState,
     );
-  const machineStopActive =
-    machineIdleReason === "machine_stop" &&
-    ["stopping", "idle_machine_stop"].includes(machineRuntimeState);
+  const machineStopActive = isPlcStopAwaitingStart(
+    machineRuntimeState,
+    machineIdleReason,
+  );
+  const machineControlsLocked = areMachineControlsLocked(machineRuntimeState);
+
+  useEffect(() => {
+    selectedProductIdRef.current = selectedProductId;
+  }, [selectedProductId]);
 
   useEffect(() => {
     if (!keypadOpen) {
@@ -421,11 +440,27 @@ export function OperatorRuntimePanel() {
       }
 
       try {
+        const currentRuntime = await getMachineRuntimeStatus(accessToken);
+        if (
+          isPlcStopAwaitingStart(
+            currentRuntime.data.state,
+            currentRuntime.data.idleReason,
+          )
+        ) {
+          if (!currentJobIdRef.current) {
+            pendingProductStartRef.current = selectedProductId;
+          }
+          autoRunRef.current = false;
+          setAutoRunning(false);
+          setMachineRuntimeState(currentRuntime.data.state);
+          applyRuntimeControls(currentRuntime.data);
+          return;
+        }
+
         const inspection = await beginInspectionSession(
           accessToken,
           selectedProductId,
         );
-        const currentRuntime = await getMachineRuntimeStatus(accessToken);
         const runtime = [
           "error",
           "idle_capture_timeout",
@@ -508,9 +543,12 @@ export function OperatorRuntimePanel() {
   const overlayResult =
     animationState === "OK" || animationState === "NG" ? animationState : null;
   const runtimeActionsDisabled = loadingProducts || dataSource !== "api";
-  const previewImageSrc = effectiveLiveCameraEnabled
-    ? livePreviewImageSrc
-    : capturedPreviewImageSrc || livePreviewImageSrc;
+  const previewImageSrc =
+    dongilSimulationRunning && capturedPreviewImageSrc
+      ? capturedPreviewImageSrc
+      : effectiveLiveCameraEnabled
+        ? livePreviewImageSrc
+        : capturedPreviewImageSrc || livePreviewImageSrc;
 
   useEffect(() => {
     if (dataSource !== "api" || loadingProducts) {
@@ -541,6 +579,7 @@ export function OperatorRuntimePanel() {
     liveRoiStatusesRef.current = {};
     liveRoiLabelsRef.current = {};
     setAnimationState("UNKNOWN");
+    setBatchQuantity(0);
     setActiveRoiIndexes([]);
     setRoiStatuses({});
     setRoiDetectedTextLabels({});
@@ -556,6 +595,13 @@ export function OperatorRuntimePanel() {
     setNgCount(inspection.ngCount);
   }
 
+  function applyRuntimeSequenceBaseline(status: MachineRuntimeStatus) {
+    lastPlcInspectionSequenceRef.current = status.lastPlcInspectionSequence;
+    lastLiveInspectionSequenceRef.current = status.liveInspectionSequence;
+    lastCameraFrameSequenceRef.current = status.cameraFrameSequence;
+    runtimeSequencesInitializedRef.current = true;
+  }
+
   function handleRoiChange(newRois: typeof selectedProduct.roiRegions) {
     setProducts((current) =>
       current.map((product) =>
@@ -567,70 +613,190 @@ export function OperatorRuntimePanel() {
   }
 
   async function resetCounters(showToast = true) {
-    autoRunRef.current = false;
-    setAutoRunning(false);
+    if (machineControlsLocked || resettingCounters) return;
+    const accessToken = getAccessToken();
+    if (!accessToken) {
+      toast.error(t("users.missingSession"));
+      return;
+    }
+
+    setResettingCounters(true);
     scanRunningRef.current = false;
     setScanRunning(false);
-    await stopCurrentInspection({ showToast: false });
-    setOkCount(0);
-    setNgCount(0);
-    setBatchCount(0);
-    setBatchQuantity(0);
-    setScanCount(0);
-    resetAnimationState();
+    try {
+      const stopped = await stopCurrentInspection({
+        showToast: false,
+        stopMachine: false,
+      });
+      if (!stopped) return;
 
-    if (showToast) {
-      toast.success(t("operator.resetDone"));
+      const inspection = await beginInspectionSession(
+        accessToken,
+        selectedProduct.id,
+      );
+      currentJobIdRef.current = inspection.data.jobId;
+      applyInspectionCounters(inspection.data);
+      resetAnimationState();
+
+      if (showToast) {
+        toast.success(t("operator.resetDone"));
+      }
+    } catch (cause) {
+      toast.error(
+        cause instanceof ApiError
+          ? cause.message
+          : t("lineAnimationTest.realTestFailed"),
+      );
+    } finally {
+      setResettingCounters(false);
     }
   }
 
-  async function handleProductChange(nextProductId: string) {
+  async function applyProductChange(nextProductId: string) {
+    const accessToken = getAccessToken();
+    const nextProduct = products.find(
+      (product) => product.id === nextProductId,
+    );
+
+    if (!accessToken) {
+      toast.error(t("users.missingSession"));
+      return;
+    }
+    if (!nextProduct) return;
+
+    try {
+      const [currentResponse, runtimeResponse] = await Promise.all([
+        getCurrentInspection(accessToken),
+        getMachineRuntimeStatus(accessToken),
+      ]);
+      const currentInspection = currentResponse.data;
+      const runtime = runtimeResponse.data;
+      const waitForPlcStart = isPlcStopAwaitingStart(
+        runtime.state,
+        runtime.idleReason,
+      );
+
+      applyRuntimeSequenceBaseline(runtime);
+
+      if (
+        currentInspection &&
+        currentInspection.productId !== nextProductId
+      ) {
+        await stopInspection(
+          accessToken,
+          currentInspection.jobId,
+          "product_change",
+        );
+        currentJobIdRef.current = "";
+      }
+
+      const inspection =
+        currentInspection?.productId === nextProductId
+          ? currentInspection
+          : (await beginInspectionSession(accessToken, nextProductId)).data;
+
+      currentJobIdRef.current = inspection.jobId;
+      operationStartupProductRef.current = nextProductId;
+      pendingProductStartRef.current = "";
+      pendingProductSessionErrorRef.current = "";
+      pendingProductSessionRetryAtRef.current = 0;
+      selectedProductIdRef.current = nextProductId;
+      setSelectedProductId(nextProductId);
+      setKeypadOpen(false);
+      applyInspectionCounters(inspection);
+      resetAnimationState();
+      setMachineRuntimeState(runtime.state);
+      applyRuntimeControls(runtime);
+
+      if (waitForPlcStart) {
+        autoRunRef.current = false;
+        setAutoRunning(false);
+        toast.info(t("operator.productChangedWaitingStart"));
+      } else if (
+        runtime.state === "running" ||
+        runtime.state === "resuming" ||
+        runtime.state === "waiting_camera"
+      ) {
+        const machineIsRunning = runtime.state === "running";
+        autoRunRef.current = machineIsRunning;
+        setAutoRunning(machineIsRunning);
+        toast.info(t("operator.productChangedSessionRestarted"));
+      } else if (
+        runtime.state === "stopping" ||
+        runtime.state === "idle_machine_stop" ||
+        runtime.state === "idle_capture_timeout" ||
+        runtime.state === "restart_required"
+      ) {
+        autoRunRef.current = false;
+        setAutoRunning(false);
+        toast.info(t("operator.productChangedSessionRestarted"));
+      } else {
+        toast.info(t("operator.productChangedSessionRestarted"));
+
+        if (!machineStartRequestRef.current) {
+          const request = startMachineOperation(accessToken)
+            .then((response) => {
+              const startedRuntime = response.data;
+              const machineIsRunning = startedRuntime.state === "running";
+              autoRunRef.current = machineIsRunning;
+              setAutoRunning(machineIsRunning);
+              setMachineRuntimeState(startedRuntime.state);
+              applyRuntimeControls(startedRuntime);
+            })
+            .catch((cause: unknown) => {
+              toast.error(
+                cause instanceof ApiError
+                  ? cause.message
+                  : t("lineAnimationTest.realTestFailed"),
+              );
+            })
+            .finally(() => {
+              machineStartRequestRef.current = null;
+            });
+          machineStartRequestRef.current = request;
+        }
+      }
+    } catch (cause) {
+      toast.error(
+        cause instanceof ApiError
+          ? cause.message
+          : t("lineAnimationTest.realTestFailed"),
+      );
+    }
+  }
+
+  async function processProductChangeQueue() {
+    if (productChangeRunningRef.current) return;
+
+    productChangeRunningRef.current = true;
+    setChangingProduct(true);
+    try {
+      while (queuedProductChangeRef.current) {
+        const nextProductId = queuedProductChangeRef.current;
+        queuedProductChangeRef.current = "";
+        if (nextProductId === selectedProductIdRef.current) continue;
+        await applyProductChange(nextProductId);
+      }
+    } finally {
+      productChangeRunningRef.current = false;
+      setChangingProduct(false);
+      if (queuedProductChangeRef.current) {
+        void processProductChangeQueue();
+      }
+    }
+  }
+
+  function handleProductChange(nextProductId: string) {
+    if (scanRunningRef.current) return;
     if (
-      nextProductId === selectedProductId ||
-      changingProduct ||
-      scanRunningRef.current
+      nextProductId === selectedProductIdRef.current &&
+      !productChangeRunningRef.current
     ) {
       return;
     }
 
-    const wasAutoRunning = autoRunRef.current || autoRunning;
-    setChangingProduct(true);
-    autoRunRef.current = false;
-    setAutoRunning(false);
-
-    try {
-      if (currentJobIdRef.current) {
-        await stopCurrentInspection({
-          endReason: "product_change",
-          showToast: false,
-          stopMachine: !wasAutoRunning,
-        });
-      }
-
-      if (wasAutoRunning) {
-        operationStartupProductRef.current = nextProductId;
-      }
-      setSelectedProductId(nextProductId);
-      const nextProduct =
-        products.find((product) => product.id === nextProductId) ??
-        demoProducts[0];
-      setBatchSize(nextProduct.batchSize || 1);
-      setBatchDraft(String(nextProduct.batchSize || 1));
-      setKeypadOpen(false);
-      setOkCount(0);
-      setNgCount(0);
-      setBatchCount(0);
-      setBatchQuantity(0);
-      setScanCount(0);
-      resetAnimationState();
-
-      if (wasAutoRunning) {
-        toast.info(t("operator.productChangedSessionRestarted"));
-        void ensureMachineOperation(nextProduct);
-      }
-    } finally {
-      setChangingProduct(false);
-    }
+    queuedProductChangeRef.current = nextProductId;
+    void processProductChangeQueue();
   }
 
   function adjustBatchDraft(delta: number) {
@@ -672,6 +838,7 @@ export function OperatorRuntimePanel() {
   }
 
   async function saveBatchSize() {
+    if (machineControlsLocked) return;
     const accessToken = getAccessToken();
     const nextBatchSize = Math.max(1, Number(batchDraft) || 1);
 
@@ -771,11 +938,11 @@ export function OperatorRuntimePanel() {
           region.index,
           slot
             ? getInspectionSlotDisplayText(
-              slot,
-              selectedProduct.code,
-              finalStatuses[region.index],
-              { showNgRecognizedText },
-            )
+                slot,
+                selectedProduct.code,
+                finalStatuses[region.index],
+                { showNgRecognizedText },
+              )
             : selectedProduct.code,
         ];
       }),
@@ -819,6 +986,7 @@ export function OperatorRuntimePanel() {
 
     liveRoiStatusesRef.current = { ...animation.finalStatuses };
     liveRoiLabelsRef.current = { ...animation.finalLabels };
+    setBatchQuantity(inspection.quantity);
     setActiveRoiIndexes(animation.regions.map((region) => region.index));
     setRoiStatuses({ ...animation.finalStatuses });
     setRoiDetectedTextLabels({ ...animation.finalLabels });
@@ -920,6 +1088,60 @@ export function OperatorRuntimePanel() {
     }
   }
 
+  async function handleDongilImageSimulation(file: File) {
+    if (scanRunningRef.current || dongilSimulationRunning) return;
+    if (!file.type.startsWith("image/")) {
+      toast.error(t("operator.dongilInvalidImage"));
+      return;
+    }
+    if (file.size > 10 * 1024 * 1024) {
+      toast.error(t("operator.dongilImageTooLarge"));
+      return;
+    }
+
+    const validated = validateRuntimeInputs();
+    if (!validated) return;
+
+    scanRunningRef.current = true;
+    setDongilSimulationRunning(true);
+    setScanRunning(true);
+    setAnimationState("CHECKING");
+
+    try {
+      const imageBase64 = await readImageFileAsDataUrl(file);
+      const crops = await cropProductRois(imageBase64, validated.product);
+      setCapturedPreviewImageSrc(imageBase64);
+      const response = await simulateInspectionImage(
+        validated.accessToken,
+        validated.product.id,
+        imageBase64,
+        crops,
+      );
+
+      if (!response.data.latched) {
+        setAnimationState("UNKNOWN");
+        toast.warning(t("operator.dongilUnknownResult"));
+        return;
+      }
+
+      await playLatchedInspectionResult(response.data.inspection);
+      toast.success(
+        t("operator.dongilImageSent").replace("{result}", response.data.result),
+      );
+    } catch (cause) {
+      setAnimationState("UNKNOWN");
+      toast.error(
+        cause instanceof ApiError
+          ? apiError(cause.message, "operator.dongilImageFailed")
+          : t("operator.dongilImageFailed"),
+      );
+    } finally {
+      scanRunningRef.current = false;
+      setDongilSimulationRunning(false);
+      setScanRunning(false);
+    }
+  }
+
   function applyRuntimeControls(status: MachineRuntimeStatus) {
     setMachineIdleReason(status.idleReason);
     setMachineStopCountdownSeconds(status.stopCountdownSeconds);
@@ -950,7 +1172,11 @@ export function OperatorRuntimePanel() {
       );
       applyRuntimeControls(response.data);
       toast.success(
-        t(nextMode === "auto" ? "operator.autoEnabled" : "operator.manualEnabled"),
+        t(
+          nextMode === "auto"
+            ? "operator.autoEnabled"
+            : "operator.manualEnabled",
+        ),
       );
     } catch (cause) {
       toast.error(
@@ -1028,12 +1254,14 @@ export function OperatorRuntimePanel() {
     endReason?: LineSessionEndReason;
     showToast?: boolean;
     stopMachine?: boolean;
-  } = {}) {
+  } = {}): Promise<boolean> {
     const accessToken = getAccessToken();
     const jobId = currentJobIdRef.current;
 
-    autoRunRef.current = false;
-    setAutoRunning(false);
+    if (stopMachine) {
+      autoRunRef.current = false;
+      setAutoRunning(false);
+    }
 
     if (!accessToken || !jobId) {
       if (accessToken && stopMachine) {
@@ -1042,7 +1270,7 @@ export function OperatorRuntimePanel() {
       if (showToast) {
         toast.success(t("operator.runStopped"));
       }
-      return;
+      return true;
     }
 
     try {
@@ -1056,7 +1284,7 @@ export function OperatorRuntimePanel() {
         toast.success(t("operator.runStopped"));
       }
 
-      if (response.data.resultSaveError) {
+      if (response.data?.resultSaveError) {
         toast.warning(
           apiError(
             response.data.resultSaveError,
@@ -1064,10 +1292,12 @@ export function OperatorRuntimePanel() {
           ),
         );
       }
+      return true;
     } catch (cause) {
       const message =
         cause instanceof ApiError ? cause.message : t("operator.runStopped");
       toast.error(message);
+      return false;
     }
   }
 
@@ -1102,9 +1332,7 @@ export function OperatorRuntimePanel() {
         setAutoRunning(true);
       }
     }
-    if (
-      status.liveInspectionSequence < lastLiveInspectionSequenceRef.current
-    ) {
+    if (status.liveInspectionSequence < lastLiveInspectionSequenceRef.current) {
       lastLiveInspectionSequenceRef.current = status.liveInspectionSequence;
     }
     if (
@@ -1116,6 +1344,7 @@ export function OperatorRuntimePanel() {
     }
 
     lastLiveInspectionSequenceRef.current = status.liveInspectionSequence;
+    setBatchQuantity(inspection.quantity);
     const slotByIndex = new Map(
       inspection.slots
         .filter((slot) => typeof slot.slotIndex === "number")
@@ -1161,8 +1390,7 @@ export function OperatorRuntimePanel() {
 
     if (knownChangedRegions.length === 0) return;
 
-    liveRoiAnimationDeadlineRef.current =
-      Date.now() + inspectionResultDelayMs;
+    liveRoiAnimationDeadlineRef.current = Date.now() + inspectionResultDelayMs;
     const expectedFingerprints = { ...nextFingerprints };
     const resultTimer = window.setTimeout(() => {
       const finalStatuses = { ...liveRoiStatusesRef.current };
@@ -1203,6 +1431,48 @@ export function OperatorRuntimePanel() {
     timersRef.current.push(resultTimer);
   };
 
+  pendingProductSessionHandlerRef.current = async (accessToken, status) => {
+    const pendingProductId = pendingProductStartRef.current;
+    if (
+      !pendingProductId ||
+      pendingProductId !== selectedProductId ||
+      currentJobIdRef.current ||
+      pendingProductSessionRequestRef.current ||
+      Date.now() < pendingProductSessionRetryAtRef.current ||
+      !canStartPendingProductSession(status.state)
+    ) {
+      return;
+    }
+
+    pendingProductSessionRequestRef.current = true;
+    try {
+      const inspection = await beginInspectionSession(
+        accessToken,
+        pendingProductId,
+      );
+      if (pendingProductStartRef.current !== pendingProductId) return;
+
+      currentJobIdRef.current = inspection.data.jobId;
+      pendingProductStartRef.current = "";
+      pendingProductSessionErrorRef.current = "";
+      pendingProductSessionRetryAtRef.current = 0;
+      applyInspectionCounters(inspection.data);
+      toast.success(t("operator.productChangedSessionStarted"));
+    } catch (cause) {
+      pendingProductSessionRetryAtRef.current = Date.now() + 2_000;
+      const message =
+        cause instanceof ApiError
+          ? cause.message
+          : t("lineAnimationTest.realTestFailed");
+      if (pendingProductSessionErrorRef.current !== message) {
+        pendingProductSessionErrorRef.current = message;
+        toast.error(message);
+      }
+    } finally {
+      pendingProductSessionRequestRef.current = false;
+    }
+  };
+
   useEffect(() => {
     if (dataSource !== "api") return;
     let active = true;
@@ -1229,6 +1499,7 @@ export function OperatorRuntimePanel() {
         setAutoRunning(machineIsRunning);
         setMachineRuntimeState(status.state);
         applyRuntimeControls(status);
+        await pendingProductSessionHandlerRef.current(accessToken, status);
         if (
           status.liveCameraEnabled === false &&
           typeof status.cameraFrameSequence === "number"
@@ -1243,8 +1514,12 @@ export function OperatorRuntimePanel() {
           setScanRunning(false);
           clearTimers();
         }
-        liveInspectionHandlerRef.current(status);
-        await plcInspectionHandlerRef.current(status);
+        if (!runtimeSequencesInitializedRef.current) {
+          applyRuntimeSequenceBaseline(status);
+        } else {
+          liveInspectionHandlerRef.current(status);
+          await plcInspectionHandlerRef.current(status);
+        }
       } catch {
         if (active) setPlcConnected(false);
         // The shared shell watchdog surfaces backend connectivity errors.
@@ -1271,6 +1546,8 @@ export function OperatorRuntimePanel() {
       operationMode={operationMode}
       realtimeAiEnabled={realtimeAiEnabled}
       runtimeControlsActive={runtimeControlsActive}
+      runtimeLocked={machineControlsLocked}
+      resettingCounters={resettingCounters}
       scanRunning={scanRunning}
       onGrab={() => void handleManualGrab()}
       onLiveCameraToggle={() => void toggleLiveCamera()}
@@ -1294,23 +1571,31 @@ export function OperatorRuntimePanel() {
 
             <div className="operator-line-product-form grid gap-3">
               <div className="operator-line-product-field grid gap-2">
-                <label className="text-sm font-semibold text-[#274d7d]">
-                  {t("products.code")}
-                </label>
+                <div className="flex min-h-5 items-center justify-between gap-3">
+                  <label className="text-sm font-semibold text-[#274d7d]">
+                    {t("products.code")}
+                  </label>
+                  {changingProduct ? (
+                    <span
+                      role="status"
+                      className="text-xs font-semibold text-[#274d7d]"
+                    >
+                      {t("operator.changingProduct")}
+                    </span>
+                  ) : null}
+                </div>
                 <Select
                   aria-label={t("products.code")}
                   value={selectedProduct.id}
                   portalled
                   viewportFittedMenu
-                  disabled={loadingProducts || scanRunning || changingProduct}
+                  disabled={loadingProducts || scanRunning}
                   className="operator-line-form-control h-12 border-[#9db7d8] bg-white px-4 text-xl font-semibold"
                   menuListClassName="py-1"
                   optionClassName="min-h-11 items-center border-b border-[#c9d6e5] px-4 py-2 last:border-b-0 active:bg-slate-200"
                   optionLabelClassName="text-xl font-semibold"
                   activeOptionClassName="border-[#8ab6df] bg-[#d5eaff] text-[#123f73] shadow-[inset_4px_0_0_#1670b9] hover:bg-[#c5e1ff]"
-                  onChange={(event) =>
-                    void handleProductChange(event.target.value)
-                  }
+                  onChange={(event) => handleProductChange(event.target.value)}
                 >
                   {products.map((product) => (
                     <option key={product.id} value={product.id}>
@@ -1332,6 +1617,7 @@ export function OperatorRuntimePanel() {
                     <Button
                       type="button"
                       variant="outline"
+                      disabled={machineControlsLocked}
                       className="operator-line-form-control h-12 border-[#9db7d8] bg-white text-slate-950 hover:bg-slate-50"
                       onClick={() => adjustBatchDraft(-1)}
                     >
@@ -1342,6 +1628,7 @@ export function OperatorRuntimePanel() {
                       inputMode="numeric"
                       data-virtual-keyboard="off"
                       value={batchDraft}
+                      disabled={machineControlsLocked}
                       className="operator-line-form-control h-12 border-[#9db7d8] bg-white text-center text-lg font-semibold"
                       onFocus={() => setKeypadOpen(true)}
                       onClick={() => setKeypadOpen(true)}
@@ -1353,6 +1640,7 @@ export function OperatorRuntimePanel() {
                     <Button
                       type="button"
                       variant="outline"
+                      disabled={machineControlsLocked}
                       className="operator-line-form-control h-12 border-[#9db7d8] bg-white text-slate-950 hover:bg-slate-50"
                       onClick={() => adjustBatchDraft(1)}
                     >
@@ -1362,7 +1650,12 @@ export function OperatorRuntimePanel() {
                   <Button
                     type="button"
                     className="operator-line-form-control operator-line-save-button h-12 border-[#274d7d] bg-[#274d7d] text-base text-white hover:bg-[#1f3d64]"
-                    disabled={savingBatch || autoRunning || scanRunning}
+                    disabled={
+                      machineControlsLocked ||
+                      savingBatch ||
+                      autoRunning ||
+                      scanRunning
+                    }
                     onClick={() => void saveBatchSize()}
                   >
                     <Save className="h-4 w-4" />
@@ -1370,7 +1663,7 @@ export function OperatorRuntimePanel() {
                       ? t("operator.savingPackSize")
                       : t("operator.savePackSize")}
                   </Button>
-                  {keypadOpen ? (
+                  {keypadOpen && !machineControlsLocked ? (
                     <div className="absolute left-0 right-0 top-full z-30 mt-2 grid gap-2 rounded-sm border border-[#9db7d8] bg-white p-3 shadow-[0_12px_30px_rgba(15,23,42,0.18)]">
                       <NumericKeypad
                         onKeyPress={appendBatchDigit}
@@ -1392,8 +1685,11 @@ export function OperatorRuntimePanel() {
                 className="operator-line-info-tile border-[#f0a53b] bg-white text-slate-950"
               />
               <InfoTile
-                label={t("operator.quantity")}
-                value={batchQuantity}
+                label={t("operator.recognition")}
+                value={`${Math.min(
+                  Math.max(0, batchQuantity),
+                  selectedProduct.roiRegions.length,
+                )}/${selectedProduct.roiRegions.length}`}
                 className="operator-line-info-tile border-[#f0a53b] bg-white text-slate-950"
               />
               <InfoTile
@@ -1427,6 +1723,16 @@ export function OperatorRuntimePanel() {
           <div className="operator-line-top-actions rounded-sm border border-[#9db7d8] bg-[#d9e6f5] p-4">
             <div className="operator-line-top-action-grid grid gap-2">
               {actionButtons}
+              {canSimulateDongilImage ? (
+                <DongilImageSimulationControls
+                  disabled={
+                    runtimeActionsDisabled ||
+                    scanRunning
+                  }
+                  submitting={dongilSimulationRunning}
+                  onSubmit={handleDongilImageSimulation}
+                />
+              ) : null}
             </div>
           </div>
         </CardContent>
@@ -1453,7 +1759,8 @@ export function OperatorRuntimePanel() {
               interactive={false}
               previewImageSrc={previewImageSrc}
               cameraDisplayName={
-                livePreviewRuntimeDeviceName || selectedProduct.camera.deviceName
+                livePreviewRuntimeDeviceName ||
+                selectedProduct.camera.deviceName
               }
               showClock
               clockLeadingContent={
@@ -1478,7 +1785,11 @@ export function OperatorRuntimePanel() {
               connectionOverlay={
                 !machineStopActive && dataSource === "api" ? (
                   <CameraConnectionOverlay
-                    status={livePreviewConnectionStatus}
+                    status={
+                      cameraRecoveryInProgress
+                        ? "connecting"
+                        : livePreviewConnectionStatus
+                    }
                     deviceName={
                       livePreviewRuntimeDeviceName ||
                       selectedProduct.camera.deviceName

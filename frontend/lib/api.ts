@@ -277,6 +277,12 @@ export type TestInspectionImageResult = {
   slots: InspectionSlotState[];
 };
 
+export type SimulatedInspectionImageResult = {
+  latched: boolean;
+  result: "OK" | "NG" | "UNKNOWN";
+  inspection: CurrentInspectionState;
+};
+
 export type TestSessionImageResult = "OK" | "NG" | "UNKNOWN" | "ERROR";
 
 export type LineResultSavePolicy = "all" | "ok" | "ng" | "none";
@@ -722,6 +728,74 @@ export type MachineRuntimeAction = MachineRuntimeStatus & {
   inspection: CurrentInspectionState | null;
 };
 
+export type DongilHistorySyncRunState =
+  | "PREPARING"
+  | "RUNNING"
+  | "PAUSED"
+  | "BLOCKED"
+  | "CANCELLED"
+  | "COMPLETED";
+
+export type DongilHistorySyncRun = {
+  id: string;
+  state: DongilHistorySyncRunState;
+  snapshotTotal: number;
+  snapshotConfirmed: number;
+  uploadTotal: number;
+  acceptedCount: number;
+  replayedCount: number;
+  failedCount: number;
+  currentBatch: number;
+  totalBatches: number;
+  lastBatchId: string | null;
+  lastRetryAt: string | null;
+  checkpointedAt: string | null;
+  startedAt: string;
+  pausedAt: string | null;
+  cancelledAt: string | null;
+  completedAt: string | null;
+  uploadCompletedAt: string | null;
+  verificationStartedAt: string | null;
+  verificationCompletedAt: string | null;
+  lastSuccessfulVerificationAt: string | null;
+  lastErrorCode: string | null;
+  lastErrorMessage: string | null;
+  invalidCount: number;
+  percent: number;
+  delivery: {
+    phase: "UPLOADING" | "COMPLETED";
+    total: number;
+    confirmed: number;
+    percent: number;
+    completedAt: string | null;
+  };
+  reconciliation: {
+    phase:
+      | "WAITING_FOR_UPLOAD"
+      | "COUNTERS"
+      | "RESULT_IDS"
+      | "FINALIZING"
+      | "COMPLETED";
+    total: number;
+    verified: number;
+    percent: number;
+    totalScopes: number;
+    completedScopes: number;
+    currentScope: { scope: string; scopeKey: string } | null;
+    startedAt: string | null;
+    completedAt: string | null;
+  };
+};
+
+export type DongilHistorySyncInvalidItem = {
+  id: string;
+  sourceLogId: string;
+  plcCaptureId: string | null;
+  reason: string;
+  capturedAt: string;
+  createdAt: string;
+};
+
 const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://127.0.0.1:3980/api";
 
@@ -945,7 +1019,10 @@ export async function stopInspection(
     throw new ApiError(await parseError(response), response.status);
   }
 
-  return (await response.json()) as { data: CurrentInspectionState };
+  return (await response.json()) as {
+    data: CurrentInspectionState | null;
+    emptySessionDeleted?: boolean;
+  };
 }
 
 export async function getLineResultSettings(accessToken: string) {
@@ -1008,6 +1085,31 @@ export async function testInspectionImage(
   }
 
   return (await response.json()) as { data: TestInspectionImageResult };
+}
+
+export async function simulateInspectionImage(
+  accessToken: string,
+  productId: string,
+  originalImageBase64: string,
+  crops: Array<{ slotIndex: number; imageBase64: string }>,
+) {
+  const response = await fetch(
+    `${API_BASE_URL}/inspections/dev-simulate-image`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ productId, originalImageBase64, crops }),
+    },
+  );
+
+  if (!response.ok) {
+    throw new ApiError(await parseError(response), response.status);
+  }
+
+  return (await response.json()) as { data: SimulatedInspectionImageResult };
 }
 
 export async function createTestSessionReport(
@@ -2229,6 +2331,70 @@ export async function reconnectMachinePlc(accessToken: string) {
   return plcRequest<{ data: MachineRuntimeStatus }>(
     accessToken,
     "/plc/machine/reconnect-plc",
+    { method: "POST" },
+  );
+}
+
+export async function getDongilHistorySyncCurrent(accessToken: string) {
+  return plcRequest<{ data: DongilHistorySyncRun | null }>(
+    accessToken,
+    "/dongil-sync/history/current",
+  );
+}
+
+export async function listDongilHistorySyncInvalid(
+  accessToken: string,
+  page = 1,
+  limit = 100,
+) {
+  return plcRequest<{
+    data: DongilHistorySyncInvalidItem[];
+    meta: { page: number; limit: number; total: number };
+  }>(
+    accessToken,
+    `/dongil-sync/history/invalid?page=${page}&limit=${limit}`,
+  );
+}
+
+export async function startDongilHistorySync(accessToken: string) {
+  return plcRequest<{
+    data: DongilHistorySyncRun | null;
+    alreadyVerified?: boolean;
+  }>(
+    accessToken,
+    "/dongil-sync/history/start",
+    { method: "POST" },
+  );
+}
+
+export async function pauseDongilHistorySync(accessToken: string) {
+  return plcRequest<{ data: DongilHistorySyncRun }>(
+    accessToken,
+    "/dongil-sync/history/pause",
+    { method: "POST" },
+  );
+}
+
+export async function resumeDongilHistorySync(accessToken: string) {
+  return plcRequest<{ data: DongilHistorySyncRun }>(
+    accessToken,
+    "/dongil-sync/history/resume",
+    { method: "POST" },
+  );
+}
+
+export async function cancelDongilHistorySync(accessToken: string) {
+  return plcRequest<{ data: DongilHistorySyncRun }>(
+    accessToken,
+    "/dongil-sync/history/cancel",
+    { method: "POST" },
+  );
+}
+
+export async function retryDongilHistorySyncFailures(accessToken: string) {
+  return plcRequest<{ data: DongilHistorySyncRun }>(
+    accessToken,
+    "/dongil-sync/history/retry-failures",
     { method: "POST" },
   );
 }

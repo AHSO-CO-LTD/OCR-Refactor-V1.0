@@ -53,7 +53,7 @@ async function bootstrap() {
   const swaggerConfig = new DocumentBuilder()
     .setTitle('OCR Metal Core Washing API')
     .setDescription('Local REST API for OCR inspection desktop system.')
-    .setVersion('1.0.0')
+    .setVersion('1.4.0')
     .addBearerAuth()
     .build();
   const swaggerDocument = SwaggerModule.createDocument(app, swaggerConfig);

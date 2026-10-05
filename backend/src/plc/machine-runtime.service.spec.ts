@@ -665,6 +665,48 @@ describe('MachineRuntimeService', () => {
     });
   });
 
+  it('accepts PLC stop while waiting for camera and resumes on the next start', async () => {
+    await service.startOperation();
+    emitPlcEvent(signal('stopTrigger'));
+    await settleAsyncWork();
+    await service['plcEventQueue'];
+    expect(service.getStatus().data.state).toBe('idle_machine_stop');
+
+    let cameraAttemptStarted!: () => void;
+    const cameraAttempt = new Promise<void>((resolve) => {
+      cameraAttemptStarted = resolve;
+    });
+    inspections.verifyRunningInspectionCameraFrame
+      .mockImplementationOnce(
+        (abortSignal: AbortSignal) =>
+          new Promise((_, reject) => {
+            cameraAttemptStarted();
+            abortSignal.addEventListener('abort', () => {
+              reject(new DOMException('Aborted', 'AbortError'));
+            });
+          }),
+      )
+      .mockResolvedValue({ success: true });
+    deviceTool.disconnectCamera.mockClear();
+
+    emitPlcEvent(signal('startTrigger'));
+    await cameraAttempt;
+    expect(service.getStatus().data.state).toBe('waiting_camera');
+
+    emitPlcEvent(signal('stopTrigger'));
+    await settleAsyncWork();
+    await service['plcEventQueue'];
+
+    expect(deviceTool.disconnectCamera).toHaveBeenCalledTimes(1);
+    expect(service.getStatus().data.state).toBe('idle_machine_stop');
+
+    emitPlcEvent(signal('startTrigger'));
+    await settleAsyncWork();
+    await service['plcEventQueue'];
+
+    expect(service.getStatus().data.state).toBe('running');
+  });
+
   it('waits for the configured PLC stop delay before stopping the line', async () => {
     jest.useFakeTimers();
     plcRuntime.getMachineStopSettings.mockResolvedValue({
@@ -744,6 +786,38 @@ describe('MachineRuntimeService', () => {
         'cameraPower',
         false,
       );
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('interrupts the camera power-off delay when PLC start arrives', async () => {
+    jest.useFakeTimers();
+    plcRuntime.getMachineStopSettings.mockResolvedValue({
+      data: {
+        delaySeconds: 0,
+        powerOffCameraOnStop: true,
+        configured: true,
+      },
+    });
+    try {
+      await service.startOperation();
+      plcRuntime.setFixedOutput.mockClear();
+
+      emitPlcEvent(signal('stopTrigger'));
+      await jest.advanceTimersByTimeAsync(0);
+      expect(service.getStatus().data.state).toBe('stopping');
+
+      emitPlcEvent(signal('startTrigger'));
+      expect(service.getStatus().data.state).toBe('resuming');
+      await jest.advanceTimersByTimeAsync(0);
+      await service['plcEventQueue'];
+
+      expect(plcRuntime.setFixedOutput).not.toHaveBeenCalledWith(
+        'cameraPower',
+        false,
+      );
+      expect(service.getStatus().data.state).toBe('running');
     } finally {
       jest.useRealTimers();
     }

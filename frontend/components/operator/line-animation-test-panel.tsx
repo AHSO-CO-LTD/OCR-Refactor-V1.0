@@ -131,8 +131,8 @@ function isKnownInspectionSlot(
 
 function getVisibleRoiIndexes(statuses: Record<number, OperatorRoiStatus>) {
   return Object.entries(statuses)
-    .filter(([, value]) =>
-      value === "OK" || value === "NG" || value === "CHECKING",
+    .filter(
+      ([, value]) => value === "OK" || value === "NG" || value === "CHECKING",
     )
     .map(([index]) => Number(index));
 }
@@ -276,9 +276,9 @@ export function LineAnimationTestPanel({
   const lineRunningRef = useRef(false);
   const batchTestingRef = useRef(false);
   const batchPausedRef = useRef(false);
-  const batchLatchResolverRef = useRef<
-    ((latched: boolean) => void) | null
-  >(null);
+  const batchLatchResolverRef = useRef<((latched: boolean) => void) | null>(
+    null,
+  );
   const folderWaitForPlcRef = useRef(true);
   const totalCountRef = useRef(0);
   const batchCountRef = useRef(0);
@@ -494,9 +494,7 @@ export function LineAnimationTestPanel({
 
   usePlcCaptureTrigger({
     enabled:
-      layout === "operator-test" &&
-      dataSource === "api" &&
-      plcTestSessionReady,
+      layout === "operator-test" && dataSource === "api" && plcTestSessionReady,
     onTrigger: handlePlcCaptureTrigger,
   });
 
@@ -529,10 +527,7 @@ export function LineAnimationTestPanel({
     }
 
     const initialId = window.setTimeout(() => void pollMachineRuntime(), 0);
-    const intervalId = window.setInterval(
-      () => void pollMachineRuntime(),
-      500,
-    );
+    const intervalId = window.setInterval(() => void pollMachineRuntime(), 500);
 
     return () => {
       active = false;
@@ -1110,10 +1105,7 @@ export function LineAnimationTestPanel({
       return;
     }
 
-    const animation = buildAnimationResult(
-      pending.inspection,
-      pending.regions,
-    );
+    const animation = buildAnimationResult(pending.inspection, pending.regions);
     const finalCounts = countStatuses(animation.finalStatuses);
     const finalState =
       pending.inspection.result === "OK"
@@ -1439,7 +1431,10 @@ export function LineAnimationTestPanel({
     plcTriggerBusyRef.current = true;
     try {
       await commitPendingDetection(pending);
-      if (!lineRunningRef.current && pendingDetectionRef.current?.id === pending.id) {
+      if (
+        !lineRunningRef.current &&
+        pendingDetectionRef.current?.id === pending.id
+      ) {
         pendingDetectionRef.current = null;
       }
       toast.success(t("lineTest.plcLatchCommitted"));
@@ -1507,11 +1502,7 @@ export function LineAnimationTestPanel({
     const paused = !batchPausedRef.current;
     batchPausedRef.current = paused;
     setBatchPaused(paused);
-    toast.info(
-      paused
-        ? t("lineTest.batchPaused")
-        : t("lineTest.batchResumed"),
-    );
+    toast.info(paused ? t("lineTest.batchPaused") : t("lineTest.batchResumed"));
   }
 
   function stopBatchTest() {
@@ -1627,11 +1618,7 @@ export function LineAnimationTestPanel({
             waitForBatchLatch(),
             animationCompleted,
           ]);
-          if (
-            !latched ||
-            !animationFinished ||
-            cancelBatchTestRef.current
-          ) {
+          if (!latched || !animationFinished || cancelBatchTestRef.current) {
             break;
           }
         } else if (!(await animationCompleted)) {
@@ -1826,6 +1813,8 @@ export function LineAnimationTestPanel({
         operationMode={testOperationMode}
         realtimeAiEnabled={testRealtimeAiEnabled}
         runtimeControlsActive={testRuntimeControlsActive}
+        runtimeLocked={false}
+        resettingCounters={false}
         scanRunning={testingRealImage}
         onGrab={() => void runTestOperationGrab()}
         onLiveCameraToggle={() =>
@@ -1848,9 +1837,7 @@ export function LineAnimationTestPanel({
           if (mode === testOperationMode) return;
           void updateTestRuntimeControls(
             { mode },
-            mode === "auto"
-              ? "operator.autoEnabled"
-              : "operator.manualEnabled",
+            mode === "auto" ? "operator.autoEnabled" : "operator.manualEnabled",
           );
         }}
         onResetCounter={() => resetScenario()}
@@ -2075,7 +2062,8 @@ export function LineAnimationTestPanel({
                       <CameraConnectionOverlay
                         status={livePreviewConnectionStatus}
                         deviceName={
-                          livePreviewRuntimeDeviceName || product.camera.deviceName
+                          livePreviewRuntimeDeviceName ||
+                          product.camera.deviceName
                         }
                         onReconnect={reconnectLivePreview}
                       />
@@ -2106,7 +2094,9 @@ export function LineAnimationTestPanel({
           <div className="grid gap-2 border border-[#9db7d8] bg-[#d9e6f5] p-2 min-[980px]:grid-cols-2">
             <div className="flex min-w-0 flex-wrap items-center gap-3">
               <PlcTestOutputToggle
-                disabled={!plcTestSessionReady || plcTestOutputUpdating || isBusy}
+                disabled={
+                  !plcTestSessionReady || plcTestOutputUpdating || isBusy
+                }
                 enabled={plcTestOutputEnabled}
                 onChange={setPlcTestOutputEnabled}
               />

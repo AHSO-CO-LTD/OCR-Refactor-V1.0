@@ -18,6 +18,8 @@ $vendorRoot = Join-Path $runtimeRoot "vendor"
 $persistentToolRoot = Join-Path $programDataRoot "tool-runtime"
 $persistentToolManifestPath = Join-Path $persistentToolRoot "tool-runtime-manifest.json"
 
+. (Join-Path $PSScriptRoot "bootstrap-dongil-config.ps1")
+
 function New-Secret {
   param([int]$Bytes = 32)
 
@@ -1103,6 +1105,9 @@ try {
 
   $databasePasswordUrl = [System.Uri]::EscapeDataString($dbPassword)
   $databaseUrl = "postgresql://${dbUser}:${databasePasswordUrl}@$($dbConfig.host):$($dbConfig.port)/${dbName}"
+  $dongilConfig = Resolve-DongilBootstrapConfig -EnvValues (Read-EnvFile -Path $envPath)
+  $dongilServerUrl = $dongilConfig.serverUrl
+  $dongilMachineTypeCode = $dongilConfig.machineTypeCode
   $embeddedToolPython = Join-Path $runtimeRoot "tool\python-embed\python.exe"
   $toolRuntimePython = if (Test-Path -LiteralPath $embeddedToolPython) {
     $embeddedToolPython
@@ -1129,6 +1134,8 @@ DONGLE_PYTHON_COMMAND=$toolRuntimePython
 DONGLE_RETRY_COUNT=3
 DONGLE_RETRY_INTERVAL_MS=1000
 DONGLE_CHECK_TIMEOUT_MS=7000
+DONGIL_SERVER_URL=$dongilServerUrl
+DONGIL_MACHINE_TYPE_CODE=$dongilMachineTypeCode
 "@
   Protect-ProgramDataFile -Path $envPath -AllowAuthenticatedRead
 

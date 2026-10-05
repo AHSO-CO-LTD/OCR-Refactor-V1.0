@@ -40,6 +40,33 @@ contextBridge.exposeInMainWorld("ocrDesktop", {
   getStartupSnapshot() {
     return ipcRenderer.invoke("desktop:get-startup-snapshot");
   },
+  getDongilStatus() {
+    return ipcRenderer.invoke("desktop:get-dongil-status");
+  },
+  testDongilServer(serverIp: string) {
+    return ipcRenderer.invoke("desktop:test-dongil-server", serverIp);
+  },
+  saveDongilSettings(settings: { accessToken: string; serverIp: string }) {
+    return ipcRenderer.invoke("desktop:save-dongil-settings", settings);
+  },
+  resetDongilSettings(accessToken: string) {
+    return ipcRenderer.invoke("desktop:reset-dongil-settings", { accessToken });
+  },
+  disconnectDongilServer(accessToken: string) {
+    return ipcRenderer.invoke("desktop:disconnect-dongil-server", accessToken);
+  },
+  requestDongilRegistration(accessToken: string) {
+    return ipcRenderer.invoke(
+      "desktop:request-dongil-registration",
+      accessToken,
+    );
+  },
+  refreshDongilRegistration() {
+    return ipcRenderer.invoke("desktop:refresh-dongil-registration");
+  },
+  connectDongilServer(accessToken: string) {
+    return ipcRenderer.invoke("desktop:connect-dongil-server", accessToken);
+  },
   exportStartupLog(context?: Record<string, unknown>) {
     return ipcRenderer.invoke("desktop:export-startup-log", context);
   },

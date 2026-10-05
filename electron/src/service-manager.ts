@@ -19,6 +19,80 @@ export type {
   StartupServiceStageUpdate,
 } from "./startup-types";
 
+export type DongilSyncBootstrapPayload = {
+  appVersion?: string;
+  credential?: string;
+  licenseStatus: "LICENSED" | "UNLICENSED";
+  machineId: string;
+  machineTypeCode: string;
+  serverUrl: string;
+};
+
+export type DongilSyncBootstrapResult = {
+  data?: {
+    assignedMachineTypeCode?: string;
+    assignmentCount?: number;
+    registrationToken?: string | null;
+    registrationStatus?: "PENDING" | "APPROVED" | "REJECTED";
+    state?:
+      | "READY"
+      | "REGISTERED_CONFIG_PENDING"
+      | "REGISTRATION_PENDING"
+      | "REGISTRATION_APPROVED"
+      | "REGISTRATION_REJECTED"
+      | "UNAUTHORIZED"
+      | "NEEDS_CREDENTIAL_RECOVERY";
+  };
+};
+
+export type DongilSyncStatusResult = {
+  data?: {
+    state?:
+      | "DISABLED"
+      | "REGISTRATION_PENDING"
+      | "REGISTRATION_APPROVED"
+      | "REGISTRATION_REJECTED"
+      | "NEEDS_CREDENTIAL_RECOVERY"
+      | "CONNECTING"
+      | "ONLINE"
+      | "RETRYING"
+      | "ERROR"
+      | "UNAUTHORIZED";
+    socketConnected?: boolean;
+    serverUrl?: string | null;
+    machineId?: string | null;
+    machineTypeCode?: string | null;
+    assignedMachineTypeCode?: string | null;
+    machineInfo?: {
+      displayName?: string | null;
+      isActive?: boolean;
+      factoryName?: string | null;
+      lineName?: string | null;
+      stationName?: string | null;
+      lastSyncedAt?: string | null;
+    } | null;
+    registrationStatus?: "PENDING" | "APPROVED" | "REJECTED" | null;
+    autoConnectEnabled?: boolean;
+    licenseStatus?: string | null;
+    operationalStatus?: string;
+    runtimeStatus?: string;
+    pendingSyncCount?: number;
+    lastConnectedAt?: string | null;
+    lastHeartbeatAckAt?: string | null;
+    lastRegisteredAt?: string | null;
+    lastConfigSyncAt?: string | null;
+    lastError?: {
+      code?: string | null;
+      message?: string | null;
+      at?: string | null;
+    } | null;
+  };
+};
+
+export type DongilConnectionTestResult = {
+  data?: { serverUrl?: string; reachable?: boolean; latencyMs?: number };
+};
+
 type LocalServiceDefinition = {
   command: string;
   env?: Record<string, string>;
@@ -299,6 +373,164 @@ export class ServiceManager {
     return `http://127.0.0.1:${backend?.port ?? DEFAULT_PORTS.backend}/api/`;
   }
 
+  async bootstrapDongilSync(
+    payload: DongilSyncBootstrapPayload,
+  ): Promise<DongilSyncBootstrapResult> {
+    const response = await fetch(
+      `http://127.0.0.1:${this.getServicePort("backend")}/api/internal/dongil-sync/bootstrap`,
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-desktop-internal-token": this.desktopInternalToken,
+        },
+        body: JSON.stringify(payload),
+        signal: AbortSignal.timeout(20_000),
+      },
+    );
+    if (!response.ok) {
+      throw new Error(
+        (await response.text()) ||
+          `Dongil bootstrap failed (${response.status})`,
+      );
+    }
+    return (await response.json()) as DongilSyncBootstrapResult;
+  }
+
+  async configureDongilSync(
+    payload: DongilSyncBootstrapPayload,
+  ): Promise<DongilSyncBootstrapResult> {
+    return this.postDongilRuntime("configure", payload);
+  }
+
+  async resetDongilSync(): Promise<DongilSyncBootstrapResult> {
+    return this.postDongilRuntime("reset");
+  }
+
+  async disconnectDongilSync(): Promise<DongilSyncBootstrapResult> {
+    return this.postDongilRuntime("disconnect");
+  }
+
+  async requestDongilRegistration(
+    payload: DongilSyncBootstrapPayload,
+  ): Promise<DongilSyncBootstrapResult> {
+    return this.postDongilRuntime("registration-request", payload);
+  }
+
+  async refreshDongilRegistration(payload: {
+    serverUrl: string;
+    machineId: string;
+    registrationToken: string;
+  }): Promise<DongilSyncBootstrapResult> {
+    return this.postDongilRuntime("registration-status", payload);
+  }
+
+  private async postDongilRuntime(
+    action:
+      | "configure"
+      | "disconnect"
+      | "reset"
+      | "registration-request"
+      | "registration-status",
+    payload?: object,
+  ): Promise<DongilSyncBootstrapResult> {
+    const response = await fetch(
+      `http://127.0.0.1:${this.getServicePort("backend")}/api/internal/dongil-sync/${action}`,
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-desktop-internal-token": this.desktopInternalToken,
+        },
+        ...(payload ? { body: JSON.stringify(payload) } : {}),
+        signal: AbortSignal.timeout(20_000),
+      },
+    );
+    if (!response.ok) {
+      throw new Error(
+        (await response.text()) ||
+          `Dongil ${action} failed (${response.status})`,
+      );
+    }
+    return (await response.json()) as DongilSyncBootstrapResult;
+  }
+
+  async getDongilSyncStatus(): Promise<DongilSyncStatusResult> {
+    const response = await fetch(
+      `http://127.0.0.1:${this.getServicePort("backend")}/api/internal/dongil-sync/status`,
+      {
+        headers: { "x-desktop-internal-token": this.desktopInternalToken },
+        signal: AbortSignal.timeout(5_000),
+      },
+    );
+    if (!response.ok) {
+      throw new Error(
+        (await response.text()) || `Dongil status failed (${response.status})`,
+      );
+    }
+    return (await response.json()) as DongilSyncStatusResult;
+  }
+
+  async testDongilConnection(
+    serverUrl: string,
+  ): Promise<DongilConnectionTestResult> {
+    const response = await fetch(
+      `http://127.0.0.1:${this.getServicePort("backend")}/api/internal/dongil-sync/test`,
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-desktop-internal-token": this.desktopInternalToken,
+        },
+        body: JSON.stringify({ serverUrl }),
+        signal: AbortSignal.timeout(8_000),
+      },
+    );
+    if (!response.ok) {
+      throw new Error(
+        (await response.text()) ||
+          `Dongil connection test failed (${response.status})`,
+      );
+    }
+    return (await response.json()) as DongilConnectionTestResult;
+  }
+
+  async assertDongilSettingsAccess(accessToken: string): Promise<void> {
+    const response = await fetch(
+      `http://127.0.0.1:${this.getServicePort("backend")}/api/auth/me`,
+      {
+        headers: { authorization: `Bearer ${accessToken}` },
+        signal: AbortSignal.timeout(5_000),
+      },
+    );
+    if (!response.ok)
+      throw new Error("An active DEV or ADMIN session is required.");
+    const payload = (await response.json()) as {
+      data?: { user?: { role?: unknown } };
+    };
+    const role = payload.data?.user?.role;
+    if (role !== "dev" && role !== "admin") {
+      throw new Error("Only DEV or ADMIN can change Dongil Server settings.");
+    }
+  }
+
+  async shutdownDongilSync(): Promise<void> {
+    const response = await fetch(
+      `http://127.0.0.1:${this.getServicePort("backend")}/api/internal/dongil-sync/shutdown`,
+      {
+        method: "POST",
+        headers: { "x-desktop-internal-token": this.desktopInternalToken },
+        signal: AbortSignal.timeout(4_000),
+      },
+    );
+    if (!response.ok) {
+      throw new Error(
+        (await response.text()) ||
+          `Dongil shutdown failed (${response.status})`,
+      );
+    }
+  }
+
   prepareStartupHardware(
     preferredProductId: string | undefined,
     onStage: (stage: StartupHardwareStageUpdate) => void,
@@ -536,6 +768,20 @@ export class ServiceManager {
 
   async stopOwned(onStatus: (message: string) => void = () => undefined) {
     this.stopWatchdog();
+    try {
+      await this.shutdownDongilSync();
+      onStatus("dongil: graceful shutdown sent");
+      this.emitLog(
+        "backend",
+        "Dongil graceful shutdown sent before service stop",
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.emitLog(
+        "backend",
+        `Dongil graceful shutdown was unavailable (${message})`,
+      );
+    }
     const ownedServices = [...this.services]
       .reverse()
       .filter(

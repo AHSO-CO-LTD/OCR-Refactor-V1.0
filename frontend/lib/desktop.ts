@@ -123,6 +123,50 @@ export type DesktopUpdateActionResult = {
 
 export type DesktopExitMode = "app-and-hardware" | "app-only";
 
+export type DongilConnectionState =
+  | "DISABLED"
+  | "REGISTRATION_PENDING"
+  | "REGISTRATION_APPROVED"
+  | "REGISTRATION_REJECTED"
+  | "NEEDS_CREDENTIAL_RECOVERY"
+  | "CONNECTING"
+  | "ONLINE"
+  | "RETRYING"
+  | "ERROR"
+  | "UNAUTHORIZED";
+
+export type DesktopDongilStatus = {
+  state: DongilConnectionState;
+  socketConnected: boolean;
+  serverUrl: string | null;
+  machineId: string | null;
+  machineTypeCode: string | null;
+  assignedMachineTypeCode: string | null;
+  machineInfo: {
+    displayName: string | null;
+    isActive: boolean;
+    factoryName: string | null;
+    lineName: string | null;
+    stationName: string | null;
+    lastSyncedAt: string | null;
+  } | null;
+  registrationStatus: "PENDING" | "APPROVED" | "REJECTED" | null;
+  autoConnectEnabled: boolean;
+  licenseStatus: string | null;
+  operationalStatus: string;
+  runtimeStatus: string;
+  pendingSyncCount: number;
+  lastConnectedAt: string | null;
+  lastHeartbeatAckAt: string | null;
+  lastRegisteredAt: string | null;
+  lastConfigSyncAt: string | null;
+  lastError: {
+    code?: string | null;
+    message?: string | null;
+    at?: string | null;
+  } | null;
+};
+
 export type DesktopShutdownStageId =
   | "app"
   | "camera"
@@ -154,6 +198,7 @@ export type DesktopBridge = {
   getTestStorageSettings(): Promise<DesktopTestStorageSettings>;
   getTerminalLogs(): Promise<string[]>;
   getStartupSnapshot(): Promise<DesktopStartupSnapshot>;
+  getDongilStatus(): Promise<{ data?: DesktopDongilStatus }>;
   getUpdateRecovery(): Promise<DesktopUpdateRecoveryNotice | null>;
   getUpdateStatus(): Promise<DesktopUpdateState>;
   exportStartupLog(
@@ -170,6 +215,44 @@ export type DesktopBridge = {
   saveTestStorageSettings(
     settings: DesktopTestStorageSettings,
   ): Promise<DesktopTestStorageSettings>;
+  testDongilServer(
+    serverIp: string,
+  ): Promise<{
+    data?: { serverUrl?: string; reachable?: boolean; latencyMs?: number };
+  }>;
+  saveDongilSettings(settings: {
+    accessToken: string;
+    serverIp: string;
+  }): Promise<{
+    serverIp: string;
+    serverUrl: string;
+    status: { data?: DesktopDongilStatus };
+  }>;
+  resetDongilSettings(
+    accessToken: string,
+  ): Promise<{ status: { data?: DesktopDongilStatus } }>;
+  disconnectDongilServer(
+    accessToken: string,
+  ): Promise<{ status: { data?: DesktopDongilStatus } }>;
+  requestDongilRegistration(
+    accessToken: string,
+  ): Promise<{
+    data?: {
+      state?: DongilConnectionState;
+      registrationStatus?: "PENDING" | "APPROVED" | "REJECTED";
+      assignedMachineTypeCode?: string;
+    };
+  }>;
+  refreshDongilRegistration(): Promise<{
+    data?: {
+      state?: DongilConnectionState;
+      registrationStatus?: "PENDING" | "APPROVED" | "REJECTED";
+      rejectionReason?: string | null;
+    };
+  }>;
+  connectDongilServer(
+    accessToken: string,
+  ): Promise<{ data?: { state?: string; assignedMachineTypeCode?: string } }>;
   selectFolder(): Promise<{ canceled: boolean; folderPath: string | null }>;
   selectModelFile(): Promise<{ canceled: boolean; filePath: string | null }>;
   onTerminalLog(callback: (message: string) => void): () => void;

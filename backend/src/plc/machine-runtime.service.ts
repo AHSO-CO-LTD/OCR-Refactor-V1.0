@@ -98,6 +98,7 @@ export class MachineRuntimeService
   private captureInProgress = false;
   private captureAbortController: AbortController | null = null;
   private cameraRestoreAbortController: AbortController | null = null;
+  private stopTransitionAbortController: AbortController | null = null;
   private detectionAbortController: AbortController | null = null;
   private detectionTimer: NodeJS.Timeout | null = null;
   private detectionLoopActive = false;
@@ -106,6 +107,7 @@ export class MachineRuntimeService
   private liveInspectionError: string | null = null;
   private plcEventQueue: Promise<void> = Promise.resolve();
   private stopRequested = false;
+  private startRequestedDuringStop = false;
   private destroyed = false;
   private transitionSequence = 0;
   private shutdownPromise: Promise<void> | null = null;
@@ -146,6 +148,13 @@ export class MachineRuntimeService
           );
         });
       }
+      if (
+        event.type === 'signal' &&
+        event.value === true &&
+        event.key === 'startTrigger'
+      ) {
+        this.interruptPendingMachineStop();
+      }
       this.enqueuePlcEvent(event);
     });
     setTimeout(() => void this.restorePersistedOperation(), 0);
@@ -171,6 +180,9 @@ export class MachineRuntimeService
     this.captureAbortController = null;
     this.cameraRestoreAbortController?.abort();
     this.cameraRestoreAbortController = null;
+    this.stopTransitionAbortController?.abort();
+    this.stopTransitionAbortController = null;
+    this.startRequestedDuringStop = false;
     this.stopContinuousDetection();
     this.testModeLeases.clear();
     this.destroyed = true;
@@ -405,6 +417,9 @@ export class MachineRuntimeService
     this.transitionSequence += 1;
     this.captureAbortController?.abort();
     this.cameraRestoreAbortController?.abort();
+    this.stopTransitionAbortController?.abort();
+    this.stopTransitionAbortController = null;
+    this.startRequestedDuringStop = false;
     this.stopContinuousDetection();
     this.clearInactivityTimer();
     this.clearCountdownTimer();
@@ -585,8 +600,14 @@ export class MachineRuntimeService
     if (event.key === 'startTrigger') {
       this.clearStopTimer();
       this.stopRequested = false;
-      if (this.state === 'idle_machine_stop') {
-        await this.resumeOperation(this.powerOffCameraOnStop, true);
+      const startInterruptedStop = this.startRequestedDuringStop;
+      this.startRequestedDuringStop = false;
+      if (this.state === 'idle_machine_stop' || startInterruptedStop) {
+        await this.resumeOperation(
+          this.powerOffCameraOnStop,
+          true,
+          startInterruptedStop,
+        );
       } else if (this.state === 'idle_capture_timeout') {
         await this.resumeOperation(false, true);
       }
@@ -784,11 +805,7 @@ export class MachineRuntimeService
   }
 
   private async scheduleMachineStop() {
-    if (
-      this.stopTimer ||
-      this.state === 'stopping' ||
-      this.state === 'idle_machine_stop'
-    ) {
+    if (this.stopTimer || !this.canTransitionToMachineStop()) {
       return;
     }
 
@@ -800,7 +817,9 @@ export class MachineRuntimeService
         delaySeconds: this.stopDelaySeconds,
         powerOffCameraOnStop: this.powerOffCameraOnStop,
       }));
-    if (revision !== this.stopRevision || this.state !== 'running') return;
+    if (revision !== this.stopRevision || !this.canTransitionToMachineStop()) {
+      return;
+    }
 
     this.stopDelaySeconds = Math.max(0, settings.delaySeconds);
     this.powerOffCameraOnStop = settings.powerOffCameraOnStop ?? true;
@@ -831,7 +850,9 @@ export class MachineRuntimeService
   }
 
   private executeScheduledMachineStop(revision: number) {
-    if (revision !== this.stopRevision || this.state !== 'running') return;
+    if (revision !== this.stopRevision || !this.canTransitionToMachineStop()) {
+      return;
+    }
     this.stopRequested = true;
     this.captureAbortController?.abort();
     this.cameraRestoreAbortController?.abort();
@@ -844,6 +865,24 @@ export class MachineRuntimeService
         `PLC stop transition failed: ${this.errorMessage(error)}`,
       );
     });
+  }
+
+  private canTransitionToMachineStop() {
+    return (
+      this.state === 'running' ||
+      this.state === 'resuming' ||
+      this.state === 'waiting_camera'
+    );
+  }
+
+  private interruptPendingMachineStop() {
+    this.clearStopTimer();
+    if (this.state === 'stopping') {
+      this.startRequestedDuringStop = true;
+      this.stopRequested = false;
+      this.setState('resuming');
+    }
+    this.stopTransitionAbortController?.abort();
   }
 
   private async stopForMachineSignal() {
@@ -874,16 +913,36 @@ export class MachineRuntimeService
       ),
       this.step('idle', 'pending', 'Chuyển ứng dụng về trạng thái nghỉ.'),
     ];
+    const stopAbortController = new AbortController();
+    this.stopTransitionAbortController?.abort();
+    this.stopTransitionAbortController = stopAbortController;
     this.setState('stopping');
 
     await this.runTransitionStep('camera', async () => {
       await this.deviceToolService.stopCameraOcr().catch(() => undefined);
       await this.deviceToolService.disconnectCamera();
       if (this.powerOffCameraOnStop) {
-        await this.delay(CAMERA_DISCONNECT_POWER_DELAY_MS);
+        await this.delayUntilAborted(
+          CAMERA_DISCONNECT_POWER_DELAY_MS,
+          stopAbortController.signal,
+        );
       }
     });
-    if (sequence !== this.transitionSequence) return;
+    if (stopAbortController.signal.aborted) {
+      this.releaseStopTransition(stopAbortController);
+      if (
+        sequence === this.transitionSequence &&
+        !this.destroyed &&
+        !this.startRequestedDuringStop
+      ) {
+        this.setState('idle_machine_stop');
+      }
+      return;
+    }
+    if (sequence !== this.transitionSequence) {
+      this.releaseStopTransition(stopAbortController);
+      return;
+    }
 
     await this.runTransitionStep('outputs', async () => {
       await this.clearResultIndicators();
@@ -892,7 +951,21 @@ export class MachineRuntimeService
         await this.plcRuntime.setFixedOutput('cameraPower', false);
       }
     });
-    if (sequence !== this.transitionSequence) return;
+    if (stopAbortController.signal.aborted) {
+      this.releaseStopTransition(stopAbortController);
+      if (
+        sequence === this.transitionSequence &&
+        !this.destroyed &&
+        !this.startRequestedDuringStop
+      ) {
+        this.setState('idle_machine_stop');
+      }
+      return;
+    }
+    if (sequence !== this.transitionSequence) {
+      this.releaseStopTransition(stopAbortController);
+      return;
+    }
 
     this.updateStep(
       'idle',
@@ -902,6 +975,7 @@ export class MachineRuntimeService
         : 'Đã ngắt camera và tắt đèn. Nguồn camera vẫn bật.',
     );
     this.setState('idle_machine_stop');
+    this.releaseStopTransition(stopAbortController);
   }
 
   private async stopForCaptureTimeout() {
@@ -946,9 +1020,10 @@ export class MachineRuntimeService
   private async resumeOperation(
     restoreCameraPower: boolean,
     restoreDefaultControls = false,
+    resumeInterruptedStop = false,
   ) {
     if (
-      this.state === 'resuming' ||
+      (this.state === 'resuming' && !resumeInterruptedStop) ||
       this.state === 'waiting_camera' ||
       this.state === 'running'
     ) {
@@ -1422,6 +1497,30 @@ export class MachineRuntimeService
 
   private delay(ms: number) {
     return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  private delayUntilAborted(ms: number, signal: AbortSignal) {
+    return new Promise<void>((resolve) => {
+      if (signal.aborted) {
+        resolve();
+        return;
+      }
+
+      const timeoutId = setTimeout(finish, ms);
+      signal.addEventListener('abort', finish, { once: true });
+
+      function finish() {
+        clearTimeout(timeoutId);
+        signal.removeEventListener('abort', finish);
+        resolve();
+      }
+    });
+  }
+
+  private releaseStopTransition(abortController: AbortController) {
+    if (this.stopTransitionAbortController === abortController) {
+      this.stopTransitionAbortController = null;
+    }
   }
 
   private errorMessage(error: unknown) {
