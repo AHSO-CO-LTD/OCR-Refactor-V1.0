@@ -23,18 +23,35 @@ Desktop-only internal endpoints require `DESKTOP_INTERNAL_TOKEN`.
 
 | Module | Responsibility |
 | --- | --- |
-| `auth`, `users`, `roles`, `permissions` | JWT authentication and RBAC |
+| `auth`, `users`, `roles`, `permissions` | JWT authentication, secure remembered-login bootstrap and RBAC |
 | `setup` | First active admin bootstrap |
-| `system` | Public and authenticated license state |
+| `system` | Public/authenticated license state and coordinated dongle checks |
 | `products` | Product profiles, camera/AI/OCR/ROI settings, import/export support |
 | `camera`, `device-tool` | Device discovery, connection, frames and Tool adapter |
 | `inspections` | Production/test sessions, OCR results and reports |
 | `plc` | PLC configuration, runtime state and machine signals |
-| `dongil-sync` | Registration, heartbeat, outbox and historical synchronization |
+| `dongil-sync` | DB-owned server configuration, registration, heartbeat, outbox and historical synchronization |
 | `database`, `common` | Prisma lifecycle and shared backend infrastructure |
 
 The authoritative data model and migration notes are in
 [`../docs/14-database.md`](../docs/14-database.md).
+
+Remembered login stores only a hash of a random bootstrap token in PostgreSQL;
+the plaintext token exists only in Electron `safeStorage`. Restore requires the
+desktop internal token, a matching machine/token/user/role record and a real
+successful dongle check before a fresh access JWT is issued. Login without the
+remember option, explicit logout, user deactivation and role changes revoke the
+stored backend record.
+
+Current source also creates a local PostgreSQL `AuthSession` and includes its ID
+as JWT `sid`. HTTP guards and camera WebSocket authorization require an active
+session. Logout revokes both the current session and remembered-login record;
+this is entirely local to OCR and does not change Dongil Server contracts.
+
+Dongil configuration is authoritative in PostgreSQL after an optional one-time
+legacy `.env` import. The station machine type is fixed to `WASHING_MACHINE`;
+server assignment mismatch blocks connection and synchronization instead of
+allowing environment data to override the station type.
 
 ## Commands
 
@@ -67,6 +84,9 @@ Stop only processes started by the current task.
   `backend/scripts/check-dongle.py`.
 - Database changes require Prisma migrations.
 - Backend authorization is authoritative; frontend visibility is only UX.
+- Dongil operational endpoints require both the desktop internal token and a
+  bearer JWT with the relevant permission. Arbitrary-IP diagnostics remain
+  restricted to `dev`/`admin`.
 
 See [`../PROJECT_PROFILE.md`](../PROJECT_PROFILE.md),
 [`../docs/06-api-contracts.md`](../docs/06-api-contracts.md), and

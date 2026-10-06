@@ -33,9 +33,12 @@ retaining Python for device and OCR work behind a versioned local API.
 - Authentication, users, roles, permissions, and first-run admin setup.
 - Product, AI, OCR variant, camera, camera identity, and ROI configuration.
 - Line operation, test workflows, PLC runtime, result persistence, reports, and export.
-- License startup gate and remembered-session physical-dongle requirement.
+- License startup gate, coordinated native dongle checks, and secure
+  machine-bound remembered login for all active roles.
 - Electron startup/shutdown, watchdog, NSIS installer, updater, and recovery.
 - Dongil registration, heartbeat, live outbox, and historical reconciliation.
+- DB-authoritative Dongil configuration, fixed `WASHING_MACHINE` client type,
+  mismatch blocking, and operator-scoped view/reconnect/history-start actions.
 
 ## Deliberate Boundaries
 

@@ -51,7 +51,7 @@ export class UsersController {
     @Body() dto: CreateUserDto,
     @CurrentUser() user: AuthenticatedRequest['user'],
   ) {
-    return this.usersService.createUser(dto, user.role === 'dev');
+    return this.usersService.createUser(dto, user.role === 'dev', user.id);
   }
 
   @ApiOperation({ summary: 'Update a user' })
@@ -62,7 +62,7 @@ export class UsersController {
     @Body() dto: UpdateUserDto,
     @CurrentUser() user: AuthenticatedRequest['user'],
   ) {
-    return this.usersService.updateUser(id, dto, user.role === 'dev');
+    return this.usersService.updateUser(id, dto, user.role === 'dev', user.id);
   }
 
   @ApiOperation({ summary: 'Delete a user' })

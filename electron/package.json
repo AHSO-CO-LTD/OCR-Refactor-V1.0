@@ -11,7 +11,8 @@
     "dist:win:publish": "npm run build && electron-builder --win nsis --x64 --publish always",
     "dev": "powershell -ExecutionPolicy Bypass -File ../scripts/dev/ensure-tool-python.ps1 && npm run build && node scripts/launch-electron.cjs",
     "lint": "eslint \"src/**/*.ts\"",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "verify:remembered-login-store": "node scripts/launch-remembered-login-store-verification.cjs"
   },
   "build": {
     "appId": "vn.ahso.ocr-metal-core-washing",

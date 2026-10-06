@@ -32,6 +32,22 @@ test reports and settings under `/dashboard`.
 Route access is driven by backend permissions. Hiding a control or route is not
 an authorization boundary.
 
+## Authentication and Dongil access
+
+- The access JWT and current user are kept in `sessionStorage`; the renderer
+  does not persist a reusable access JWT across a full shutdown.
+- When remembered login is enabled, the login page asks Electron to restore the
+  session. The renderer never receives the remembered bootstrap token and does
+  not show a restore status when no local remembered credential exists.
+- Every role may choose remembered login. A real dongle result is required for
+  restore, and logout revokes both the local backend session and remembered
+  record before secure local and renderer session cleanup.
+- Operators may view Dongil state, refresh, reconnect and start permitted
+  history synchronization. Configuration fields and reset/save/registration
+  controls remain disabled unless the user has the management permission.
+- `dev`/`admin` connection tests show staged diagnostics for URL validation,
+  server health, registration and machine-type validation.
+
 ## UI constraints
 
 - Keep application chrome fixed; only the active content pane scrolls.

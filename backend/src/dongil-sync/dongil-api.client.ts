@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto';
+
 export type DongilRegistration = {
   machineId: string;
   registrationStatus: 'PENDING' | 'APPROVED' | 'REJECTED';
@@ -97,9 +99,33 @@ export class DongilApiError extends Error {
     message: string,
     readonly path: string,
     readonly responseBody: string | null,
+    readonly correlationId: string,
   ) {
     super(message);
   }
+}
+
+export type DongilFailureClassification =
+  | 'CREDENTIAL_RECOVERY'
+  | 'PERMANENT'
+  | 'RETRYABLE';
+
+export function classifyDongilFailure(
+  error: unknown,
+): DongilFailureClassification {
+  if (!(error instanceof DongilApiError)) return 'RETRYABLE';
+  if (error.status === 401 || error.status === 403) {
+    return 'CREDENTIAL_RECOVERY';
+  }
+  if (
+    error.status === 408 ||
+    error.status === 425 ||
+    error.status === 429 ||
+    error.status >= 500
+  ) {
+    return 'RETRYABLE';
+  }
+  return error.status >= 400 && error.status < 500 ? 'PERMANENT' : 'RETRYABLE';
 }
 
 export class DongilApiClient {
@@ -226,8 +252,12 @@ export class DongilApiClient {
   }
 
   private async request<T>(path: string, init: RequestInit): Promise<T> {
+    const correlationId = randomUUID();
+    const headers = new Headers(init.headers);
+    headers.set('x-correlation-id', correlationId);
     const response = await fetch(new URL(path, `${this.serverUrl}/`), {
       ...init,
+      headers,
       signal: AbortSignal.timeout(8_000),
     });
     const responseBody = await response.text();
@@ -245,6 +275,7 @@ export class DongilApiClient {
           `Dongil Server request failed with HTTP ${response.status}`,
         path,
         responseBody || null,
+        correlationId,
       );
     }
     return envelope.data;

@@ -10,7 +10,7 @@ are authoritative for structure.
 
 | Domain | Models |
 | --- | --- |
-| Identity | `User`, `Role`, `Permission`, `RolePermission`, `UserPermission` |
+| Identity | `User`, `Role`, `Permission`, `RolePermission`, `UserPermission`, `RememberedLogin`, `AuthSession` |
 | Product setup | `Product`, `CameraIdentity`, `CameraConfig`, `RoiRegion` |
 | Production | `InspectionJob`, `InspectionLog`, `LineResultSettings` |
 | Test evidence | `TestSessionReport`, `TestSessionFailedImage`, `TestSessionFailedRoiResult` |
@@ -22,6 +22,11 @@ are authoritative for structure.
 ## Important Relationships
 
 - Users belong to one fixed top-level role and may have an explicit permission set.
+- One singleton `RememberedLogin` may reference the account remembered on this
+  workstation. It stores a token hash, never the raw token, password, or JWT.
+- A user may own multiple `AuthSession` rows. JWTs contain the session ID; a
+  nullable `revokedAt` and non-secret reason support local revocation without
+  storing the access JWT.
 - Product code and name are unique.
 - Each product may own one camera configuration and indexed ROI regions.
 - Inspection jobs reference the starting operator and optionally the ending operator.
@@ -40,12 +45,21 @@ must tolerate a missing current product row.
 The following models use the stable ID `default`:
 
 - `DongilSyncConfiguration`
+- `RememberedLogin`
 - `DongilMachineInfo`
 - `DongilSyncWorkerLease`
 - `LineResultSettings`
 - `PlcConfig`
 
 Code should use upsert or an equivalent atomic path for these records.
+
+`RememberedLogin` is hard-deleted on revoke. Role change, deactivation and
+account deletion revoke it transactionally; `AuditLog` retains the event.
+
+`AuthSession` uses an additive user foreign key with cascade delete and an index
+on `(userId, revokedAt)`. Active sessions have `revokedAt = null`; logout, role
+change and account deactivation set revocation metadata instead of deleting the
+row. Migration execution and packaged compatibility verification remain pending.
 
 ## Migration Policy
 
@@ -89,6 +103,24 @@ role permission customization.
 
 ## Current Verification Status
 
-Schema and migration files were inspected during the documentation refresh.
-No live database, data distribution, migration deployment, backup, restore, or
-constraint behavior was tested.
+On 2026-10-06, all 48 migrations were deployed successfully to the backed-up
+isolated PostgreSQL 18.4 database `ocrahso_codex_phase9b_20261006`. A second
+deploy reported no pending migration. Six guarded integration tests passed for
+the new schema, token-hash persistence, revoke/cascade transactions, operator
+permission boundaries, fixed machine type and Dongil idempotency. The test
+runner refuses database names outside `ocrahso_codex_phase9b_*`.
+
+Phase 9C created a second verified custom-format backup before focused runtime
+checks. Backend runtime confirmed fixed type `WASHING_MACHINE`, remembered-login
+restore/opt-out and operator permission reads against the isolated database.
+Afterward `pg_restore --clean --if-exists --no-owner` restored the pre-runtime
+snapshot successfully; verification found zero Phase 9C users, zero remembered
+rows and zero remembered-login audit rows.
+
+The configured workstation database `ocrahso` was queried read-only and was not
+migrated during Phase 9B. A later read-only `prisma migrate status` audit on
+2026-10-06 found all 48 migrations applied and the schema up to date; that audit
+did not apply migrations or establish deployment provenance. No production data
+was copied and no seed ran. Real data-distribution compatibility and migration
+on other target machines remain unverified until their packaged pilot
+gate.

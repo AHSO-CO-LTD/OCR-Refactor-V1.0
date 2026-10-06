@@ -1,0 +1,1 @@
+export const LOCAL_DONGIL_MACHINE_TYPE_CODE = 'WASHING_MACHINE' as const;

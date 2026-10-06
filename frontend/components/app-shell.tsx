@@ -26,6 +26,7 @@ import {
 } from "@/lib/api";
 import type { TranslationKey } from "@/lib/i18n";
 import { useI18n } from "@/lib/i18n";
+import { getDesktopBridge } from "@/lib/desktop";
 import {
   DASHBOARD_OVERVIEW_VISIBLE,
   getPostLoginRoute,
@@ -288,6 +289,19 @@ export function AppShell({ children }: AppShellProps) {
       await releasePlcSimulatorSession(accessToken, user.id).catch(
         () => undefined,
       );
+    }
+    if (accessToken) {
+      const bridge = getDesktopBridge();
+      if (!bridge) {
+        toast.error(t("session.logoutFailed"));
+        return;
+      }
+      try {
+        await bridge.logoutSession(accessToken);
+      } catch {
+        toast.error(t("session.logoutFailed"));
+        return;
+      }
     }
     clearSession();
     router.replace("/login");

@@ -27,7 +27,6 @@ import { ConfirmModal } from "@/components/ui/confirm-modal";
 import { Input } from "@/components/ui/input";
 import {
   getDongilHistorySyncCurrent,
-  startDongilHistorySync,
   type DongilHistorySyncRun,
 } from "@/lib/api";
 import { getDesktopBridge } from "@/lib/desktop";
@@ -41,11 +40,20 @@ import { getAccessToken, getStoredUser } from "@/lib/session";
 import { useDongilStatus } from "@/lib/use-dongil-status";
 import { cn } from "@/lib/utils";
 
+type DongilDiagnosticStage = {
+  id: "URL_VALIDATION" | "SERVER_HEALTH" | "REGISTRATION" | "MACHINE_TYPE";
+  status: "PASSED" | "FAILED" | "SKIPPED";
+  code?: string;
+};
+
 export function DongilServerSettingsPanel() {
   const { t } = useI18n();
   const { status, loading, error, refresh } = useDongilStatus();
   const [serverIpDraft, setServerIpDraft] = useState<string | null>(null);
   const [testing, setTesting] = useState(false);
+  const [diagnosticStages, setDiagnosticStages] = useState<
+    DongilDiagnosticStage[]
+  >([]);
   const [saving, setSaving] = useState(false);
   const [registering, setRegistering] = useState(false);
   const [refreshingRegistration, setRefreshingRegistration] = useState(false);
@@ -60,10 +68,20 @@ export function DongilServerSettingsPanel() {
   const [historySyncConfirmOpen, setHistorySyncConfirmOpen] = useState(false);
   const storedUser = getStoredUser();
   const role = storedUser?.role;
-  const canManage = role === "dev" || role === "admin";
-  const canManageHistorySync =
+  const isDev = storedUser?.isDev === true;
+  const canManageConfiguration = role === "dev" || role === "admin";
+  const canViewConnection =
+    isDev ||
+    storedUser?.permissions.includes("dongil.connection.view") === true;
+  const canOperateConnection =
+    isDev ||
+    storedUser?.permissions.includes("dongil.connection.operate") === true;
+  const canViewHistorySync =
+    isDev ||
+    storedUser?.permissions.includes("dongil.history-sync.view") === true;
+  const canStartHistorySync =
     storedUser?.isDev === true ||
-    storedUser?.permissions.includes("dongil.history-sync.manage") === true;
+    storedUser?.permissions.includes("dongil.history-sync.start") === true;
 
   const savedIp = status?.serverUrl
     ? (getDongilServerIp(status.serverUrl) ?? "")
@@ -90,7 +108,7 @@ export function DongilServerSettingsPanel() {
   }, [dirty]);
 
   useEffect(() => {
-    if (!canManageHistorySync) return;
+    if (!canViewHistorySync) return;
     let cancelled = false;
 
     async function loadHistoryRun() {
@@ -110,14 +128,38 @@ export function DongilServerSettingsPanel() {
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [canManageHistorySync]);
+  }, [canViewHistorySync]);
 
   async function testConnection() {
     const bridge = getDesktopBridge();
-    if (!bridge || !normalizedServerIp) return;
+    const accessToken = getAccessToken();
+    if (
+      !bridge ||
+      !accessToken ||
+      !normalizedServerIp ||
+      !canManageConfiguration
+    )
+      return;
+    setDiagnosticStages([]);
     setTesting(true);
     try {
-      const response = await bridge.testDongilServer(normalizedServerIp);
+      const response = await bridge.testDongilServer(
+        accessToken,
+        normalizedServerIp,
+      );
+      const failedStage = response.data?.stages?.find(
+        (stage) => stage.status === "FAILED",
+      );
+      setDiagnosticStages(response.data?.stages ?? []);
+      if (failedStage?.code === "DONGIL_MACHINE_TYPE_MISMATCH") {
+        throw new Error(t("settings.dongilState.MACHINE_TYPE_MISMATCH"));
+      }
+      if (failedStage?.code === "DONGIL_REGISTRATION_NOT_READY") {
+        throw new Error(t("settings.dongilDiagnosticRegistrationNotReady"));
+      }
+      if (failedStage) {
+        throw new Error(t("settings.dongilTestFailed"));
+      }
       toast.success(
         t("settings.dongilTestSuccess").replace(
           "{latency}",
@@ -136,7 +178,13 @@ export function DongilServerSettingsPanel() {
   async function saveConfiguration() {
     const bridge = getDesktopBridge();
     const accessToken = getAccessToken();
-    if (!bridge || !accessToken || !normalizedServerIp || !canManage) return;
+    if (
+      !bridge ||
+      !accessToken ||
+      !normalizedServerIp ||
+      !canManageConfiguration
+    )
+      return;
     setSaving(true);
     try {
       const response = await bridge.saveDongilSettings({
@@ -160,7 +208,14 @@ export function DongilServerSettingsPanel() {
   async function requestRegistration() {
     const bridge = getDesktopBridge();
     const accessToken = getAccessToken();
-    if (!bridge || !accessToken || dirty || !savedIp || !canManage) return;
+    if (
+      !bridge ||
+      !accessToken ||
+      dirty ||
+      !savedIp ||
+      !canManageConfiguration
+    )
+      return;
     setRegistering(true);
     try {
       await bridge.requestDongilRegistration(accessToken);
@@ -179,10 +234,12 @@ export function DongilServerSettingsPanel() {
 
   async function refreshRegistrationStatus() {
     const bridge = getDesktopBridge();
-    if (!bridge || dirty || !savedIp) return;
+    const accessToken = getAccessToken();
+    if (!bridge || !accessToken || !canViewConnection || dirty || !savedIp)
+      return;
     setRefreshingRegistration(true);
     try {
-      await bridge.refreshDongilRegistration();
+      await bridge.refreshDongilRegistration(accessToken);
       await refresh();
       toast.success(t("settings.dongilRegistrationRefreshed"));
     } catch (cause) {
@@ -203,7 +260,7 @@ export function DongilServerSettingsPanel() {
       !bridge ||
       !accessToken ||
       status?.registrationStatus !== "APPROVED" ||
-      !canManage
+      !canOperateConnection
     )
       return;
     setConnecting(true);
@@ -225,7 +282,7 @@ export function DongilServerSettingsPanel() {
   async function resetConfiguration() {
     const bridge = getDesktopBridge();
     const accessToken = getAccessToken();
-    if (!bridge || !accessToken || !canManage) return;
+    if (!bridge || !accessToken || !canManageConfiguration) return;
     setResetting(true);
     try {
       await bridge.resetDongilSettings(accessToken);
@@ -245,7 +302,7 @@ export function DongilServerSettingsPanel() {
   async function disconnectServer() {
     const bridge = getDesktopBridge();
     const accessToken = getAccessToken();
-    if (!bridge || !accessToken || !canManage) return;
+    if (!bridge || !accessToken || !canManageConfiguration) return;
     setDisconnecting(true);
     try {
       await bridge.disconnectDongilServer(accessToken);
@@ -264,11 +321,13 @@ export function DongilServerSettingsPanel() {
 
   async function startHistorySynchronization() {
     const accessToken = getAccessToken();
-    if (!accessToken || !canManageHistorySync || !online || dirty) return;
+    const bridge = getDesktopBridge();
+    if (!bridge || !accessToken || !canStartHistorySync || !online || dirty)
+      return;
     setHistorySyncStarting(true);
     try {
-      const response = await startDongilHistorySync(accessToken);
-      setHistorySyncRun(response.data);
+      const response = await bridge.startDongilHistorySync(accessToken);
+      setHistorySyncRun(response.data ?? null);
       setHistorySyncConfirmOpen(false);
       toast.success(
         t(
@@ -316,7 +375,7 @@ export function DongilServerSettingsPanel() {
               value={serverIp}
               onChange={(event) => setServerIpDraft(event.target.value)}
               placeholder="192.168.3.4"
-              disabled={!canManage || saving}
+              disabled={!canManageConfiguration || saving}
               aria-invalid={serverIp.length > 0 && !normalizedServerIp}
             />
             {serverIp.length > 0 && !normalizedServerIp ? (
@@ -333,24 +392,32 @@ export function DongilServerSettingsPanel() {
             />
             <ReadOnlyField
               label={t("settings.dongilMachineType")}
-              value={status?.assignedMachineTypeCode ?? status?.machineTypeCode}
+              value={status?.machineTypeCode}
+            />
+            <ReadOnlyField
+              label={t("settings.dongilAssignedMachineType")}
+              value={status?.assignedMachineTypeCode}
             />
           </div>
 
           <div className="flex flex-wrap gap-2">
-            <Button
-              type="button"
-              variant="outline"
-              disabled={!normalizedServerIp || testing}
-              onClick={() => void testConnection()}
-            >
-              <Activity
-                className={cn("h-4 w-4", testing && "animate-pulse")}
-                aria-hidden="true"
-              />
-              {testing ? t("settings.dongilTesting") : t("settings.dongilTest")}
-            </Button>
-            {canManage ? (
+            {canManageConfiguration ? (
+              <Button
+                type="button"
+                variant="outline"
+                disabled={!normalizedServerIp || testing}
+                onClick={() => void testConnection()}
+              >
+                <Activity
+                  className={cn("h-4 w-4", testing && "animate-pulse")}
+                  aria-hidden="true"
+                />
+                {testing
+                  ? t("settings.dongilTesting")
+                  : t("settings.dongilTest")}
+              </Button>
+            ) : null}
+            {canManageConfiguration ? (
               <Button
                 type="button"
                 disabled={!dirty || !normalizedServerIp || saving}
@@ -360,7 +427,7 @@ export function DongilServerSettingsPanel() {
                 {t("settings.dongilSave")}
               </Button>
             ) : null}
-            {canManage ? (
+            {canManageConfiguration ? (
               <Button
                 type="button"
                 variant="outline"
@@ -376,7 +443,7 @@ export function DongilServerSettingsPanel() {
                   : t("settings.dongilDisconnect")}
               </Button>
             ) : null}
-            {canManage ? (
+            {canManageConfiguration ? (
               <Button
                 type="button"
                 variant="outline"
@@ -388,7 +455,7 @@ export function DongilServerSettingsPanel() {
                 {t("settings.dongilReset")}
               </Button>
             ) : null}
-            {canManage ? (
+            {canManageConfiguration ? (
               <Button
                 type="button"
                 variant="outline"
@@ -410,7 +477,7 @@ export function DongilServerSettingsPanel() {
                   : t("settings.dongilRegister")}
               </Button>
             ) : null}
-            {canManage ? (
+            {canOperateConnection ? (
               <Button
                 type="button"
                 disabled={
@@ -431,7 +498,37 @@ export function DongilServerSettingsPanel() {
             ) : null}
           </div>
 
-          {canManageHistorySync ? (
+          {canManageConfiguration && diagnosticStages.length > 0 ? (
+            <div className="border border-slate-200 bg-slate-50 p-3">
+              <div className="text-sm font-semibold text-slate-900">
+                {t("settings.dongilDiagnosticStages")}
+              </div>
+              <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                {diagnosticStages.map((stage) => (
+                  <div
+                    key={stage.id}
+                    className="flex min-h-10 items-center justify-between gap-3 border border-slate-200 bg-white px-3 py-2 text-sm"
+                  >
+                    <span className="font-medium text-slate-700">
+                      {t(`settings.dongilDiagnosticStage.${stage.id}`)}
+                    </span>
+                    <span
+                      className={cn(
+                        "font-semibold",
+                        stage.status === "PASSED" && "text-emerald-700",
+                        stage.status === "FAILED" && "text-red-700",
+                        stage.status === "SKIPPED" && "text-slate-500",
+                      )}
+                    >
+                      {t(`settings.dongilDiagnosticStatus.${stage.status}`)}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : null}
+
+          {canStartHistorySync ? (
             <div className="border border-cyan-200 bg-cyan-50 p-4">
               <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <div>
@@ -571,7 +668,9 @@ export function DongilServerSettingsPanel() {
             className="w-full"
             variant="outline"
             onClick={() => void refreshRegistrationStatus()}
-            disabled={dirty || !savedIp || refreshingRegistration}
+            disabled={
+              !canViewConnection || dirty || !savedIp || refreshingRegistration
+            }
           >
             <RefreshCw
               className={cn(

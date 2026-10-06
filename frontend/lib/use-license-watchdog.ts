@@ -69,15 +69,22 @@ export function useLicenseWatchdog({
       }
     }
 
-    void checkLicense();
-    const interval = window.setInterval(
-      () => void checkLicense(),
-      LICENSE_WATCHDOG_INTERVAL_MS,
-    );
+    let nextCheckTimer: number | null = null;
+    async function poll() {
+      await checkLicense();
+      if (!cancelled) {
+        nextCheckTimer = window.setTimeout(
+          () => void poll(),
+          LICENSE_WATCHDOG_INTERVAL_MS,
+        );
+      }
+    }
+
+    void poll();
 
     return () => {
       cancelled = true;
-      window.clearInterval(interval);
+      if (nextCheckTimer !== null) window.clearTimeout(nextCheckTimer);
     };
   }, [apiError, enabled, onLicenseLost, t]);
 

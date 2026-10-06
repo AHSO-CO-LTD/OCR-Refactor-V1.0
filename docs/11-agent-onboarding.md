@@ -84,6 +84,7 @@ collapse them into one unqualified “verified” claim.
 - ROI free-angle/runtime crop mismatch.
 - Incomplete session security and audit coverage.
 - Local Tool network exposure.
-- CR-only runtime `.env` parsing.
+- Runtime `.env` parser, backup, ACL and downgrade recovery are implemented but
+  not yet verified in a packaged cold-boot acceptance run.
 - Large cross-domain modules and inactive shared contracts.
 - Hardware and update acceptance still require explicit target-machine evidence.

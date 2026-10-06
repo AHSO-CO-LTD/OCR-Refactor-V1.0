@@ -1,8 +1,9 @@
 # Kế hoạch ổn định cold boot, đăng nhập ghi nhớ và kết nối Dongil
 
-Status: **Approved — Pending implementation**  
-Plan version: **2**  
+Status: **Approved — source implementation and manual source pilot accepted; packaged pilot pending**
+Plan version: **3**
 Approved date: **2026-10-05**  
+Execution rule updated: **2026-10-06**
 Source baseline: **v1.4.0**, branch **remote**
 
 ## 1. Mục tiêu
@@ -67,6 +68,28 @@ Kết quả đích:
 - Thay đổi business payload của kết quả máy rửa.
 - Thay đổi kiến trúc durable outbox và historical reconciliation đã được ADR
   0005 chấp nhận.
+
+### 2.4. Quy tắc thực thi thích ứng
+
+Trước khi sửa source của mỗi phase phải thực hiện một feasibility gate riêng:
+
+1. Đọc lại mục tiêu và exit gate của phase.
+2. Kiểm tra source hiện tại và mọi consumer trực tiếp.
+3. Kiểm tra schema, migration history và dữ liệu tương thích nếu phase chạm DB.
+4. Kiểm tra Accepted ADR và project constraints liên quan.
+5. Xác định regression risk, security impact và rollback thực tế.
+6. Kiểm tra xem giả định trong plan còn đúng với source tại thời điểm thực thi.
+7. Điều chỉnh chi tiết implementation khi cần để đạt mục tiêu an toàn hơn,
+   không bám máy móc vào một cách triển khai đã lỗi thời.
+8. Nếu điều chỉnh làm thay đổi architecture, business rule, permission,
+   database contract, API contract hoặc rollback đã duyệt thì dừng phase, cập
+   nhật plan và xin duyệt lại trước khi sửa source.
+
+Mỗi phase phải ghi rõ một trong ba kết quả gate:
+
+- `Feasible`: có thể triển khai theo hướng hiện tại;
+- `Feasible with adjustment`: mục tiêu giữ nguyên nhưng chi tiết cần điều chỉnh;
+- `Blocked`: chưa thể triển khai an toàn nếu thiếu quyết định hoặc điều kiện.
 
 ## 3. Quyết định nghiệp vụ đã chốt
 
@@ -530,7 +553,7 @@ Nút kiểm tra của admin/dev thực hiện lần lượt:
 
 ### Phase 0 — Khóa kế hoạch và bảo vệ baseline
 
-Status: **In Progress**
+Status: **Done — documentation and feasibility only**
 
 1. Lưu tài liệu kế hoạch này dưới `docs/plans/`.
 2. Ghi nhận branch và worktree dirty trước khi sửa source.
@@ -540,6 +563,16 @@ Status: **In Progress**
    - `0008-secure-remembered-login.md`.
 5. Ghi rõ source-boundary checklist trong plan implementation.
 
+Feasibility result: **Feasible**
+
+- Branch tại thời điểm kiểm tra là `remote` và worktree sạch.
+- ADR 0001, 0002, 0005 và 0006 không xung đột với hai quyết định mới.
+- Electron hiện đã có Windows `safeStorage`, restricted preload IPC và
+  per-process desktop internal token.
+- NestJS/Prisma đã là owner của PostgreSQL và permission enforcement.
+- Có thể thực hiện mà không sửa `tool/` hoặc protected license artifacts.
+- Chi tiết từng phase vẫn phải qua feasibility gate riêng trước khi sửa source.
+
 Exit gate:
 
 - Plan và quyết định nghiệp vụ khớp yêu cầu đã duyệt.
@@ -547,7 +580,27 @@ Exit gate:
 
 ### Phase 1 — Env parser và runtime bootstrap
 
-Status: **Pending**
+Status: **Source runtime user-accepted — packaged cold boot pending**
+
+Feasibility result: **Feasible with adjustment**
+
+- Chỉ các parser cấu hình `.env` được thay đổi; các regex tách dòng dùng cho
+  service logs, Python launcher output và netstat không phải env parser.
+- `service-manager` sẽ được dynamic import sau `loadRuntimeEnv`. Cách này sửa
+  đúng lỗi module-level port/origin evaluation với thay đổi nhỏ hơn việc chuyển
+  toàn bộ port constants thành mutable instance state.
+- Không thêm dependency; parser/serializer thuần TypeScript được tách thành
+  module và đã có harness kiểm thử độc lập.
+- Duplicate key giữ semantics giá trị cuối của parser hiện tại nhưng tạo
+  diagnostic theo key. Serializer loại duplicate và normalize CRLF khi được
+  công cụ cài đặt/hỗ trợ sử dụng.
+- Sau khi Phase 3 chuyển Dongil config sang PostgreSQL, Electron runtime không
+  còn use case hợp lệ để ghi `.env`. Helper filesystem writer không có consumer
+  đã được loại bỏ thay vì duy trì một đường ghi cấu hình thứ hai; packaged
+  legacy env chỉ được backup/checksum và đọc tương thích.
+- Việc bỏ authority của hai Dongil env keys vẫn thuộc Phase 2/3, không trộn vào
+  Phase 1.
+- Test execution, build và runtime verification tiếp tục chờ ủy quyền Phase 9.
 
 1. Tập trung parser env Electron thành một implementation duy nhất.
 2. Hỗ trợ UTF-8 BOM, CRLF, LF, CR-only, comment, empty line, dấu `=` trong value
@@ -558,21 +611,39 @@ Status: **Pending**
 6. Không log secret value.
 7. Nạp runtime env trước khi khởi tạo các module tính port/origin.
 8. Chuyển các constant phụ thuộc env sang bootstrap result hoặc constructor.
-9. Writer đọc-parse-update-serialize toàn file thay vì replace dòng đầu tiên.
-10. Ghi temp, flush, atomic replace, reapply ACL và read-back verify.
-11. Backup file trước lần normalize đầu tiên, kèm timestamp và checksum.
+9. Serializer đọc-parse-update toàn nội dung và loại duplicate thay vì replace
+   dòng đầu tiên.
+10. Runtime không ghi Dongil config trở lại env sau khi DB trở thành authority.
+11. Backup file packaged legacy trước lần đọc đầu tiên, kèm checksum.
 12. Sửa installer bootstrap để validate giá trị preserved.
 13. Bổ sung unit fixtures cho CRLF, LF, CR, BOM, duplicate, blank và malformed.
 
 Exit gate:
 
 - Không còn parser runtime env critical dùng regex không hỗ trợ CR-only.
-- Save rồi restart đọc lại đúng cùng giá trị.
+- Save Dongil rồi restart đọc lại cùng giá trị từ PostgreSQL, không từ env.
 - ACL không bị mở rộng sau replace.
 
 ### Phase 2 — Fixed machine type
 
-Status: **Pending**
+Status: **Source fixed type/live assignment user-accepted — packaged verification pending**
+
+Feasibility result: **Feasible with adjustment**
+
+- `shared/` chưa có TypeScript build hoặc contract package. Kích hoạt package
+  chỉ để chia sẻ một constant sẽ mở rộng architecture ngoài nhu cầu hiện tại.
+- Electron và backend dùng process-local constants cùng giá trị; backend là
+  authoritative boundary và chỉ chấp nhận chính xác `WASHING_MACHINE`.
+- Dongil Server hiện đã trả `assignedMachineTypeCode` và
+  `machineTypeMismatch` trong heartbeat acknowledgement, đồng thời phát
+  `server:registration-updated`. Client có thể fail-closed bằng contract hiện
+  có, không cần sửa Dongil Server.
+- DTO giữ field trong release chuyển tiếp để không phá IPC/API shape, nhưng
+  validation và service đều ép đúng fixed value.
+- DB normalization được giao bằng migration source; migration chưa được chạy.
+- Static source review xác nhận không còn runtime path nào lấy local machine type
+  từ `process.env`; key legacy chỉ còn trong parser/installer và fixture chuyển
+  đổi. `git diff --check` đã đạt, còn test/typecheck/build/runtime chờ Phase 9.
 
 1. Đặt constant `WASHING_MACHINE` tại module dùng chung phù hợp hiện trạng.
 2. Electron registration, bootstrap, hello và heartbeat dùng constant.
@@ -593,7 +664,29 @@ Exit gate:
 
 ### Phase 3 — DB-authoritative Dongil configuration
 
-Status: **Pending**
+Status: **Workstation schema current and source runtime user-accepted — packaged migration pending**
+
+Feasibility result: **Feasible with sequencing adjustment**
+
+- Singleton row hiện tại không thể tồn tại ở trạng thái chưa cấu hình vì
+  `serverUrl`, `machineId` và `licenseStatus` đều bắt buộc. Migration v2 cần
+  chuyển ba field này thành nullable, thêm `configVersion` và
+  `legacyEnvImportedAt`; dữ liệu hiện hữu vẫn được giữ nguyên.
+- Import legacy khả thi trong backend `OnModuleInit` vì backend kế thừa env từ
+  Electron. Import chỉ chạy khi DB chưa có URL và marker chưa ghi; URL DB không
+  hợp lệ không bị âm thầm ghi đè bằng env.
+- Endpoint `configure` hiện còn được lifecycle nội bộ sử dụng nên không thể đổi
+  thẳng thành endpoint có JWT. Thêm endpoint settings riêng, yêu cầu đồng thời
+  JWT admin/dev và desktop internal token, để save/reset có actor và audit cùng
+  transaction; Phase 4 sẽ chuẩn hóa cơ chế trust/permission rộng hơn.
+- Electron có thể lấy URL canonical từ status backend cho registration,
+  reconnect và lifecycle. `.env` chỉ còn là input import/backup downgrade.
+- Prisma migration/source sẽ được tạo nhưng không chạy; Prisma Client chưa được
+  generate và các kiểm tra runtime tiếp tục chờ Phase 9.
+- Static source review xác nhận Electron chỉ dùng URL từ status DB cho lifecycle,
+  registration và connect; `process.env.DONGIL_SERVER_URL` chỉ còn được backend
+  đọc một lần để import legacy. Save/reset settings có JWT + internal token,
+  actor active admin/dev và audit cùng transaction. `git diff --check` đã đạt.
 
 1. Tạo Prisma migration cho `DongilSyncConfiguration` version 2.
 2. Giữ migration additive và bảo toàn row hiện có.
@@ -619,7 +712,31 @@ Exit gate:
 
 ### Phase 4 — Dongil reliability
 
-Status: **Pending**
+Status: **Live source Dongil/outbox flow user-accepted — packaged verification pending**
+
+Feasibility result: **Feasible with targeted corrections**
+
+- Backend đã có `bootstrapPromise`, socket identity key và UI in-flight state nên
+  nền tảng idempotency/double-click đã tồn tại; không cần thay kiến trúc socket.
+- Dongil Server trả assigned type ngay trong `server:accepted`, heartbeat và
+  registration update. Client vẫn cần refresh registration/config sau mỗi
+  socket accept trước khi chuyển ONLINE và cho outbox tiếp tục.
+- `BLOCKED_CONFIG` đã có trong enum nhưng startup hiện đưa nó trở lại PENDING,
+  làm permanent error retry lại. Phase này giữ block qua restart; chỉ config
+  target thay đổi hoặc credential được xác nhận lại mới mở đúng nhóm row.
+- HTTP 401/403, retryable network/408/429/5xx và permanent 4xx cần một classifier
+  dùng chung cho live outbox và history sync.
+- Dongil API client có thể thêm correlation ID trên từng HTTP request mà không
+  thay contract server; log chỉ giữ ID/path/status/code và dữ liệu đã redact.
+- Không cần thay Dongil Server hoặc Device Tool.
+- Socket chỉ chuyển ONLINE sau khi refresh registration, assigned type và config;
+  outbox/history không chạy khi connection chưa ONLINE. Registration update lúc
+  runtime cũng đi lại qua cùng validation path.
+- 401/403 chuyển credential recovery, retryable network/408/425/429/5xx dùng
+  backoff, permanent 4xx chuyển `BLOCKED_CONFIG` và không được startup tự mở
+  lại. Config target mới hoặc credential được xác nhận mới mở đúng nhóm block.
+- HTTP Dongil có correlation ID; diagnostic log không ghi credential. Nút kiểm
+  tra trả stage URL/health/registration/type, và source đã qua `git diff --check`.
 
 1. Tách diagnostic stages như mục 9.2.
 2. Chuẩn hóa error codes và retry classification.
@@ -639,7 +756,22 @@ Exit gate:
 
 ### Phase 5 — Operator Dongil permissions
 
-Status: **Pending**
+Status: **Source operator UI/runtime boundary user-accepted — packaged verification pending**
+
+Feasibility result: **Feasible with an authoritative IPC/API boundary**
+
+- `PermissionsGuard` reloads the active user and effective permissions from the
+  database, so the new operator capabilities do not rely on stale JWT claims.
+- Renderer visibility alone is insufficient for privileged desktop IPC. Status,
+  reconnect, registration refresh and history start now require both the user
+  bearer token and `x-desktop-internal-token`; arbitrary-IP testing additionally
+  reloads the actor and permits only active DEV/ADMIN accounts.
+- The existing `dongil.history-sync.manage` permission remains authoritative for
+  Pause/Resume/Cancel/Retry Failures. The new start permission is intentionally
+  independent so Operator cannot gain management controls implicitly.
+- Engineer receives `dongil.connection.view` to preserve its prior read-only
+  visibility while the newly protected status endpoint is introduced; no new
+  connect or history-start capability is granted to Engineer.
 
 1. Thêm permission constants.
 2. Tạo migration idempotent cho permission catalog và default mappings.
@@ -659,7 +791,27 @@ Exit gate:
 
 ### Phase 6 — Secure remembered login cho mọi role
 
-Status: **Pending**
+Status: **Source Electron safeStorage/cold boot user-accepted — packaged verification pending**
+
+Feasibility result: **Feasible with revocation-state clarification**
+
+- Mô hình singleton phù hợp với một workstation DB: backend sinh token 256-bit,
+  PostgreSQL chỉ giữ SHA-256, Electron main giữ token gốc đã mã hóa bằng Windows
+  `safeStorage`, và renderer không nhận token ghi nhớ.
+- Restore không còn phụ thuộc JWT cũ. Electron chỉ gọi restore khi file local tồn
+  tại; backend kiểm tra desktop internal token, dongle thật, machine ID, token
+  hash, user active và role trước khi phát JWT phiên mới.
+- Role change, deactivate và delete thu hồi DB record ngay trong transaction của
+  account mutation. Vì record đã bị xóa trước lần cold boot kế tiếp, file local
+  còn lại được phân loại là token đã bị thu hồi/không hợp lệ rồi bị xóa; không
+  thể luôn phân biệt nguyên nhân role-change chỉ từ token cũ nếu không bổ sung
+  tombstone ngoài thiết kế đã duyệt.
+- Source hiện không có password-reset mutation. Hook thu hồi cho password reset
+  được giữ là yêu cầu bắt buộc khi flow đó được bổ sung, không tạo endpoint giả
+  chỉ để thỏa checklist.
+- Logout thực hiện revoke DB qua Electron/backend trước, sau đó mới xóa local
+  secure token và sessionStorage. Lỗi backend giữ người dùng ở phiên hiện tại để
+  có thể Retry; lỗi xóa file sau khi DB đã revoke không làm token dùng lại được.
 
 1. Tạo Prisma migration cho `RememberedLogin` và quan hệ `User`.
 2. Tạo remember-token service chuyên trách.
@@ -692,7 +844,21 @@ Exit gate:
 
 ### Phase 7 — Dongle check coordination
 
-Status: **Pending**
+Status: **Physical dongle and source cold-boot coordination accepted — packaged verification pending**
+
+Feasibility result: **Feasible without changing protected license code**
+
+- `DongleCheckerService`, native helper, DLL và fallback script được giữ nguyên.
+  Coordinator mới nằm ở application layer và chia sẻ một in-flight promise cho
+  login gate, watchdog, login thủ công và remembered restore.
+- Polling ở login và runtime watchdog dùng recursive timeout sau khi request hiện
+  tại hoàn tất, thay vì `setInterval` có thể xếp chồng request chậm.
+- `NOT_FOUND` và `INVALID` là lỗi xác định; `TIMEOUT`, `TRANSIENT_BUSY` và
+  `HELPER_ERROR` trả license state `unknown`. Vì vậy lỗi tạm thời chặn cấp phiên
+  mới nhưng không bị hiểu nhầm thành thao tác rút dongle và không thu hồi
+  remembered credential.
+- Phân loại dựa trên contract hiện có của application wrapper. Không sửa output,
+  retry hoặc timeout bên trong helper được bảo vệ.
 
 1. Tạo coordinator dùng chung cho backend license/dongle checks.
 2. Các caller chia sẻ một in-flight promise.
@@ -710,7 +876,24 @@ Exit gate:
 
 ### Phase 8 — UI, i18n, logging và documentation
 
-Status: **Pending**
+Status: **Source visual/runtime/log review accepted — packaged UI pending**
+
+Feasibility result: **Feasible without a layout redesign**
+
+- Login, permission-aware Dongil controls and the existing responsive settings
+  panel could be extended without replacing the current design system.
+- Connection-stage diagnostics are rendered only after the privileged
+  `dev`/`admin` test flow; operator controls remain limited to refresh,
+  reconnect and permitted history synchronization.
+- Errors, audits and correlation metadata are structured without placing
+  passwords, JWTs, remembered tokens, internal tokens or Dongil credentials in
+  user-visible diagnostics.
+- Project, architecture, API, database, security, Dongil, logging, onboarding
+  and workspace READMEs now describe PostgreSQL as Dongil config authority and
+  Electron `safeStorage` as the local remembered-token boundary.
+- Static documentation/source review and `git diff --check` are complete. Visual
+  verification at 1280 x 1024, automated checks and runtime validation remain
+  deferred to Phase 9 authorization.
 
 1. Cập nhật login UI cho mọi role.
 2. Cập nhật Dongil panel theo readonly operator mode.
@@ -735,7 +918,191 @@ Exit gate:
 
 ### Phase 9 — Verification và pilot
 
-Status: **Pending explicit verification authorization**
+Status: **Phase 9A/9B/9C complete; user-reported manual source pilot accepted — packaged pilot pending**
+
+Pre-execution feasibility assessment: **Feasible with staged authorization**
+
+- Existing backend Jest coverage can be extended for auth, permission, dongle
+  coordination and Dongil behavior without adding a dependency.
+- Electron/frontend do not currently expose a general unit-test runner for the
+  new pure modules. Env bootstrap has an existing PowerShell test harness;
+  remaining Electron/frontend confidence should come from typecheck/build and
+  focused runtime/visual checks unless a separately approved test dependency is
+  justified.
+- The checked-in Prisma schema now differs from the generated client under
+  `backend/node_modules`; `prisma:generate` must run before backend typecheck or
+  Jest compilation. Generation is not a database migration.
+- `backend/.env` exists and may identify a real workstation database. No
+  migration, seed, destructive cleanup or integration test may use that URL
+  until the target is confirmed as an isolated test/pilot database and a backup
+  requirement is satisfied.
+- The backend `lint` script includes `--fix`; verification should invoke ESLint
+  in non-fixing mode so it cannot silently rewrite source.
+- Automated source checks, isolated-DB integration, Electron runtime/visual
+  verification, and physical cold-boot pilot are separate gates. Authorization
+  for one gate does not imply authorization for the later gates.
+
+Phase 9A evidence recorded on **2026-10-06**:
+
+- Prisma Client `6.19.3` generated successfully; no migration or seed ran.
+- Ten targeted backend Jest suites passed: **66 tests, 0 failures**. Coverage
+  includes remembered-login opt-in/restore/revocation behavior, all four roles,
+  role/account-state changes, internal-token boundaries, permission metadata,
+  dongle check coordination, transient/definitive classification, DB-over-env
+  import, fixed machine type, staged diagnostics and retry classification.
+- Electron runtime-env harness passed CRLF/LF/CR/BOM, duplicate, blank,
+  malformed, value-with-`=` and validation cases.
+- Installer Dongil bootstrap PowerShell harness passed.
+- Backend, frontend and Electron typecheck all passed.
+- Backend, frontend and Electron production builds all passed. Electron build
+  only copied the existing protected license artifact into its generated
+  read-only runtime output; protected source was not modified.
+- ESLint passed for every backend/frontend/Electron source file changed by this
+  plan, and full Electron lint passed. Full frontend lint remains blocked by a
+  pre-existing `react-hooks/set-state-in-effect` error and dependency warning in
+  `components/dongil/dongil-history-sync-processing.tsx`, which is outside this
+  change set. Full backend non-fixing lint remains blocked by repository-wide
+  baseline Prettier/CRLF debt; changed backend files pass non-fixing ESLint.
+- Password-reset revoke is not runtime-tested because there is currently no
+  password-reset mutation. Deleted-account cascade/revocation is covered by the
+  isolated-DB integration test recorded below.
+
+Phase 9B evidence recorded on **2026-10-06**:
+
+- Preflight confirmed `backend/.env` targets local database `ocrahso`; that
+  database was treated as the workstation database and was never used as a
+  migration target. A final read-only comparison showed 40 completed migrations,
+  no `RememberedLogin` table and no Phase 9B migration records.
+- Created isolated database `ocrahso_codex_phase9b_20261006` on localhost. The
+  URL was supplied only through the child process environment; `backend/.env`
+  was not edited.
+- Created and validated a pre-migration custom-format backup at
+  `%LOCALAPPDATA%\Temp\ahso-ocr-phase9b`, with SHA-256
+  `1BC0917238BEB5C1DB5F756DDFB412214DB332E5FEE7F261B95AF21579CDBDF3`.
+- `prisma migrate deploy` applied all 48 migrations successfully. `prisma
+  migrate status` reported the schema current, and a second deploy reported no
+  pending migrations.
+- Added a guarded integration runner that refuses any database whose name does
+  not match `ocrahso_codex_phase9b_*`. Six integration tests passed against
+  PostgreSQL 18.4: complete migration history, fixed machine type, all-role
+  remembered login with hash-only persistence, transient/definitive revoke
+  behavior, role-change/delete revoke, operator allow/deny permissions, config
+  idempotency and concurrent reconnect deduplication.
+- The integration cleanup left zero remembered-login rows, zero Phase 9B users
+  and zero audit rows. No seed, external Dongil connection, Device Tool, dongle,
+  Electron runtime or hardware flow ran.
+- This was a blank/synthetic isolated database. Compatibility with the actual
+  workstation's data distribution still requires the separately approved pilot
+  backup and migration; production data was not copied into the test database.
+
+Phase 9C evidence recorded on **2026-10-06**:
+
+- Reconfirmed that ports 3970, 3980, 8668, 3000, 4000 and 8000 were free before
+  the focused check. Only the backend and frontend processes started by this
+  check were stopped afterward.
+- Created and validated a pre-runtime custom-format backup of the isolated
+  database at `%LOCALAPPDATA%\Temp\ahso-ocr-phase9c`, with SHA-256
+  `B92C86F420964720FB76AE49BA8C5E4CF39FA976ABD8CC389FAF6ED5647D6E36`.
+- Started the backend on port 3980 with the isolated database supplied through
+  the child-process environment and automatic migration disabled. Health was
+  `ok`; backend stderr had no entries.
+- The real protected dongle boundary was invoked without modifying its source
+  or binary. It returned `DONGLE_OK`, `licensed=true` and
+  `donglePresent=true`.
+- Runtime API checks created temporary admin and operator accounts without
+  printing passwords, JWTs or opaque remember tokens. Both roles returned
+  `REMEMBER_RESTORED`; logging in again with `rememberLogin=false` made the
+  previous opaque token return `REMEMBER_TOKEN_INVALID`.
+- The Phase 9B integration fixture had left the isolated database with its
+  deliberately reduced role-permission set, so its temporary admin could not
+  create an operator through `user.manage`. Phase 9C inserted only the temporary
+  operator through Prisma after rechecking the database identity, then removed
+  it through the full pre-runtime snapshot restore. Making that integration
+  fixture restore role data is follow-up test-isolation work, not a production
+  authorization failure.
+- The runtime operator session contained `dongil.connection.view`,
+  `dongil.connection.operate`, `dongil.history-sync.view` and
+  `dongil.history-sync.start`. Operator status/history reads succeeded while
+  the unrelated user-management endpoint returned 403. Reconnect, registration
+  refresh and history-start were not invoked because they can contact the live
+  Dongil Server or mutate synchronization state; their guards and service
+  behavior remain covered by Phase 9A/9B checks.
+- Backend runtime status and the database singleton both reported fixed machine
+  type `WASHING_MACHINE`; the row remained config version 2.
+- Frontend setup/login screens were inspected at 1280 x 1024. There was no
+  horizontal overflow and no browser console warning/error. In a normal web
+  browser the remember checkbox is intentionally disabled and the Windows
+  secure-storage-unavailable message is visible because the Electron preload
+  bridge is absent; this does not verify the packaged Electron presentation.
+- Electron was not launched. Current `startAll()` startup behavior would start
+  or reuse Device Tool and then run PLC/camera preparation, so it cannot satisfy
+  the approved no-hardware Phase 9C boundary without a separately approved
+  isolation mechanism or a controlled hardware pilot.
+- After the check, the isolated database was restored from the verified backup.
+  Verification showed zero `phase9c_*` users, zero remembered-login rows and
+  zero remember-login audit rows. All touched and legacy OCR ports listed above
+  were free. No Device Tool, PLC, camera, updater or live Dongil operation ran.
+
+Remembered-login ACL follow-up recorded on **2026-10-06**:
+
+- A real development Electron login reproduced successful password login plus
+  failed local remember persistence. The backend compensating revoke completed;
+  the workstation database contained zero `RememberedLogin` rows.
+- The failed save left `remembered-login.json.tmp` owned by the current user but
+  with access granted only to Administrators and SYSTEM. Development launch sets
+  `AHSO_ELECTRON_SKIP_ADMIN_RELAUNCH=1`, so the non-elevated process could no
+  longer rename or delete the file it had just protected.
+- The store now resolves the current Windows user SID and grants that SID,
+  Administrators and SYSTEM full control. Exact application-owned `.tmp` and
+  `.bak` artifacts are repaired to this ACL before cleanup; no password, JWT or
+  plaintext remember token is persisted or logged.
+- Electron typecheck and production build passed. The build prepared the
+  existing protected license runtime artifact without modifying protected
+  source.
+- A non-elevated Electron harness used isolated temporary `userData`, reproduced
+  the legacy admin-only `.tmp` ACL, recovered it, persisted and decrypted a
+  `safeStorage` token, cleared all artifacts and removed its temporary directory.
+- The already-running full desktop process was not restarted by the agent.
+  Full-app restart, real opt-in through the UI and Windows cold boot remain the
+  final acceptance checks.
+
+Manual source acceptance reported by the user on **2026-10-06**:
+
+- The development Electron application completed real remembered-login opt-in,
+  application restart, automatic restore and full Windows cold boot
+  successfully.
+- The operator Dongil screen exposed the approved refresh, reconnect,
+  registration-refresh and history-start operations while configuration and
+  management actions remained unavailable.
+- Temporary LAN interruption recovered successfully and pending local outbox
+  results synchronized after reconnection.
+- The user reviewed runtime logs and reported no exposed password, JWT,
+  remember token or machine credential.
+- These are user-reported manual source-runtime results. They were not captured
+  independently by the agent and do not constitute packaged installer,
+  production-data migration, updater, PLC or camera acceptance.
+- A separate read-only Prisma audit found the workstation `ocrahso` database at
+  all 48 migrations and reported the schema up to date. No migration or seed was
+  executed by the audit, and deployment provenance was not inferred.
+
+Final source-diff and migration audit recorded on **2026-10-06**:
+
+- `prisma validate` passed for the current schema. Prisma emitted only the
+  existing package-configuration deprecation warning for a future Prisma 7
+  migration.
+- The four new migrations are ordered and match the current schema. The config,
+  permission and remembered-login changes are additive/idempotent for their
+  approved contracts.
+- `20261006090000_fixed_washing_machine_type` intentionally rewrites every
+  non-washing local type to `WASHING_MACHINE`. That normalization cannot recover
+  the previous value by itself, so the packaged pilot must retain the verified
+  pre-migration database backup required by the rollback plan.
+- Full tracked `git diff --check`, conflict-marker scan and whitespace/final-
+  newline checks for new text files passed. Git reported only the repository's
+  LF-to-CRLF checkout warnings.
+- Branch remained `remote`; protected `tool/` and license paths had no diff. No
+  commit, push, build, installer, migration deploy or seed was performed by this
+  final audit.
 
 Không chạy các bước này chỉ dựa trên việc plan đã được duyệt. Cần yêu cầu xác
 minh rõ ràng trước khi chạy command hoặc thiết bị thật.
@@ -902,16 +1269,16 @@ Kế hoạch chỉ hoàn thành khi đáp ứng toàn bộ điều kiện áp d�
 
 | Phase | Trạng thái |
 | --- | --- |
-| Phase 0 — Plan và baseline | In Progress |
-| Phase 1 — Env parser/bootstrap | Pending |
-| Phase 2 — Fixed machine type | Pending |
-| Phase 3 — DB-authoritative Dongil config | Pending |
-| Phase 4 — Dongil reliability | Pending |
-| Phase 5 — Operator permissions | Pending |
-| Phase 6 — Secure remembered login | Pending |
-| Phase 7 — Dongle coordination | Pending |
-| Phase 8 — UI/i18n/logging/docs | Pending |
-| Phase 9 — Verification/pilot | Pending explicit authorization |
+| Phase 0 — Plan và baseline | Done — documentation and feasibility only |
+| Phase 1 — Env parser/bootstrap | Source runtime user-accepted — packaged cold boot pending |
+| Phase 2 — Fixed machine type | Source fixed type/live assignment user-accepted — packaged verification pending |
+| Phase 3 — DB-authoritative Dongil config | Workstation schema current and source runtime user-accepted — packaged migration pending |
+| Phase 4 — Dongil reliability | Live source Dongil/outbox flow user-accepted — packaged verification pending |
+| Phase 5 — Operator permissions | Source operator UI/runtime boundary user-accepted — packaged verification pending |
+| Phase 6 — Secure remembered login | Source Electron opt-in, restart and cold boot user-accepted — packaged verification pending |
+| Phase 7 — Dongle coordination | Physical dongle and source cold-boot coordination accepted — packaged verification pending |
+| Phase 8 — UI/i18n/logging/docs | Source visual/runtime/log review accepted — packaged Electron UI pending |
+| Phase 9 — Verification/pilot | Automated/isolated checks complete and manual source pilot user-accepted — packaged pilot pending |
 
 Mọi thay đổi architecture, database, API, permission, security hoặc rollback
 khác với plan này phải dừng triển khai, cập nhật plan và được duyệt lại trước

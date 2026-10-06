@@ -47,6 +47,10 @@ matching Configuration tab. `/dashboard` currently redirects to the Line workspa
 - Manual Save, destructive actions, sensitive settings, and dirty exit use custom confirmation dialogs.
 - Sonner is reserved for meaningful asynchronous success, error, warning, and system events.
 - Loading is localized to the affected control or region.
+- No remembered credential opens the login form directly. The temporary access
+  JWT stays in `sessionStorage`; Electron owns the encrypted remember token.
+- Operator sees Dongil URL/type as read-only and only receives controls allowed
+  by its current backend permissions.
 
 ## Runtime State
 

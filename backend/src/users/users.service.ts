@@ -6,13 +6,17 @@ import {
 } from '@nestjs/common';
 import { Prisma, RoleCode } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
+import { AuthSessionService } from '../auth/auth-session.service';
 import { PrismaService } from '../database/prisma.service';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 
 @Injectable()
 export class UsersService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly authSessions: AuthSessionService,
+  ) {}
 
   async listUsers(includeDev = false) {
     const users = await this.prisma.user.findMany({
@@ -40,7 +44,11 @@ export class UsersService {
     };
   }
 
-  async createUser(dto: CreateUserDto, canManageDev: boolean) {
+  async createUser(
+    dto: CreateUserDto,
+    canManageDev: boolean,
+    actorId: string,
+  ) {
     if (dto.role === RoleCode.dev && !canManageDev) {
       throw new BadRequestException('Only dev can create dev users');
     }
@@ -63,16 +71,27 @@ export class UsersService {
     }
 
     const passwordHash = await bcrypt.hash(dto.password, 12);
-    const user = await this.prisma.user.create({
-      data: {
-        username: dto.username,
-        passwordHash,
-        fullName: dto.fullName,
-        department: dto.department || null,
-        employeeNo: dto.employeeNo || null,
-        roleCode: dto.role,
-        active: dto.active ?? true,
-      },
+    const user = await this.prisma.$transaction(async (transaction) => {
+      const created = await transaction.user.create({
+        data: {
+          username: dto.username,
+          passwordHash,
+          fullName: dto.fullName,
+          department: dto.department || null,
+          employeeNo: dto.employeeNo || null,
+          roleCode: dto.role,
+          active: dto.active ?? true,
+        },
+      });
+      await transaction.auditLog.create({
+        data: {
+          actorId,
+          action: 'user.create',
+          target: created.id,
+          details: { after: this.toAuditUser(created) },
+        },
+      });
+      return created;
     });
 
     return {
@@ -80,10 +99,23 @@ export class UsersService {
     };
   }
 
-  async updateUser(id: string, dto: UpdateUserDto, canManageDev: boolean) {
+  async updateUser(
+    id: string,
+    dto: UpdateUserDto,
+    canManageDev: boolean,
+    actorId: string,
+  ) {
     const existingUser = await this.prisma.user.findUnique({
       where: { id },
-      select: { id: true, roleCode: true, active: true },
+      select: {
+        id: true,
+        username: true,
+        fullName: true,
+        department: true,
+        employeeNo: true,
+        roleCode: true,
+        active: true,
+      },
     });
 
     if (!existingUser) {
@@ -110,17 +142,62 @@ export class UsersService {
 
     await this.ensureAdminWillRemain(existingUser, dto);
 
-    const user = await this.prisma.user.update({
-      where: { id },
-      data: {
-        fullName: dto.fullName,
-        department:
-          dto.department === undefined ? undefined : dto.department || null,
-        employeeNo:
-          dto.employeeNo === undefined ? undefined : dto.employeeNo || null,
-        roleCode: dto.role,
-        active: dto.active,
-      },
+    const roleChanged =
+      dto.role !== undefined && dto.role !== existingUser.roleCode;
+    const becameInactive = existingUser.active && dto.active === false;
+    const user = await this.prisma.$transaction(async (transaction) => {
+      const updated = await transaction.user.update({
+        where: { id },
+        data: {
+          fullName: dto.fullName,
+          department:
+            dto.department === undefined ? undefined : dto.department || null,
+          employeeNo:
+            dto.employeeNo === undefined ? undefined : dto.employeeNo || null,
+          roleCode: dto.role,
+          active: dto.active,
+        },
+      });
+      if (roleChanged || becameInactive) {
+        await this.authSessions.revokeAllForUser(
+          id,
+          roleChanged ? 'role-change' : 'account-state',
+          actorId,
+          transaction,
+        );
+        const revoked = await transaction.rememberedLogin.deleteMany({
+          where: { userId: id },
+        });
+        if (revoked.count > 0) {
+          await transaction.auditLog.create({
+            data: {
+              actorId,
+              action: roleChanged
+                ? 'auth.remember.revoke-role-change'
+                : 'auth.remember.revoke-account-state',
+              target: id,
+              details: {
+                previousRole: existingUser.roleCode,
+                nextRole: updated.roleCode,
+                previousActive: existingUser.active,
+                nextActive: updated.active,
+              },
+            },
+          });
+        }
+      }
+      await transaction.auditLog.create({
+        data: {
+          actorId,
+          action: 'user.update',
+          target: id,
+          details: {
+            before: this.toAuditUser(existingUser),
+            after: this.toAuditUser(updated),
+          },
+        },
+      });
+      return updated;
     });
 
     return {
@@ -135,7 +212,15 @@ export class UsersService {
 
     const existingUser = await this.prisma.user.findUnique({
       where: { id },
-      select: { id: true, roleCode: true, active: true },
+      select: {
+        id: true,
+        username: true,
+        fullName: true,
+        department: true,
+        employeeNo: true,
+        roleCode: true,
+        active: true,
+      },
     });
 
     if (!existingUser) {
@@ -149,7 +234,31 @@ export class UsersService {
     await this.ensureAdminCanBeDeleted(existingUser);
 
     try {
-      await this.prisma.user.delete({ where: { id } });
+      await this.prisma.$transaction(async (transaction) => {
+        const remembered = await transaction.rememberedLogin.findFirst({
+          where: { userId: id },
+          select: { id: true },
+        });
+        await transaction.user.delete({ where: { id } });
+        await transaction.auditLog.create({
+          data: {
+            actorId,
+            action: 'user.delete',
+            target: id,
+            details: { before: this.toAuditUser(existingUser) },
+          },
+        });
+        if (remembered) {
+          await transaction.auditLog.create({
+            data: {
+              actorId,
+              action: 'auth.remember.revoke-account-state',
+              target: id,
+              details: { reason: 'account-deleted' },
+            },
+          });
+        }
+      });
     } catch (error) {
       if (
         error instanceof Prisma.PrismaClientKnownRequestError &&
@@ -275,6 +384,26 @@ export class UsersService {
       role: user.roleCode,
       active: user.active,
       lastLoginAt: user.lastLoginAt?.toISOString() ?? null,
+    };
+  }
+
+  private toAuditUser(user: {
+    id: string;
+    username: string;
+    fullName: string;
+    department: string | null;
+    employeeNo: string | null;
+    roleCode: RoleCode;
+    active: boolean;
+  }) {
+    return {
+      id: user.id,
+      username: user.username,
+      fullName: user.fullName,
+      department: user.department,
+      employeeNo: user.employeeNo,
+      role: user.roleCode,
+      active: user.active,
     };
   }
 

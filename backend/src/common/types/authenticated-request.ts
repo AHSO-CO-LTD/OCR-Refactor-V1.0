@@ -5,5 +5,6 @@ export type AuthenticatedRequest = Request & {
     id: string;
     username: string;
     role: string;
+    sessionId: string;
   };
 };

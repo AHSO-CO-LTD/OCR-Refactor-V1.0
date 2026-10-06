@@ -16,8 +16,10 @@ already implemented; this workspace is not a future placeholder.
 - Keep child-service logs and expose the restricted preload bridge.
 - Coordinate graceful shutdown, PLC output cleanup and child-process cleanup.
 - Check and apply GitHub Releases updates with staged recovery/rollback data.
-- Bootstrap and maintain Dongil machine identity/credential state without
-  exposing the credential to the renderer.
+- Bootstrap the Dongil machine identity and broker restricted Dongil actions;
+  PostgreSQL is authoritative for server configuration and registration state.
+- Encrypt the remembered-login bootstrap token with Electron `safeStorage` and
+  expose only enable/restore/disable/capability IPC operations to the renderer.
 
 Electron stops only child processes it started. It must not terminate an
 unrelated service already listening on a candidate port.
@@ -38,6 +40,13 @@ $env:AHSO_ELECTRON_SKIP_ADMIN_RELAUNCH = "0"
 npm run dev:desktop
 ```
 
+Verify the remembered-login `safeStorage`, current-user ACL, legacy temporary
+file recovery and cleanup without starting the normal desktop services:
+
+```powershell
+npm run verify:remembered-login-store -w @ocr/electron
+```
+
 Current development defaults are:
 
 ```text
@@ -49,6 +58,13 @@ Frontend     http://localhost:3970
 The Device Tool port is not dynamically reassigned because the Tool owns its
 server configuration. Backend/frontend candidate-port behavior is controlled
 by the desktop service manager and environment configuration.
+
+The packaged runtime may import a legacy Dongil server IP from the machine
+`.env` once. Subsequent Dongil configuration is read from PostgreSQL. The
+runtime parser accepts BOM, CRLF, LF and CR-only files, rejects duplicate or
+invalid critical values, and backs up the packaged legacy file with a checksum.
+Electron does not write Dongil changes back to `.env` after the DB-authoritative
+configuration transition.
 
 ## Build and packaging
 
@@ -67,6 +83,10 @@ work.
 - `contextIsolation` remains enabled and Node integration remains disabled for
   renderer content.
 - Add only explicit, validated preload/IPC operations.
+- Never expose the remembered-login bootstrap token or the desktop internal
+  token to renderer code. The local remembered token is encrypted with
+  `safeStorage`; its ACL allows only the current Windows user, Administrators
+  and SYSTEM. Failure to persist it revokes the matching backend record.
 - Do not modify original license code or binaries in `external/license-key/`,
   `backend/native/System8.dll`, the native helper or
   `backend/scripts/check-dongle.py`.

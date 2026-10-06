@@ -23,8 +23,12 @@ Electron may supply different ports through runtime environment and fallback sel
 ## Authentication
 
 - Protected REST endpoints use `Authorization: Bearer <jwt>`.
+- New JWTs contain a local session `sid`; guards require the corresponding
+  `AuthSession` to remain active.
 - Camera proxy WebSockets currently receive the JWT as a `token` query parameter.
 - Electron-only internal endpoints require `x-desktop-internal-token`.
+- Internal actions with a user actor require both the desktop token and bearer
+  JWT; the desktop token is not a replacement for user authorization.
 - Backend permissions are reloaded from PostgreSQL for guarded actions.
 
 ## Response Convention
@@ -52,7 +56,10 @@ typed frontend helper and stable message mapping until a separately approved API
 | --- | --- | --- |
 | POST | `/auth/login` | Public with license gate |
 | GET | `/auth/me` | Authenticated |
-| GET | `/auth/restore` | Authenticated with physical dongle gate |
+| POST | `/internal/auth/remembered-login/enable` | JWT + desktop token + physical dongle |
+| POST | `/internal/auth/remembered-login/restore` | Desktop token + safeStorage token + machine identity + physical dongle |
+| DELETE | `/internal/auth/remembered-login` | JWT + desktop token |
+| DELETE | `/internal/auth/remembered-login/logout` | Active JWT session + desktop token |
 | GET/POST/PATCH/DELETE | `/users` and `/users/:id` | `user.manage` |
 | GET | `/users/assignable-roles` | `user.manage` |
 | POST | `/users/virtual-keyboard` | `user.manage` |
@@ -142,14 +149,30 @@ Authenticated history APIs:
 
 - `GET /dongil-sync/history/current`
 - `GET /dongil-sync/history/invalid`
-- `POST /dongil-sync/history/start`
 - `POST /dongil-sync/history/pause`
 - `POST /dongil-sync/history/resume`
 - `POST /dongil-sync/history/cancel`
 - `POST /dongil-sync/history/retry-failures`
 
-Electron-only internal Dongil routes live under `/internal/dongil-sync/*` and
-require the per-process desktop token.
+Dongil runtime routes live under `/internal/dongil-sync/*`. Background lifecycle
+routes require the per-process desktop token. User actions additionally require:
+
+| Method/path | User authorization |
+| --- | --- |
+| `GET status/user` | `dongil.connection.view` |
+| `POST registration-status/refresh` | `dongil.connection.view` |
+| `POST reconnect` | `dongil.connection.operate` |
+| `POST history-start` | `dongil.history-sync.start` |
+| `POST settings`, `reset`, `test` | active DEV/ADMIN |
+
+Pause/resume/cancel/retry-failures remain on the authenticated history API and
+require `dongil.history-sync.manage`.
+
+The internal Dongil `test` response returns ordered `URL_VALIDATION`,
+`SERVER_HEALTH`, `REGISTRATION`, and `MACHINE_TYPE` stages with
+`PASSED`/`FAILED`/`SKIPPED` status. Expected connection, registration, and
+machine-type failures are represented in these stages instead of exposing a
+raw remote-method exception to the renderer.
 
 ## Device Tool Contracts
 

@@ -23,14 +23,4 @@ export class AuthController {
   me(@Req() request: AuthenticatedRequest) {
     return this.authService.me(request.user.id);
   }
-
-  @ApiBearerAuth()
-  @ApiOperation({
-    summary: 'Restore a remembered session after a physical dongle check',
-  })
-  @Get('restore')
-  @UseGuards(JwtAuthGuard)
-  restore(@Req() request: AuthenticatedRequest) {
-    return this.authService.restore(request.user.id);
-  }
 }

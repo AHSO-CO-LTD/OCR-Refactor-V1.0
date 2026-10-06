@@ -16,10 +16,19 @@
 ## Login And Restore
 
 - Manual login checks dongle, user activity, and bcrypt password.
-- Backend returns a JWT and current effective permissions.
-- A remembered session is restored only after the real `DONGLE_OK` result.
+- Backend creates a local revocable `AuthSession`, then returns a JWT containing
+  its `sid` and the current effective permissions.
+- JWT and user state are current-session data in renderer `sessionStorage`.
+- A remembered account uses an opaque token encrypted by Electron
+  `safeStorage`; PostgreSQL stores only its hash and machine/user binding.
+- Restore checks the real `DONGLE_OK`, machine ID, token hash, active account,
+  saved role and current effective permissions, then creates a new local session
+  and issues a fresh JWT.
 - Dongle mock mode can support explicit development login but cannot restore a remembered session.
-- Current frontend stores temporary sessions in `sessionStorage` and remembered sessions in application-owned `localStorage` keys.
+- No remembered credential opens the manual form immediately without showing an
+  artificial restore step. Legacy localStorage JWT keys are deleted, not migrated.
+- Explicit logout revokes the current local session and remembered-login record
+  before Electron deletes secure local state and the renderer clears its session.
 
 ## Line Operation
 
@@ -47,6 +56,10 @@
 ## Dongil Runtime
 
 - Electron derives local machine identity after a valid dongle check.
+- Backend `DongilSyncConfiguration` is the runtime authority for the server URL;
+  legacy `.env` URL import is one-time only.
+- Local type is always `WASHING_MACHINE`; server-assigned type is displayed
+  separately and a mismatch blocks connection.
 - Registration is requested explicitly and must be approved by Dongil Server.
 - Heartbeat runs independently of result delivery.
 - Live results are delivered from a durable outbox.

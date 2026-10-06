@@ -6,6 +6,10 @@
 - `admin` manages operational users, permissions, settings, updates, and integrations but cannot obtain dev-only permissions.
 - `engineer` focuses on product, camera, OCR, ROI, PLC configuration, tests, and reports according to assigned permissions.
 - `operator` focuses on Line operation according to assigned permissions.
+- Default Operator Dongil access is read status, refresh registration, reconnect
+  saved approved configuration, view history progress, and start a new history
+  run. Operator cannot edit/test/save/reset/register/disconnect or
+  pause/resume/cancel/retry a history run.
 - Backend permissions are authoritative; frontend visibility is not authorization.
 - When a user has explicit permissions, they replace the role-derived list in the current implementation.
 
@@ -16,6 +20,11 @@
 - Non-dev users cannot create, edit, or delete `dev` users.
 - The system blocks deletion, deactivation, or demotion that would remove the last active admin.
 - Production seed creates a hidden support dev; the customer creates the first admin explicitly.
+- Every active role may opt into remembered login. It stores no password or
+  durable access JWT, requires the same machine and a real dongle, and issues a
+  fresh JWT with current permissions on restore.
+- Logout, login without Remember, role change, account deactivation, and account
+  deletion revoke the remembered credential. Recoverable startup/dongle errors do not.
 
 ## Product And ROI
 
@@ -67,6 +76,10 @@
 - `ACCEPTED` and `REPLAYED` are successful delivery dispositions.
 - Retry preserves stable local IDs and original inspection timestamps.
 - Historical synchronization never deletes local results.
+- The local OCR client type is fixed to `WASHING_MACHINE`; a different
+  server-assigned type blocks connection and sending.
+- PostgreSQL is authoritative for Dongil server configuration after the one-time
+  legacy `.env` import.
 
 ## Language And Display
 

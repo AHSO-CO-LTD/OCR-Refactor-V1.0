@@ -40,7 +40,9 @@ service names while redacting credentials and user-entered secrets.
 
 - Application logs do not yet use one normalized structured envelope or correlation ID.
 - There is no documented six-month rotation and cleanup implementation across all log categories.
-- `AuditLog` schema exists but is not consistently written by mutation services.
+- `AuditLog` covers remembered-login lifecycle and the new Dongil config,
+  reconnect, and history-start mutations. Other mutation services remain
+  incomplete and require separate scope.
 - Runtime log-level persistence and an in-app searchable structured log viewer are not implemented.
 - Tool logging is owned by the read-only Tool project and must not be changed from this repository task.
 

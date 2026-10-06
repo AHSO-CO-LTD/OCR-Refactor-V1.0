@@ -83,7 +83,9 @@ Do not rely on old status text that describes these areas as unimplemented.
   Device Tool accepts only 90-degree crop rotation increments.
 - JWT expiry/revocation, login rate limiting, lockout enforcement, and complete audit writes are not implemented.
 - Device Tool currently binds to all interfaces and has no application JWT layer.
-- Electron `.env` parsing does not handle CR-only line endings.
+- Electron CR/LF/BOM-aware `.env` parsing and legacy ProgramData backup are
+  implemented. Runtime Dongil changes are DB-only and do not rewrite `.env`;
+  packaged cold-boot and downgrade verification remain pending.
 - Core service and frontend API files have grown large and need separately approved refactoring.
 
 ## Task Workflow

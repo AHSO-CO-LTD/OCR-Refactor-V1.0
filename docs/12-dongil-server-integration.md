@@ -3,9 +3,9 @@
 Status: Implemented; connected-server verification remains environment
 dependent.
 
-Last source review: `2026-10-05`. Related architecture records:
+Last source review: `2026-10-06`. Related architecture records:
 [`adr/0005-dongil-durable-outbox.md`](adr/0005-dongil-durable-outbox.md) and
-[`plans/2026-09-09-dongil-history-sync.md`](plans/2026-09-09-dongil-history-sync.md).
+[`adr/0007-dongil-database-config-and-fixed-machine-type.md`](adr/0007-dongil-database-config-and-fixed-machine-type.md).
 
 ## Purpose
 
@@ -28,32 +28,49 @@ The current pilot does not read or evaluate `license.dat`. Local software-licens
 
 ## Configuration
 
-Development uses the repository `.env`. Packaged installations use:
+PostgreSQL `DongilSyncConfiguration` is the runtime authority for server URL,
+machine binding, registration state and server-assigned type. Packaged
+installations may still contain the legacy file:
 
 ```text
 C:\ProgramData\AHSO OCR\.env
 ```
 
-Required pilot values:
+Legacy values:
 
 ```dotenv
 DONGIL_SERVER_URL=http://<dongil-server-ip>:3979
 DONGIL_MACHINE_TYPE_CODE=WASHING_MACHINE
 ```
 
-Do not set `DONGIL_SERVER_URL` to `localhost` unless Dongil Server actually runs on the same PC. The installer preserves an existing Dongil URL during repair/reinstall.
+On first backend start after the configuration migration, a valid legacy
+`DONGIL_SERVER_URL` is imported only when the DB has no URL and the import marker
+has not been set. It is not read again as runtime authority. The legacy machine
+type value is ignored; this OCR client always uses `WASHING_MACHINE`.
 
 DEV/ADMIN can also open **Settings → General → Dongil Server** to:
 
 - enter only `<server-ip>`; Electron derives `http://<server-ip>:3979`;
-- test `/api/v1/health` without changing the saved value;
+- test `/api/v1/health` without changing the saved value; DEV/ADMIN receive
+  staged URL, health, registration, and machine-type diagnostics even when an
+  expected check fails;
 - save the server configuration without registering or connecting;
-- reset the server configuration, which disconnects immediately and clears the saved URL, local registration state, credential, and assignment cache while retaining pending outbox results and the last synchronized machine-information cache;
+- reset the server configuration, which disconnects immediately and clears the saved URL, registration/assignment cache, local credential, and synchronized machine-information row while retaining outbox and history data;
 - disconnect the current server without clearing its configuration; this disables automatic reconnection until a DEV/ADMIN explicitly connects again;
 - send a registration request, refresh its state immediately, and explicitly connect only after server approval;
 - view machine ID/type, connection state, runtime state, pending outbox count, last heartbeat and last error.
 
-The saved URL is written atomically to the same development or ProgramData `.env`. Machine ID, `WASHING_MACHINE` type and dongle license status are derived locally and remain visible before the server is configured or while it is offline. The renderer never receives the machine credential. All signed-in roles can see the status, but Electron re-validates an active DEV/ADMIN session before changing the URL.
+The saved URL is transactionally written to PostgreSQL with config audit.
+Machine ID, fixed `WASHING_MACHINE` type and dongle license status are derived
+locally and remain visible while offline. The server-assigned type is shown
+separately; any non-washing assignment blocks socket/outbox/history work. The
+renderer never receives the machine credential.
+
+Operator has `dongil.connection.view`, `dongil.connection.operate`,
+`dongil.history-sync.view`, and `dongil.history-sync.start` by default. Operator
+may refresh status/registration, reconnect saved approved configuration, view
+history progress and start a new run, but cannot edit/test/save/reset/register,
+disconnect, or manage an existing history run. Backend permissions are authoritative.
 
 ## Registration and credential
 
@@ -135,18 +152,20 @@ uploaded image -> ROI crop -> real OCR -> aggregate OK/NG
 
 This development path does not force an OK/NG verdict, does not pulse the PLC, and does not upload the image to Dongil Server. An `UNKNOWN` OCR outcome is shown locally and is not queued.
 
-On startup, legacy `BLOCKED_CONFIG` rows are returned to `PENDING` with their original `localResultId`, product identity, quantities, and inspection time. Server idempotency prevents duplicate results.
+On startup, interrupted `SENDING` rows return to `PENDING`. `BLOCKED_CONFIG`
+rows remain blocked until credential recovery or a relevant configuration
+change reopens them. Stable local IDs preserve server idempotency.
 
 Local tables:
 
 - `DongilSyncConfiguration`: non-secret identity/configuration state;
-- `DongilMachineInfo`: latest server-confirmed display name, activation state, and factory/line/station metadata for this local machine; it is retained across disconnect/reset and changes only when a later registration-status response differs;
+- `DongilMachineInfo`: latest server-confirmed display name, activation state, and factory/line/station metadata; disconnect retains it, while Reset clears it;
 - `DongilProductAssignment`: transition cache for legacy/future server configuration;
 - `DongilSyncOutbox`: immutable product identity, result payload, washing OK/NG counts and delivery state.
 
 ## Historical washing-result synchronization
 
-DEV/ADMIN can start **Đồng bộ lịch sử máy rửa** from the Dongil Server
+DEV/ADMIN and users with `dongil.history-sync.start` can start **Đồng bộ lịch sử máy rửa** from the Dongil Server
 settings panel once the machine is connected. The action creates an immutable
 local snapshot before any historical result is uploaded. It is intended for a
 machine that has accumulated local data while offline for a long period.
@@ -192,9 +211,9 @@ machine that has accumulated local data while offline for a long period.
 - The Processing screen shows batch/result progress, newly accepted, replayed
   and failed counts, the latest batch/retry/checkpoint and manual-review count.
   **Tiếp tục vận hành** only hides this screen; it does not pause the backend
-  worker. All signed-in operational roles with the view permission can see
-  progress. The manage permission is required to start, pause, resume or retry
-  failures.
+  worker. Roles with the view permission can see progress. Start has its own
+  permission; `dongil.history-sync.manage` is required only for pause, resume,
+  cancel, or retry failures.
 
 `DongilSyncWorkerLease` is a shared database lease: the normal outbox sender
 and historical sender cannot post batches concurrently for the same machine.
@@ -220,6 +239,10 @@ No local inspection data is deleted after server confirmation.
 Electron terminal logs use the `[dongil]` prefix and never include the credential. Local outbox error fields contain sanitized server error codes/messages. Important recovery states:
 
 - `REGISTRATION_PENDING`, `REGISTRATION_APPROVED`, `REGISTRATION_REJECTED`;
+- `MACHINE_TYPE_MISMATCH` blocks connection until Dongil Server assigns
+  `WASHING_MACHINE`;
+- `NEEDS_CREDENTIAL_RECOVERY` blocks automatic retry until a valid credential
+  is restored;
 - missing/lost credential for an already approved machine requires controlled recovery on Dongil Server; public registration never exposes the existing secret;
-- legacy `BLOCKED_CONFIG` rows are automatically requeued;
+- permanent/configuration failures remain `BLOCKED_CONFIG` until recovery;
 - `DONGIL_SERVER_UNAVAILABLE`.

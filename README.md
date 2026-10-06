@@ -32,7 +32,8 @@ The frontend never calls camera, OCR, PLC, PostgreSQL, or Dongil services direct
 
 ## Implemented Product Areas
 
-- JWT login and remembered-session dongle gate.
+- JWT login plus machine-bound remembered login using Electron `safeStorage`,
+  a PostgreSQL token hash, and a real-dongle restore gate.
 - Dynamic role permissions for `dev`, `admin`, `engineer`, and `operator`.
 - User and role-permission administration.
 - Product, AI, OCR variant, camera identity, camera, and ROI configuration.

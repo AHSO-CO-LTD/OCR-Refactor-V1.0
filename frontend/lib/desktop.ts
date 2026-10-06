@@ -1,5 +1,18 @@
 "use client";
 
+import type { DongilHistorySyncRun, SessionUser } from "@/lib/api";
+
+export type RememberedLoginStatus =
+  | "NO_REMEMBERED_LOGIN"
+  | "REMEMBER_LOCAL_TOKEN_INVALID"
+  | "REMEMBER_SECURE_STORAGE_UNAVAILABLE"
+  | "REMEMBER_TOKEN_INVALID"
+  | "REMEMBER_MACHINE_MISMATCH"
+  | "REMEMBER_ROLE_CHANGED"
+  | "REMEMBER_USER_INACTIVE"
+  | "REMEMBER_DONGLE_REQUIRED"
+  | "REMEMBER_RESTORED";
+
 export type DesktopWindowPreset =
   | "factory"
   | "hd"
@@ -129,6 +142,7 @@ export type DongilConnectionState =
   | "REGISTRATION_APPROVED"
   | "REGISTRATION_REJECTED"
   | "NEEDS_CREDENTIAL_RECOVERY"
+  | "MACHINE_TYPE_MISMATCH"
   | "CONNECTING"
   | "ONLINE"
   | "RETRYING"
@@ -142,6 +156,11 @@ export type DesktopDongilStatus = {
   machineId: string | null;
   machineTypeCode: string | null;
   assignedMachineTypeCode: string | null;
+  configVersion?: number;
+  configurationSource?:
+    | "DATABASE"
+    | "LEGACY_ENV_IMPORTED"
+    | "NOT_CONFIGURED";
   machineInfo: {
     displayName: string | null;
     isActive: boolean;
@@ -188,6 +207,28 @@ export type DesktopShutdownStageUpdate = {
 };
 
 export type DesktopBridge = {
+  getRememberedLoginCapability(): Promise<{
+    available: boolean;
+    hasLocalCredential: boolean;
+  }>;
+  enableRememberedLogin(
+    accessToken: string,
+  ): Promise<{ enabled: boolean }>;
+  restoreRememberedLogin(): Promise<{
+    data: {
+      status: RememberedLoginStatus;
+      accessToken?: string;
+      user?: SessionUser;
+    };
+  }>;
+  disableRememberedLogin(accessToken: string): Promise<{
+    disabled: boolean;
+    localCleanup: boolean;
+  }>;
+  logoutSession(accessToken: string): Promise<{
+    loggedOut: boolean;
+    localCleanup: boolean;
+  }>;
   applyWindowSettings(
     settings: Partial<DesktopWindowSettings>,
   ): Promise<DesktopWindowSettings>;
@@ -198,7 +239,9 @@ export type DesktopBridge = {
   getTestStorageSettings(): Promise<DesktopTestStorageSettings>;
   getTerminalLogs(): Promise<string[]>;
   getStartupSnapshot(): Promise<DesktopStartupSnapshot>;
-  getDongilStatus(): Promise<{ data?: DesktopDongilStatus }>;
+  getDongilStatus(
+    accessToken: string,
+  ): Promise<{ data?: DesktopDongilStatus }>;
   getUpdateRecovery(): Promise<DesktopUpdateRecoveryNotice | null>;
   getUpdateStatus(): Promise<DesktopUpdateState>;
   exportStartupLog(
@@ -216,9 +259,19 @@ export type DesktopBridge = {
     settings: DesktopTestStorageSettings,
   ): Promise<DesktopTestStorageSettings>;
   testDongilServer(
+    accessToken: string,
     serverIp: string,
   ): Promise<{
-    data?: { serverUrl?: string; reachable?: boolean; latencyMs?: number };
+    data?: {
+      serverUrl?: string;
+      reachable?: boolean;
+      latencyMs?: number;
+      stages?: Array<{
+        id: "URL_VALIDATION" | "SERVER_HEALTH" | "REGISTRATION" | "MACHINE_TYPE";
+        status: "PASSED" | "FAILED" | "SKIPPED";
+        code?: string;
+      }>;
+    };
   }>;
   saveDongilSettings(settings: {
     accessToken: string;
@@ -243,7 +296,7 @@ export type DesktopBridge = {
       assignedMachineTypeCode?: string;
     };
   }>;
-  refreshDongilRegistration(): Promise<{
+  refreshDongilRegistration(accessToken: string): Promise<{
     data?: {
       state?: DongilConnectionState;
       registrationStatus?: "PENDING" | "APPROVED" | "REJECTED";
@@ -253,6 +306,10 @@ export type DesktopBridge = {
   connectDongilServer(
     accessToken: string,
   ): Promise<{ data?: { state?: string; assignedMachineTypeCode?: string } }>;
+  startDongilHistorySync(accessToken: string): Promise<{
+    data?: DongilHistorySyncRun | null;
+    alreadyVerified?: boolean;
+  }>;
   selectFolder(): Promise<{ canceled: boolean; folderPath: string | null }>;
   selectModelFile(): Promise<{ canceled: boolean; filePath: string | null }>;
   onTerminalLog(callback: (message: string) => void): () => void;

@@ -4,21 +4,27 @@ import {
   dialog,
   ipcMain,
   Notification,
-  shell,
   type OpenDialogOptions,
   type WebContents,
 } from "electron";
 import { spawnSync } from "node:child_process";
-import { randomUUID } from "node:crypto";
+import { createHash } from "node:crypto";
 import {
+  copyFileSync,
   existsSync,
   readFileSync,
-  renameSync,
   unlinkSync,
   writeFileSync,
 } from "node:fs";
-import { join, resolve } from "node:path";
+import { basename, join, resolve } from "node:path";
 import { registerAutoUpdater } from "./auto-updater";
+import {
+  clearRememberedLogin,
+  getRememberedLoginCapability,
+  loadRememberedLogin,
+  saveRememberedLogin,
+} from "./auth/remembered-login-store";
+import { LOCAL_DONGIL_MACHINE_TYPE_CODE } from "./dongil-constants";
 import {
   getLocalMachineIdentity,
   type LocalMachineIdentity,
@@ -28,7 +34,12 @@ import {
   loadMachineCredential,
   saveMachineCredential,
 } from "./license/machine-credential-store";
-import { ServiceManager } from "./service-manager";
+import type { ServiceManager } from "./service-manager";
+import {
+  getRuntimeEnvValidationError,
+  parseRuntimeEnvFile,
+  shouldTreatBlankRuntimeEnvValueAsMissing,
+} from "./runtime-env";
 import { createStartupDocument } from "./startup-page";
 import { UpdateRecoveryManager } from "./update-recovery";
 import {
@@ -92,9 +103,7 @@ const terminalLogLimit = 1200;
 const terminalShortcutPresses = 5;
 const terminalShortcutWindowMs = 4_000;
 
-let rendererUrl =
-  process.env.ELECTRON_RENDERER_URL ??
-  `http://127.0.0.1:${process.env.FRONTEND_PORT ?? "3970"}/`;
+let rendererUrl = "about:blank";
 
 let mainWindow: BrowserWindow | null = null;
 let terminalWindow: BrowserWindow | null = null;
@@ -148,6 +157,10 @@ if (!hasSingleInstanceLock) {
 async function startDesktopApp() {
   const runtimeRoot = getRuntimeRoot();
   loadRuntimeEnv(runtimeRoot);
+  rendererUrl =
+    process.env.ELECTRON_RENDERER_URL ??
+    `http://127.0.0.1:${process.env.FRONTEND_PORT ?? "3970"}/`;
+  const { ServiceManager } = await import("./service-manager");
   serviceManager = new ServiceManager(runtimeRoot);
   updateRecoveryManager = new UpdateRecoveryManager({
     onLog: showTerminalLog,
@@ -252,7 +265,7 @@ function createMainWindow() {
   });
 
   window.webContents.setWindowOpenHandler(({ url }) => {
-    void shell.openExternal(url);
+    console.warn(`[security] blocked renderer window open: ${describeUrl(url)}`);
     return { action: "deny" };
   });
   bindTerminalShortcut(window);
@@ -290,6 +303,120 @@ function createMainWindow() {
 }
 
 function registerDesktopIpc() {
+  ipcMain.handle("desktop:get-remembered-login-capability", (event) => {
+    assertMainRendererSender(event.sender);
+    return getRememberedLoginCapability();
+  });
+  ipcMain.handle(
+    "desktop:enable-remembered-login",
+    async (event, accessToken: string) => {
+      assertMainRendererSender(event.sender);
+      if (!serviceManager)
+        throw new Error("Local service manager is unavailable.");
+      const identity = requireLocalMachineIdentity();
+      if (!getRememberedLoginCapability().available) {
+        throw new Error("Windows credential encryption is unavailable.");
+      }
+      const response = await serviceManager.enableRememberedLogin(
+        accessToken,
+        identity.machineId,
+      );
+      try {
+        saveRememberedLogin(response.data.token);
+      } catch (error) {
+        console.error(
+          "Remembered-login local persistence failed:",
+          errorMessage(error),
+        );
+        await serviceManager
+          .disableRememberedLogin(accessToken)
+          .catch((cleanupError) =>
+            console.error(
+              "Remembered-login compensating revoke failed:",
+              errorMessage(cleanupError),
+            ),
+          );
+        try {
+          clearRememberedLogin();
+        } catch (cleanupError) {
+          console.error(
+            "Remembered-login local cleanup failed:",
+            errorMessage(cleanupError),
+          );
+        }
+        throw error;
+      }
+      return { enabled: true };
+    },
+  );
+  ipcMain.handle("desktop:restore-remembered-login", async (event) => {
+    assertMainRendererSender(event.sender);
+    if (!serviceManager)
+      throw new Error("Local service manager is unavailable.");
+    const identity = requireLocalMachineIdentity();
+    const local = loadRememberedLogin();
+    if (local.status === "NO_REMEMBERED_LOGIN") {
+      return { data: { status: local.status } };
+    }
+    if (local.status === "REMEMBER_SECURE_STORAGE_UNAVAILABLE") {
+      return { data: { status: local.status } };
+    }
+    if (local.status === "REMEMBER_LOCAL_TOKEN_INVALID") {
+      await serviceManager.rejectInvalidLocalRememberedLogin();
+      clearRememberedLogin();
+      return { data: { status: local.status } };
+    }
+
+    const response = await serviceManager.restoreRememberedLogin(
+      local.token,
+      identity.machineId,
+    );
+    if (
+      response.data.status !== "REMEMBER_RESTORED" &&
+      response.data.status !== "REMEMBER_DONGLE_REQUIRED"
+    ) {
+      clearRememberedLogin();
+    }
+    if (
+      response.data.status === "REMEMBER_RESTORED" &&
+      (!response.data.accessToken || !response.data.user)
+    ) {
+      throw new Error("Remembered login returned an incomplete session.");
+    }
+    return response;
+  });
+  ipcMain.handle(
+    "desktop:disable-remembered-login",
+    async (event, accessToken: string) => {
+      assertMainRendererSender(event.sender);
+      if (!serviceManager)
+        throw new Error("Local service manager is unavailable.");
+      await serviceManager.disableRememberedLogin(accessToken);
+      try {
+        clearRememberedLogin();
+        return { disabled: true, localCleanup: true };
+      } catch (error) {
+        console.error("Remembered-login local cleanup failed:", error);
+        return { disabled: true, localCleanup: false };
+      }
+    },
+  );
+  ipcMain.handle(
+    "desktop:logout-session",
+    async (event, accessToken: string) => {
+      assertMainRendererSender(event.sender);
+      if (!serviceManager)
+        throw new Error("Local service manager is unavailable.");
+      await serviceManager.logoutSession(accessToken);
+      try {
+        clearRememberedLogin();
+        return { loggedOut: true, localCleanup: true };
+      } catch (error) {
+        console.error("Remembered-login local cleanup failed:", error);
+        return { loggedOut: true, localCleanup: false };
+      }
+    },
+  );
   ipcMain.handle(
     "desktop:get-test-storage-settings",
     () => testStorageSettings,
@@ -297,18 +424,31 @@ function registerDesktopIpc() {
   ipcMain.handle("desktop:get-window-settings", () => windowSettings);
   ipcMain.handle("desktop:get-terminal-logs", () => [...terminalLogs]);
   ipcMain.handle("desktop:get-startup-snapshot", () => getStartupSnapshot());
-  ipcMain.handle("desktop:get-dongil-status", async (event) => {
+  ipcMain.handle("desktop:get-dongil-status", async (event, accessToken: string) => {
     assertMainRendererSender(event.sender);
-    return getDongilStatusWithLocalIdentity();
+    return getDongilStatusWithLocalIdentity(accessToken);
   });
   ipcMain.handle(
     "desktop:test-dongil-server",
-    async (event, serverIp: string) => {
+    async (
+      event,
+      payload: { accessToken: string; serverIp: string },
+    ) => {
       assertMainRendererSender(event.sender);
       if (!serviceManager)
         throw new Error("Local service manager is unavailable.");
+      await serviceManager.assertDongilSettingsAccess(payload.accessToken);
+      const serverUrl = buildDongilServerUrl(payload.serverIp);
+      const identity = localMachineIdentity;
+      const credential = identity
+        ? loadMachineCredential(identity.machineId, serverUrl)
+        : null;
       return serviceManager.testDongilConnection(
-        buildDongilServerUrl(serverIp),
+        serverUrl,
+        payload.accessToken,
+        identity && credential
+          ? { machineId: identity.machineId, credential }
+          : undefined,
       );
     },
   );
@@ -321,12 +461,16 @@ function registerDesktopIpc() {
       await serviceManager.assertDongilSettingsAccess(payload.accessToken);
       const serverIp = normalizeDongilServerIp(payload.serverIp);
       const serverUrl = buildDongilServerUrl(serverIp);
-      persistRuntimeEnvValue("DONGIL_SERVER_URL", serverUrl);
-      process.env.DONGIL_SERVER_URL = serverUrl;
       const identity = requireLocalMachineIdentity();
-      await serviceManager.configureDongilSync(
+      const current = await serviceManager.getDongilSyncStatus();
+      const identityTargetChanged =
+        current.data?.serverUrl !== serverUrl ||
+        current.data?.machineId !== identity.machineId;
+      await serviceManager.saveDongilConfiguration(
         buildDongilPayload(identity, serverUrl),
+        payload.accessToken,
       );
+      if (identityTargetChanged) clearMachineCredential();
       return {
         serverIp,
         serverUrl,
@@ -340,11 +484,8 @@ function registerDesktopIpc() {
       assertMainRendererSender(event.sender);
       if (!serviceManager)
         throw new Error("Local service manager is unavailable.");
-      await serviceManager.assertDongilSettingsAccess(payload.accessToken);
-      await serviceManager.resetDongilSync();
+      await serviceManager.resetDongilSync(payload.accessToken);
       clearMachineCredential();
-      removeRuntimeEnvValue("DONGIL_SERVER_URL");
-      delete process.env.DONGIL_SERVER_URL;
       return { status: await getDongilStatusWithLocalIdentity() };
     },
   );
@@ -367,7 +508,7 @@ function registerDesktopIpc() {
         throw new Error("Local service manager is unavailable.");
       await serviceManager.assertDongilSettingsAccess(accessToken);
       const identity = requireLocalMachineIdentity();
-      const serverUrl = requireDongilServerUrl();
+      const serverUrl = await requireDongilServerUrl();
       const response = await serviceManager.requestDongilRegistration(
         buildDongilPayload(identity, serverUrl),
       );
@@ -386,28 +527,42 @@ function registerDesktopIpc() {
       };
     },
   );
-  ipcMain.handle("desktop:refresh-dongil-registration", async (event) => {
-    assertMainRendererSender(event.sender);
-    return refreshDongilRegistrationStatus();
-  });
+  ipcMain.handle(
+    "desktop:refresh-dongil-registration",
+    async (event, accessToken: string) => {
+      assertMainRendererSender(event.sender);
+      return refreshDongilRegistrationStatus(accessToken);
+    },
+  );
   ipcMain.handle(
     "desktop:connect-dongil-server",
     async (event, accessToken: string) => {
       assertMainRendererSender(event.sender);
       if (!serviceManager)
         throw new Error("Local service manager is unavailable.");
-      await serviceManager.assertDongilSettingsAccess(accessToken);
       const identity = requireLocalMachineIdentity();
-      const serverUrl = requireDongilServerUrl();
+      const serverUrl = await requireDongilServerUrl();
       const credential = loadMachineCredential(identity.machineId, serverUrl);
       if (!credential)
         throw new Error(
           "Send a registration request before connecting to Dongil Server.",
         );
-      return serviceManager.bootstrapDongilSync({
-        ...buildDongilPayload(identity, serverUrl),
-        credential,
-      });
+      return serviceManager.reconnectDongilSync(
+        {
+          ...buildDongilPayload(identity, serverUrl),
+          credential,
+        },
+        accessToken,
+      );
+    },
+  );
+  ipcMain.handle(
+    "desktop:start-dongil-history-sync",
+    async (event, accessToken: string) => {
+      assertMainRendererSender(event.sender);
+      if (!serviceManager)
+        throw new Error("Local service manager is unavailable.");
+      return serviceManager.startDongilHistorySync(accessToken);
     },
   );
   ipcMain.handle(
@@ -667,9 +822,11 @@ function refreshDongilLifecycle() {
   return dongilLifecyclePromise;
 }
 
-async function getDongilStatusWithLocalIdentity() {
+async function getDongilStatusWithLocalIdentity(accessToken?: string) {
   if (!serviceManager) throw new Error("Local service manager is unavailable.");
-  const response = await serviceManager.getDongilSyncStatus();
+  const response = accessToken
+    ? await serviceManager.getDongilSyncStatusForUser(accessToken)
+    : await serviceManager.getDongilSyncStatus();
   if (!response.data) return response;
 
   return {
@@ -678,10 +835,7 @@ async function getDongilStatusWithLocalIdentity() {
       ...response.data,
       machineId:
         localMachineIdentity?.machineId ?? response.data.machineId ?? null,
-      machineTypeCode:
-        process.env.DONGIL_MACHINE_TYPE_CODE?.trim() ||
-        response.data.machineTypeCode ||
-        "WASHING_MACHINE",
+      machineTypeCode: LOCAL_DONGIL_MACHINE_TYPE_CODE,
       licenseStatus:
         localMachineIdentity?.licenseStatus ??
         response.data.licenseStatus ??
@@ -694,12 +848,12 @@ async function performDongilLifecycleRefresh() {
   const identity = localMachineIdentity;
   if (!identity || !serviceManager || isQuitting) return;
 
-  const serverUrl = process.env.DONGIL_SERVER_URL?.trim().replace(/\/+$/, "");
+  let current = await serviceManager.getDongilSyncStatus();
+  const serverUrl = current.data?.serverUrl?.trim().replace(/\/+$/, "");
   if (!serverUrl) return;
 
   const credential = loadMachineCredential(identity.machineId, serverUrl);
   try {
-    let current = await serviceManager.getDongilSyncStatus();
     if (
       current.data?.serverUrl !== serverUrl ||
       current.data?.machineId !== identity.machineId
@@ -710,6 +864,12 @@ async function performDongilLifecycleRefresh() {
       current = await serviceManager.getDongilSyncStatus();
     }
     if (!credential) return;
+    if (
+      current.data?.state === "NEEDS_CREDENTIAL_RECOVERY" ||
+      current.data?.state === "MACHINE_TYPE_MISMATCH"
+    ) {
+      return;
+    }
     const shouldBootstrap =
       current.data?.autoConnectEnabled === true &&
       (current.data.state !== "ONLINE" || current.data.socketConnected !== true);
@@ -737,10 +897,10 @@ async function performDongilLifecycleRefresh() {
   }
 }
 
-async function refreshDongilRegistrationStatus() {
+async function refreshDongilRegistrationStatus(accessToken: string) {
   if (!serviceManager) throw new Error("Local service manager is unavailable.");
   const identity = requireLocalMachineIdentity();
-  const serverUrl = requireDongilServerUrl();
+  const serverUrl = await requireDongilServerUrl();
   const registrationToken = loadMachineCredential(
     identity.machineId,
     serverUrl,
@@ -749,11 +909,23 @@ async function refreshDongilRegistrationStatus() {
     throw new Error(
       "Send a registration request before refreshing its status.",
     );
-  return serviceManager.refreshDongilRegistration({
-    serverUrl,
-    machineId: identity.machineId,
-    registrationToken,
-  });
+  return serviceManager.refreshDongilRegistrationForUser(
+    {
+      serverUrl,
+      machineId: identity.machineId,
+      registrationToken,
+    },
+    accessToken,
+  );
+}
+
+function describeUrl(value: string) {
+  try {
+    const url = new URL(value);
+    return `${url.protocol}//${url.hostname}`;
+  } catch {
+    return "invalid-url";
+  }
 }
 
 function requireLocalMachineIdentity() {
@@ -762,8 +934,10 @@ function requireLocalMachineIdentity() {
   return localMachineIdentity;
 }
 
-function requireDongilServerUrl() {
-  const serverUrl = process.env.DONGIL_SERVER_URL?.trim().replace(/\/+$/, "");
+async function requireDongilServerUrl() {
+  if (!serviceManager) throw new Error("Local service manager is unavailable.");
+  const status = await serviceManager.getDongilSyncStatus();
+  const serverUrl = status.data?.serverUrl?.trim().replace(/\/+$/, "");
   if (!serverUrl) throw new Error("Save the Dongil Server IP first.");
   return serverUrl;
 }
@@ -772,8 +946,7 @@ function buildDongilPayload(identity: LocalMachineIdentity, serverUrl: string) {
   return {
     serverUrl,
     machineId: identity.machineId,
-    machineTypeCode:
-      process.env.DONGIL_MACHINE_TYPE_CODE?.trim() || "WASHING_MACHINE",
+    machineTypeCode: LOCAL_DONGIL_MACHINE_TYPE_CODE,
     licenseStatus: identity.licenseStatus,
     appVersion: app.getVersion(),
   };
@@ -885,12 +1058,51 @@ function loadRuntimeEnv(runtimeRoot: string) {
       continue;
     }
 
-    const env = parseEnvFile(envContent);
-
-    for (const [key, value] of Object.entries(env)) {
-      if (process.env[key] === undefined) {
-        process.env[key] = value;
+    if (app.isPackaged && envPath === join(getProgramDataRoot(), ".env")) {
+      try {
+        ensureInitialRuntimeEnvBackup(envPath, envContent);
+      } catch (error) {
+        console.warn(
+          `Could not create the downgrade recovery backup for ${envPath}:`,
+          error,
+        );
       }
+    }
+
+    const parsed = parseRuntimeEnvFile(envContent);
+
+    for (const key of parsed.duplicateKeys) {
+      console.warn(
+        `Runtime environment file contains duplicate key ${key}; the last value is used: ${envPath}`,
+      );
+    }
+
+    for (const issue of parsed.issues) {
+      const keyDetail = issue.key ? ` for key ${issue.key}` : "";
+      console.warn(
+        `Runtime environment ${issue.code}${keyDetail} at line ${issue.lineNumber}: ${envPath}`,
+      );
+    }
+
+    for (const [key, value] of Object.entries(parsed.values)) {
+      if (process.env[key] !== undefined) continue;
+
+      if (shouldTreatBlankRuntimeEnvValueAsMissing(key, value)) {
+        console.warn(
+          `Runtime environment key ${key} is blank and will not override lower-priority configuration: ${envPath}`,
+        );
+        continue;
+      }
+
+      const validationError = getRuntimeEnvValidationError(key, value);
+      if (validationError) {
+        console.warn(
+          `Runtime environment key ${key} ${validationError} and will be ignored: ${envPath}`,
+        );
+        continue;
+      }
+
+      process.env[key] = value;
     }
   }
 
@@ -938,30 +1150,6 @@ function createRuntimeEnvReadError(envPath: string, error: unknown) {
   );
 }
 
-function parseEnvFile(content: string) {
-  const result: Record<string, string> = {};
-
-  for (const line of content.split(/\r?\n/)) {
-    const trimmed = line.trim();
-
-    if (!trimmed || trimmed.startsWith("#")) {
-      continue;
-    }
-
-    const separatorIndex = trimmed.indexOf("=");
-
-    if (separatorIndex <= 0) {
-      continue;
-    }
-
-    const key = trimmed.slice(0, separatorIndex).trim();
-    const rawValue = trimmed.slice(separatorIndex + 1).trim();
-    result[key] = rawValue.replace(/^["']|["']$/g, "");
-  }
-
-  return result;
-}
-
 function normalizeDongilServerIp(value: string) {
   const normalized = value.trim();
   const octets = normalized.split(".");
@@ -981,72 +1169,56 @@ function buildDongilServerUrl(value: string) {
   return `http://${normalizeDongilServerIp(value)}:3979`;
 }
 
-function persistRuntimeEnvValue(key: string, value: string) {
-  if (/\r|\n/.test(value))
-    throw new Error("Environment value contains an invalid newline.");
-  const envPath = getMutableRuntimeEnvPath();
-  const content = readFileSync(envPath, "utf8");
-  const escapedKey = key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const linePattern = new RegExp(`^\\s*${escapedKey}\\s*=.*$`, "m");
-  const nextLine = `${key}=${value}`;
-  const nextContent = linePattern.test(content)
-    ? content.replace(linePattern, nextLine)
-    : `${content.replace(/\s*$/, "")}\r\n${nextLine}\r\n`;
-  const temporaryPath = `${envPath}.${randomUUID()}.tmp`;
+function ensureInitialRuntimeEnvBackup(envPath: string, content: string) {
+  const backupPath = `${envPath}.before-normalization.bak`;
+  const checksumPath = `${backupPath}.sha256`;
+  if (existsSync(backupPath)) return;
+
   try {
-    writeFileSync(temporaryPath, nextContent, {
+    copyFileSync(envPath, backupPath);
+    protectProgramDataRuntimeFile(backupPath);
+    const checksum = createHash("sha256")
+      .update(content, "utf8")
+      .digest("hex");
+    writeFileSync(checksumPath, `${checksum}  ${basename(backupPath)}\r\n`, {
       encoding: "utf8",
       flush: true,
     });
-    renameSync(temporaryPath, envPath);
+    protectProgramDataRuntimeFile(checksumPath);
   } catch (error) {
     try {
-      if (existsSync(temporaryPath)) unlinkSync(temporaryPath);
-    } catch {
-      // Preserve the original write error; stale temporary files are non-authoritative.
+      if (existsSync(checksumPath)) unlinkSync(checksumPath);
+      if (existsSync(backupPath)) unlinkSync(backupPath);
+    } catch (cleanupError) {
+      console.error("Runtime environment backup cleanup failed:", cleanupError);
     }
     throw error;
   }
 }
 
-function removeRuntimeEnvValue(key: string) {
-  const envPath = getMutableRuntimeEnvPath();
-  const content = readFileSync(envPath, "utf8");
-  const escapedKey = key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const linePattern = new RegExp(`^\\s*${escapedKey}\\s*=.*(?:\\r?\\n|$)`, "gm");
-  const nextContent = content.replace(linePattern, "");
-  const temporaryPath = `${envPath}.${randomUUID()}.tmp`;
-  try {
-    writeFileSync(temporaryPath, nextContent, {
+function protectProgramDataRuntimeFile(filePath: string) {
+  if (!app.isPackaged || process.platform !== "win32") return;
+
+  const result = spawnSync(
+    "icacls.exe",
+    [
+      filePath,
+      "/inheritance:r",
+      "/grant:r",
+      "*S-1-5-32-544:F",
+      "*S-1-5-18:F",
+      "*S-1-5-11:R",
+    ],
+    {
       encoding: "utf8",
-      flush: true,
-    });
-    renameSync(temporaryPath, envPath);
-  } catch (error) {
-    try {
-      if (existsSync(temporaryPath)) unlinkSync(temporaryPath);
-    } catch {
-      // Preserve the original write error; stale temporary files are non-authoritative.
-    }
-    throw error;
-  }
-}
-
-function getMutableRuntimeEnvPath() {
-  if (app.isPackaged) return join(getProgramDataRoot(), ".env");
-
-  const runtimeRoot = getRuntimeRoot();
-  const candidates = [
-    join(runtimeRoot, ".env"),
-    join(runtimeRoot, "backend", ".env"),
-  ];
-  const envPath = candidates.find((candidate) => existsSync(candidate));
-  if (!envPath) {
+      windowsHide: true,
+    },
+  );
+  if (result.status !== 0) {
     throw new Error(
-      `Runtime environment file was not found: ${candidates.join(", ")}`,
+      `Could not apply the required ACL to runtime configuration file: ${filePath}`,
     );
   }
-  return envPath;
 }
 
 function assertMainRendererSender(sender: WebContents) {

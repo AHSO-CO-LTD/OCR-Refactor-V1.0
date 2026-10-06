@@ -1,6 +1,21 @@
 import { contextBridge, ipcRenderer } from "electron";
 
 contextBridge.exposeInMainWorld("ocrDesktop", {
+  getRememberedLoginCapability() {
+    return ipcRenderer.invoke("desktop:get-remembered-login-capability");
+  },
+  enableRememberedLogin(accessToken: string) {
+    return ipcRenderer.invoke("desktop:enable-remembered-login", accessToken);
+  },
+  restoreRememberedLogin() {
+    return ipcRenderer.invoke("desktop:restore-remembered-login");
+  },
+  disableRememberedLogin(accessToken: string) {
+    return ipcRenderer.invoke("desktop:disable-remembered-login", accessToken);
+  },
+  logoutSession(accessToken: string) {
+    return ipcRenderer.invoke("desktop:logout-session", accessToken);
+  },
   applyWindowSettings(settings: Record<string, unknown>) {
     return ipcRenderer.invoke("desktop:apply-window-settings", settings);
   },
@@ -40,11 +55,14 @@ contextBridge.exposeInMainWorld("ocrDesktop", {
   getStartupSnapshot() {
     return ipcRenderer.invoke("desktop:get-startup-snapshot");
   },
-  getDongilStatus() {
-    return ipcRenderer.invoke("desktop:get-dongil-status");
+  getDongilStatus(accessToken: string) {
+    return ipcRenderer.invoke("desktop:get-dongil-status", accessToken);
   },
-  testDongilServer(serverIp: string) {
-    return ipcRenderer.invoke("desktop:test-dongil-server", serverIp);
+  testDongilServer(accessToken: string, serverIp: string) {
+    return ipcRenderer.invoke("desktop:test-dongil-server", {
+      accessToken,
+      serverIp,
+    });
   },
   saveDongilSettings(settings: { accessToken: string; serverIp: string }) {
     return ipcRenderer.invoke("desktop:save-dongil-settings", settings);
@@ -61,11 +79,17 @@ contextBridge.exposeInMainWorld("ocrDesktop", {
       accessToken,
     );
   },
-  refreshDongilRegistration() {
-    return ipcRenderer.invoke("desktop:refresh-dongil-registration");
+  refreshDongilRegistration(accessToken: string) {
+    return ipcRenderer.invoke(
+      "desktop:refresh-dongil-registration",
+      accessToken,
+    );
   },
   connectDongilServer(accessToken: string) {
     return ipcRenderer.invoke("desktop:connect-dongil-server", accessToken);
+  },
+  startDongilHistorySync(accessToken: string) {
+    return ipcRenderer.invoke("desktop:start-dongil-history-sync", accessToken);
   },
   exportStartupLog(context?: Record<string, unknown>) {
     return ipcRenderer.invoke("desktop:export-startup-log", context);

@@ -1,6 +1,6 @@
 # Project Profile
 
-Last source review: 2026-10-05
+Last source review: 2026-10-06
 Source baseline: `v1.4.0` tree on branch `remote`
 
 ## Project
@@ -51,7 +51,7 @@ yet the authoritative contract package. Current frontend API types remain in
 - PostgreSQL is the durable source of truth.
 - Schema: `backend/prisma/schema.prisma`.
 - Migration history: `backend/prisma/migrations/`.
-- Current schema contains 28 models and 13 enums.
+- Current schema contains 29 models and 13 enums.
 - Electron runs `prisma migrate deploy` before starting the backend unless
   `BACKEND_AUTO_MIGRATE=false`.
 - Installer bootstrap creates or reuses a selected PostgreSQL database and runs
@@ -69,10 +69,21 @@ See [docs/14-database.md](docs/14-database.md).
 - `dev` bypasses ordinary permission checks and is hidden from non-dev management flows.
 - Only `dev` can view or manage protected `admin`/`dev` role permissions.
 - Backend guards are authoritative; frontend menu filtering is only a UX layer.
-- Remembered sessions require a real dongle result; dongle mock mode cannot restore them.
+- Remembered login is available to all four active roles. Electron stores the
+  opaque token with Windows `safeStorage`; PostgreSQL stores only its SHA-256
+  hash and machine/user binding. Restore requires real `DONGLE_OK` and issues a
+  fresh current-session JWT.
+- Access JWT and user state live in renderer `sessionStorage`; legacy remembered
+  JWT keys in `localStorage` are removed and are never used for restore.
+- Current source creates a local PostgreSQL `AuthSession` for each password or
+  remembered login and places its ID in JWT `sid`. HTTP guards and camera
+  WebSocket authorization reject revoked/inactive sessions. Source validation,
+  migration execution and packaged acceptance are still pending.
 
-Known gaps include missing server-side session revocation, JWT expiry policy,
-login rate limiting, enforced failed-attempt lockout, and mutation audit writes.
+JWT expiry remains intentionally unset under the accepted no-inactivity-timeout
+policy. Login rate limiting and enforced failed-attempt lockout are deferred;
+audit coverage remains incomplete outside the newly covered auth, user and role
+permission mutations.
 See [docs/15-security.md](docs/15-security.md).
 
 ## UI
@@ -104,6 +115,10 @@ See [docs/13-plc-runtime.md](docs/13-plc-runtime.md).
 
 - Machine identity is derived locally after a valid physical dongle check.
 - Registration requires explicit server approval and stores the machine credential locally.
+- PostgreSQL `DongilSyncConfiguration` is authoritative for the server URL.
+  ProgramData `.env` is imported once only for legacy compatibility.
+- Local machine type is fixed to `WASHING_MACHINE`; a different server assignment
+  blocks connection and delivery rather than overwriting the local type.
 - Presence and heartbeat use Socket.IO; production results use REST outbox delivery.
 - Durable historical synchronization snapshots, retries, delivery dispositions,
   counter reconciliation, and result-ID reconciliation are implemented.
@@ -159,7 +174,9 @@ factory-LAN address. Port ownership must always be checked before starting a loc
 - NestJS uses framework loggers for runtime diagnostics.
 - License checks persist `LicenseLog` records.
 - Dongil delivery and history reconciliation persist durable status and errors.
-- `AuditLog` exists in the schema, but current mutation paths do not yet provide complete audit coverage.
+- `AuditLog` covers remembered-login lifecycle, Dongil configuration,
+  reconnect, and history-start changes. Other mutation domains still do not
+  provide complete audit coverage.
 
 See [docs/17-logging-and-diagnostics.md](docs/17-logging-and-diagnostics.md).
 
@@ -176,6 +193,33 @@ See [docs/17-logging-and-diagnostics.md](docs/17-logging-and-diagnostics.md).
 
 ## Current Verification Status
 
-The `v1.4.0` source and installer publication have historical evidence. The
-current documentation refresh does not run builds, tests, migrations, installer
-acceptance, or live dongle, camera, PLC, PostgreSQL, updater, and Dongil checks.
+The `v1.4.0` source and installer publication have historical evidence. Phase
+9A on 2026-10-06 generated Prisma Client, passed 66 targeted backend tests, both
+env/bootstrap harnesses, all three workspace typechecks, and all three
+production builds. Phase 9B applied all 48 migrations to a backed-up isolated
+PostgreSQL 18.4 database and passed six guarded DB integration tests covering
+remembered login, revocation, operator permissions, fixed machine type and
+Dongil idempotency. Phase 9C then ran the backend and frontend against that
+isolated database: health passed, the physical dongle returned `DONGLE_OK`,
+admin/operator remembered-session restore and opt-out passed, operator Dongil
+read permissions passed, fixed type remained `WASHING_MACHINE`, and browser
+layout had no horizontal overflow at 1280 x 1024. The database was restored from
+its verified pre-runtime backup and all started services were stopped. A later
+non-elevated Electron harness also verified current-user ACL recovery,
+`safeStorage` token round-trip and artifact cleanup without starting the normal
+desktop hardware flow. The configured workstation database was checked
+read-only during Phase 9B and was not migrated by that test. A later read-only
+`prisma migrate status` audit on 2026-10-06 found all 48 migrations applied and
+the workstation `ocrahso` schema up to date; the audit did not apply migrations
+or establish when or by whom they were deployed.
+The user subsequently reported successful manual acceptance on the development
+Electron source runtime: real remembered-login opt-in survived application
+restart and a full Windows cold boot, operator Dongil controls respected the
+approved allow/deny boundary, temporary LAN loss recovered with outbox replay,
+and the reviewed runtime logs did not expose passwords, JWTs, remember tokens,
+or machine credentials. This evidence is user-reported rather than
+agent-captured and does not cover the packaged installer.
+Changed source files pass non-fixing ESLint; full frontend and backend lint
+remain blocked by documented baseline issues outside this change set. No seed,
+installer acceptance, camera, PLC, updater, packaged cold boot, or
+production-data migration pilot has been performed for this change.

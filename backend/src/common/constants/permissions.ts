@@ -17,7 +17,10 @@ export const PERMISSIONS = {
   SYSTEM_SHUTDOWN: 'system.shutdown',
   SYSTEM_DEBUG: 'system.debug',
   LICENSE_VIEW: 'license.view',
+  DONGIL_CONNECTION_VIEW: 'dongil.connection.view',
+  DONGIL_CONNECTION_OPERATE: 'dongil.connection.operate',
   DONGIL_HISTORY_SYNC_VIEW: 'dongil.history-sync.view',
+  DONGIL_HISTORY_SYNC_START: 'dongil.history-sync.start',
   DONGIL_HISTORY_SYNC_MANAGE: 'dongil.history-sync.manage',
 } as const;
 

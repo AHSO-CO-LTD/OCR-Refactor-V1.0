@@ -1,6 +1,9 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../database/prisma.service';
-import { DongleCheckerService } from './dongle-checker.service';
+import {
+  DongleCheckCoordinatorService,
+  type DongleFailureKind,
+} from './dongle-check-coordinator.service';
 
 type ResolvedLicenseState = {
   status: 'licensed' | 'unlicensed' | 'unknown';
@@ -9,6 +12,7 @@ type ResolvedLicenseState = {
   lastCheckedAt: string | null;
   code: string | null;
   message: string | null;
+  failureKind: DongleFailureKind | null;
 };
 
 type LicenseCheckOptions = {
@@ -19,20 +23,27 @@ type LicenseCheckOptions = {
 export class SystemService {
   constructor(
     private readonly prisma: PrismaService,
-    private readonly dongleChecker: DongleCheckerService,
+    private readonly dongleChecks: DongleCheckCoordinatorService,
   ) {}
 
   async checkLicenseStatus(options: LicenseCheckOptions = {}) {
     const persist = options.persist ?? true;
-    const check = await this.dongleChecker.check();
-    const status = check.ok ? 'licensed' : 'unlicensed';
+    const check = await this.dongleChecks.check();
+    const definitiveFailure =
+      check.failureKind === 'NOT_FOUND' || check.failureKind === 'INVALID';
+    const status = check.ok
+      ? 'licensed'
+      : definitiveFailure
+        ? 'unlicensed'
+        : 'unknown';
+    const persistedCode = normalizeDongleCode(check);
     const checkedAt = new Date();
 
     if (persist) {
       await this.prisma.licenseLog.create({
         data: {
           status,
-          code: check.code,
+          code: persistedCode,
           message: check.message,
         },
       });
@@ -41,11 +52,18 @@ export class SystemService {
     return {
       data: {
         status,
-        licensed: check.ok,
-        donglePresent: check.ok,
+        licensed: check.ok ? true : definitiveFailure ? false : null,
+        donglePresent: check.ok
+          ? true
+          : check.failureKind === 'NOT_FOUND'
+            ? false
+            : check.failureKind === 'INVALID'
+              ? true
+              : null,
         lastCheckedAt: checkedAt.toISOString(),
-        code: check.code,
+        code: persistedCode,
         message: check.message,
+        failureKind: check.failureKind,
       },
     };
   }
@@ -84,6 +102,7 @@ export class SystemService {
           lastCheckedAt: null,
           code: null,
           message: null,
+          failureKind: null,
         },
       };
     }
@@ -107,6 +126,26 @@ export class SystemService {
     code?: string | null,
     message?: string | null,
   ): ResolvedLicenseState {
+    const failureKind = resolvePersistedFailureKind(code);
+    if (failureKind) {
+      const definitive =
+        failureKind === 'NOT_FOUND' || failureKind === 'INVALID';
+      return {
+        status: definitive ? 'unlicensed' : 'unknown',
+        licensed: definitive ? false : null,
+        donglePresent:
+          failureKind === 'NOT_FOUND'
+            ? false
+            : failureKind === 'INVALID'
+              ? true
+              : null,
+        lastCheckedAt: null,
+        code: code ?? null,
+        message: message ?? null,
+        failureKind,
+      };
+    }
+
     const normalizedText = [status, code, message]
       .filter((value): value is string => Boolean(value))
       .join(' ')
@@ -127,6 +166,7 @@ export class SystemService {
       lastCheckedAt: null,
       code: code ?? null,
       message: message ?? null,
+      failureKind: null,
     };
   }
 
@@ -207,4 +247,25 @@ export class SystemService {
   private containsAny(text: string, candidates: string[]) {
     return candidates.some((candidate) => text.includes(candidate));
   }
+}
+
+function normalizeDongleCode(check: {
+  code: string;
+  failureKind: DongleFailureKind | null;
+}) {
+  if (!check.failureKind) return check.code;
+  return `DONGLE_${check.failureKind}`;
+}
+
+function resolvePersistedFailureKind(
+  code?: string | null,
+): DongleFailureKind | null {
+  const normalized = code?.replace(/^DONGLE_/, '');
+  return normalized === 'NOT_FOUND' ||
+    normalized === 'INVALID' ||
+    normalized === 'TIMEOUT' ||
+    normalized === 'HELPER_ERROR' ||
+    normalized === 'TRANSIENT_BUSY'
+    ? normalized
+    : null;
 }

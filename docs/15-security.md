@@ -18,17 +18,35 @@ configuration, and update handling are privileged security boundaries.
 
 - Passwords are stored as bcrypt hashes with cost 12.
 - Login checks account activity and the physical or explicitly mocked dongle state.
-- Remembered-session restore accepts only the real `DONGLE_OK` result.
-- JWT payloads contain user ID, username, and role; current permission checks
-  reload the user and effective permissions from PostgreSQL.
-- Inactive or deleted users are rejected by guarded permission endpoints.
+- Remembered restore accepts only real `DONGLE_OK`, validates machine binding,
+  compares an opaque token hash, reloads account state/permissions, and issues a
+  fresh JWT. Raw remember tokens exist only in Electron Windows `safeStorage`.
+- The local encrypted remember file ACL is limited to the current Windows user
+  SID, local Administrators and SYSTEM. Electron can repair and remove stale
+  application-owned `.tmp`/`.bak` files created by the earlier admin-only ACL.
+- JWT payloads contain user ID, username, role and local session `sid`; guards
+  require the corresponding `AuthSession` to remain active and reload current
+  user state from PostgreSQL.
+- Inactive, deleted or revoked sessions are rejected by guarded HTTP endpoints
+  and camera WebSocket authorization.
 
 Current limitations:
 
-- JWTs do not have a documented expiry or server-side revocation record.
-- Logout clears application-owned browser storage but has no backend token revocation endpoint.
+- JWT expiry is intentionally unset under the accepted no-inactivity-timeout
+  policy; validity is controlled by the local session record instead.
+- Source now implements server-side logout revocation through JWT plus the
+  per-process desktop token before Electron deletes its encrypted file and the
+  renderer session. Migration/source/package verification remains pending.
 - Failed attempts are counted but do not currently enforce a lock threshold.
 - Login rate limiting is not implemented.
+
+The approved next security plan is documented in
+[plans/2026-10-06-local-auth-session-and-runtime-security.md](plans/2026-10-06-local-auth-session-and-runtime-security.md)
+and ADR 0009. It introduces revocable sessions only in the OCR-local backend and
+database; source implementation is complete but verification is pending. It
+must not change the external Dongil Server. Account lockout and
+login rate limiting are explicitly deferred; the rejected five-attempt,
+60-second policy must not be implemented or silently replaced.
 
 ## Authorization
 
@@ -40,6 +58,9 @@ Current limitations:
   `admin` session through the backend.
 - Electron-to-backend internal PLC and Dongil endpoints require a random
   per-process internal token.
+- Remembered-login enable/disable requires both bearer JWT and the internal
+  token; restore requires the internal token plus Electron-held opaque token and
+  machine identity.
 
 Some authenticated endpoints intentionally have no fine-grained permission
 decorator. Their business authorization must be reviewed whenever the endpoint
@@ -54,14 +75,15 @@ contract changes.
 - Sensitive Dongil IPC handlers verify the sender is the main renderer.
 - Main and terminal windows use the same restricted preload bridge.
 
-Open external URL handling currently delegates renderer-requested URLs to the
-operating system without an explicit allowlist. Any future external-link feature
-must validate scheme and destination before opening it.
+Renderer-requested new windows are denied. No current product feature needs
+`shell.openExternal`; any future external-link feature requires an explicit
+scheme and destination allowlist before opening it.
 
 ## Local Network Exposure
 
 - Electron calls backend and Tool through loopback URLs.
-- NestJS does not currently specify a loopback-only bind host.
+- NestJS source binds explicitly to `127.0.0.1`; runtime/package verification is
+  still pending.
 - `tool/config.json` currently binds Device Tool to `0.0.0.0`.
 - Device Tool camera and PLC endpoints do not implement application JWT authorization.
 
@@ -75,6 +97,8 @@ untrusted LAN clients cannot invoke privileged Device Tool operations.
   runtime contents, and build artifacts are ignored by Git.
 - Packaged configuration lives under `C:\ProgramData\AHSO OCR`.
 - Machine registration credentials are stored by Electron, not exposed as normal UI data.
+- Remember token hashes are stored in PostgreSQL; raw tokens and long-lived JWTs
+  are not stored there or in renderer localStorage.
 - Logs must not include passwords, JWTs, database passwords, machine credentials,
   private keys, or dongle secrets.
 - Original license source and binaries are protected and must not be modified
@@ -94,9 +118,11 @@ Application documentation or integration changes must not alter those sources by
 
 ## Audit
 
-`AuditLog` exists in Prisma, but the current user, permission, role, product,
-PLC, and settings mutation paths do not provide complete audit writes. This is
-an implementation gap, especially for privileged configuration and permission changes.
+`AuditLog` records session creation/revocation, remembered-login
+enable/disable/restore/rejection, user create/update/delete, role permission
+replacement, Dongil configuration migration/update/reset, reconnect, and
+history start. Product, PLC and other settings paths still do not provide
+complete audit coverage.
 
 ## Update Security
 
@@ -111,8 +137,9 @@ an implementation gap, especially for privileged configuration and permission ch
 
 Before production acceptance, verify:
 
-- Tool and backend network binding/firewall policy.
-- JWT expiry, logout, revocation, lockout, and rate limiting requirements.
+- Tool firewall policy and packaged backend loopback binding.
+- Local session migration, logout/revocation, and the explicitly deferred
+  lockout/rate-limiting requirements.
 - IPC sender validation and external URL allowlisting.
 - Audit coverage for privileged changes.
 - Update artifact trust and backup integrity on the target workstation.

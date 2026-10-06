@@ -9,9 +9,14 @@ are protected and are not modified by ordinary application work.
 ## Current Integration
 
 - Backend `DongleCheckerService` invokes the native helper when available.
+- Application `DongleCheckCoordinatorService` shares one in-flight native check
+  among startup, login, watchdog, and remembered restore callers.
 - Development may use the Python helper only outside production or when explicitly allowed.
 - The helper receives the configured DLL path, retry count, retry interval, and timeout.
 - Backend normalizes the result into `DONGLE_OK`, mock, missing DLL/helper, return-code, or execution-error states.
+- Application failures are classified as `NOT_FOUND`, `INVALID`, `TIMEOUT`,
+  `HELPER_ERROR`, or `TRANSIENT_BUSY`. Timeout, busy, and helper errors are
+  unknown/recoverable states rather than proof that the dongle was removed.
 - Persisted checks create `LicenseLog` records without storing dongle secrets.
 
 ## Startup Contract
@@ -26,6 +31,7 @@ are protected and are not modified by ordinary application work.
 - Manual login requires the ordinary license gate.
 - Development dongle mock mode may pass manual login.
 - Remembered-session restore requires physical `DONGLE_OK`; mock mode is rejected.
+- Recoverable check failures do not delete the remembered credential.
 - Authenticated license status can be refreshed through backend.
 
 ## Configuration
@@ -48,6 +54,7 @@ Never commit real secrets or machine-specific protected values.
 - Periodic full-runtime dongle removal protection is not documented as a complete production acceptance result.
 - Source and historical release evidence do not prove behavior with the target physical dongle.
 - Dongle error messages must remain useful without exposing key material or SDK internals.
+- Target-machine verification of coordinator timing and native process count is pending.
 
 ## Acceptance
 

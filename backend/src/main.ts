@@ -60,7 +60,7 @@ async function bootstrap() {
   SwaggerModule.setup('api/docs', app, swaggerDocument);
 
   const port = readPortEnv('BACKEND_PORT', 3980);
-  await app.listen(port);
+  await app.listen(port, '127.0.0.1');
   app.get(CameraStreamGateway).attach(app.getHttpServer());
 }
 bootstrap().catch((error) => {

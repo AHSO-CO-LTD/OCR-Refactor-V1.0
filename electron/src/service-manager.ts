@@ -41,7 +41,8 @@ export type DongilSyncBootstrapResult = {
       | "REGISTRATION_APPROVED"
       | "REGISTRATION_REJECTED"
       | "UNAUTHORIZED"
-      | "NEEDS_CREDENTIAL_RECOVERY";
+      | "NEEDS_CREDENTIAL_RECOVERY"
+      | "MACHINE_TYPE_MISMATCH";
   };
 };
 
@@ -53,6 +54,7 @@ export type DongilSyncStatusResult = {
       | "REGISTRATION_APPROVED"
       | "REGISTRATION_REJECTED"
       | "NEEDS_CREDENTIAL_RECOVERY"
+      | "MACHINE_TYPE_MISMATCH"
       | "CONNECTING"
       | "ONLINE"
       | "RETRYING"
@@ -63,6 +65,11 @@ export type DongilSyncStatusResult = {
     machineId?: string | null;
     machineTypeCode?: string | null;
     assignedMachineTypeCode?: string | null;
+    configVersion?: number;
+    configurationSource?:
+      | "DATABASE"
+      | "LEGACY_ENV_IMPORTED"
+      | "NOT_CONFIGURED";
     machineInfo?: {
       displayName?: string | null;
       isActive?: boolean;
@@ -90,7 +97,45 @@ export type DongilSyncStatusResult = {
 };
 
 export type DongilConnectionTestResult = {
-  data?: { serverUrl?: string; reachable?: boolean; latencyMs?: number };
+  data?: {
+    serverUrl?: string;
+    reachable?: boolean;
+    latencyMs?: number;
+    stages?: Array<{
+      id: "URL_VALIDATION" | "SERVER_HEALTH" | "REGISTRATION" | "MACHINE_TYPE";
+      status: "PASSED" | "FAILED" | "SKIPPED";
+      code?: string;
+    }>;
+  };
+};
+
+export type DongilHistorySyncStartResult = {
+  data?: unknown;
+  alreadyVerified?: boolean;
+};
+
+export type RememberedLoginUser = {
+  id: string;
+  username: string;
+  fullName: string;
+  role: "dev" | "admin" | "engineer" | "operator";
+  permissions: string[];
+  isDev: boolean;
+};
+
+export type RememberedLoginRestoreResult = {
+  data: {
+    status:
+      | "NO_REMEMBERED_LOGIN"
+      | "REMEMBER_TOKEN_INVALID"
+      | "REMEMBER_MACHINE_MISMATCH"
+      | "REMEMBER_ROLE_CHANGED"
+      | "REMEMBER_USER_INACTIVE"
+      | "REMEMBER_DONGLE_REQUIRED"
+      | "REMEMBER_RESTORED";
+    accessToken?: string;
+    user?: RememberedLoginUser;
+  };
 };
 
 type LocalServiceDefinition = {
@@ -397,14 +442,142 @@ export class ServiceManager {
     return (await response.json()) as DongilSyncBootstrapResult;
   }
 
+  async enableRememberedLogin(accessToken: string, machineId: string) {
+    const response = await fetch(
+      `http://127.0.0.1:${this.getServicePort("backend")}/api/internal/auth/remembered-login/enable`,
+      {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${accessToken}`,
+          "content-type": "application/json",
+          "x-desktop-internal-token": this.desktopInternalToken,
+        },
+        body: JSON.stringify({ machineId }),
+        signal: AbortSignal.timeout(20_000),
+      },
+    );
+    if (!response.ok) {
+      throw new Error(
+        (await response.text()) ||
+          `Remembered login enable failed (${response.status})`,
+      );
+    }
+    return (await response.json()) as {
+      data: { enabled: true; token: string };
+    };
+  }
+
+  async restoreRememberedLogin(
+    token: string,
+    machineId: string,
+  ): Promise<RememberedLoginRestoreResult> {
+    const response = await fetch(
+      `http://127.0.0.1:${this.getServicePort("backend")}/api/internal/auth/remembered-login/restore`,
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-desktop-internal-token": this.desktopInternalToken,
+        },
+        body: JSON.stringify({ token, machineId }),
+        signal: AbortSignal.timeout(20_000),
+      },
+    );
+    if (!response.ok) {
+      throw new Error(
+        (await response.text()) ||
+          `Remembered login restore failed (${response.status})`,
+      );
+    }
+    return (await response.json()) as RememberedLoginRestoreResult;
+  }
+
+  async disableRememberedLogin(accessToken: string) {
+    const response = await fetch(
+      `http://127.0.0.1:${this.getServicePort("backend")}/api/internal/auth/remembered-login`,
+      {
+        method: "DELETE",
+        headers: {
+          authorization: `Bearer ${accessToken}`,
+          "x-desktop-internal-token": this.desktopInternalToken,
+        },
+        signal: AbortSignal.timeout(10_000),
+      },
+    );
+    if (!response.ok) {
+      throw new Error(
+        (await response.text()) ||
+          `Remembered login disable failed (${response.status})`,
+      );
+    }
+  }
+
+  async logoutSession(accessToken: string) {
+    const response = await fetch(
+      `http://127.0.0.1:${this.getServicePort("backend")}/api/internal/auth/remembered-login/logout`,
+      {
+        method: "DELETE",
+        headers: {
+          authorization: `Bearer ${accessToken}`,
+          "x-desktop-internal-token": this.desktopInternalToken,
+        },
+        signal: AbortSignal.timeout(10_000),
+      },
+    );
+    if (response.status === 401) {
+      return { data: { loggedOut: true, alreadyInvalid: true } };
+    }
+    if (!response.ok) {
+      throw new Error(
+        (await response.text()) || `Logout failed (${response.status})`,
+      );
+    }
+    return (await response.json()) as {
+      data: { loggedOut: true; alreadyInvalid?: boolean };
+    };
+  }
+
+  async rejectInvalidLocalRememberedLogin() {
+    const response = await fetch(
+      `http://127.0.0.1:${this.getServicePort("backend")}/api/internal/auth/remembered-login/local-invalid`,
+      {
+        method: "DELETE",
+        headers: {
+          "x-desktop-internal-token": this.desktopInternalToken,
+        },
+        signal: AbortSignal.timeout(10_000),
+      },
+    );
+    if (!response.ok) {
+      throw new Error(
+        (await response.text()) ||
+          `Invalid remembered login cleanup failed (${response.status})`,
+      );
+    }
+  }
+
+  async reconnectDongilSync(
+    payload: DongilSyncBootstrapPayload,
+    accessToken: string,
+  ): Promise<DongilSyncBootstrapResult> {
+    return this.postDongilRuntime("reconnect", payload, accessToken);
+  }
+
   async configureDongilSync(
     payload: DongilSyncBootstrapPayload,
   ): Promise<DongilSyncBootstrapResult> {
     return this.postDongilRuntime("configure", payload);
   }
 
-  async resetDongilSync(): Promise<DongilSyncBootstrapResult> {
-    return this.postDongilRuntime("reset");
+  async saveDongilConfiguration(
+    payload: DongilSyncBootstrapPayload,
+    accessToken: string,
+  ): Promise<DongilSyncBootstrapResult> {
+    return this.postDongilRuntime("settings", payload, accessToken);
+  }
+
+  async resetDongilSync(accessToken: string): Promise<DongilSyncBootstrapResult> {
+    return this.postDongilRuntime("reset", undefined, accessToken);
   }
 
   async disconnectDongilSync(): Promise<DongilSyncBootstrapResult> {
@@ -425,15 +598,45 @@ export class ServiceManager {
     return this.postDongilRuntime("registration-status", payload);
   }
 
-  private async postDongilRuntime(
+  async refreshDongilRegistrationForUser(
+    payload: {
+      serverUrl: string;
+      machineId: string;
+      registrationToken: string;
+    },
+    accessToken: string,
+  ): Promise<DongilSyncBootstrapResult> {
+    return this.postDongilRuntime(
+      "registration-status/refresh",
+      payload,
+      accessToken,
+    );
+  }
+
+  async startDongilHistorySync(
+    accessToken: string,
+  ): Promise<DongilHistorySyncStartResult> {
+    return this.postDongilRuntime<DongilHistorySyncStartResult>(
+      "history-start",
+      undefined,
+      accessToken,
+    );
+  }
+
+  private async postDongilRuntime<T = DongilSyncBootstrapResult>(
     action:
       | "configure"
       | "disconnect"
       | "reset"
+      | "settings"
+      | "reconnect"
+      | "history-start"
       | "registration-request"
-      | "registration-status",
+      | "registration-status"
+      | "registration-status/refresh",
     payload?: object,
-  ): Promise<DongilSyncBootstrapResult> {
+    accessToken?: string,
+  ): Promise<T> {
     const response = await fetch(
       `http://127.0.0.1:${this.getServicePort("backend")}/api/internal/dongil-sync/${action}`,
       {
@@ -441,6 +644,9 @@ export class ServiceManager {
         headers: {
           "content-type": "application/json",
           "x-desktop-internal-token": this.desktopInternalToken,
+          ...(accessToken
+            ? { authorization: `Bearer ${accessToken}` }
+            : {}),
         },
         ...(payload ? { body: JSON.stringify(payload) } : {}),
         signal: AbortSignal.timeout(20_000),
@@ -452,7 +658,7 @@ export class ServiceManager {
           `Dongil ${action} failed (${response.status})`,
       );
     }
-    return (await response.json()) as DongilSyncBootstrapResult;
+    return (await response.json()) as T;
   }
 
   async getDongilSyncStatus(): Promise<DongilSyncStatusResult> {
@@ -471,18 +677,42 @@ export class ServiceManager {
     return (await response.json()) as DongilSyncStatusResult;
   }
 
+  async getDongilSyncStatusForUser(
+    accessToken: string,
+  ): Promise<DongilSyncStatusResult> {
+    const response = await fetch(
+      `http://127.0.0.1:${this.getServicePort("backend")}/api/internal/dongil-sync/status/user`,
+      {
+        headers: {
+          authorization: `Bearer ${accessToken}`,
+          "x-desktop-internal-token": this.desktopInternalToken,
+        },
+        signal: AbortSignal.timeout(5_000),
+      },
+    );
+    if (!response.ok) {
+      throw new Error(
+        (await response.text()) || `Dongil status failed (${response.status})`,
+      );
+    }
+    return (await response.json()) as DongilSyncStatusResult;
+  }
+
   async testDongilConnection(
     serverUrl: string,
+    accessToken: string,
+    identity?: { machineId: string; credential: string },
   ): Promise<DongilConnectionTestResult> {
     const response = await fetch(
       `http://127.0.0.1:${this.getServicePort("backend")}/api/internal/dongil-sync/test`,
       {
         method: "POST",
         headers: {
+          authorization: `Bearer ${accessToken}`,
           "content-type": "application/json",
           "x-desktop-internal-token": this.desktopInternalToken,
         },
-        body: JSON.stringify({ serverUrl }),
+        body: JSON.stringify({ serverUrl, ...identity }),
         signal: AbortSignal.timeout(8_000),
       },
     );

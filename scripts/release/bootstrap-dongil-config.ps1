@@ -14,10 +14,6 @@ function Resolve-DongilBootstrapConfig {
     } else {
       ""
     }
-    machineTypeCode = if ($EnvValues.ContainsKey("DONGIL_MACHINE_TYPE_CODE")) {
-      [string]$EnvValues["DONGIL_MACHINE_TYPE_CODE"]
-    } else {
-      "WASHING_MACHINE"
-    }
+    machineTypeCode = "WASHING_MACHINE"
   }
 }

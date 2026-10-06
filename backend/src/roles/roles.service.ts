@@ -38,32 +38,54 @@ export class RolesService {
   async setRolePermissions(
     roleCode: RoleCode,
     permissionKeys: string[],
+    actorId: string,
     includeHidden = false,
   ) {
-    const allowedPermissions = await this.prisma.permission.findMany({
-      where: {
-        key: { in: permissionKeys },
-        devOnly: roleCode === 'dev' ? undefined : false,
-      },
-      select: { key: true },
-    });
+    const [allowedPermissions, existingPermissions] = await Promise.all([
+      this.prisma.permission.findMany({
+        where: {
+          key: { in: permissionKeys },
+          devOnly: roleCode === 'dev' ? undefined : false,
+        },
+        select: { key: true },
+      }),
+      this.prisma.rolePermission.findMany({
+        where: { roleCode },
+        select: { permissionKey: true },
+        orderBy: { permissionKey: 'asc' },
+      }),
+    ]);
 
     const allowedPermissionKeys = allowedPermissions.map(
       (permission) => permission.key,
+    ).sort();
+    const previousPermissionKeys = existingPermissions.map(
+      (permission) => permission.permissionKey,
     );
 
-    await this.prisma.$transaction([
-      this.prisma.rolePermission.deleteMany({
+    await this.prisma.$transaction(async (transaction) => {
+      await transaction.rolePermission.deleteMany({
         where: { roleCode },
-      }),
-      this.prisma.rolePermission.createMany({
+      });
+      await transaction.rolePermission.createMany({
         data: allowedPermissionKeys.map((permissionKey) => ({
           roleCode,
           permissionKey,
         })),
         skipDuplicates: true,
-      }),
-    ]);
+      });
+      await transaction.auditLog.create({
+        data: {
+          actorId,
+          action: 'role.permissions.update',
+          target: roleCode,
+          details: {
+            before: previousPermissionKeys,
+            after: allowedPermissionKeys,
+          },
+        },
+      });
+    });
 
     return this.listRoles(includeHidden);
   }
