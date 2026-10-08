@@ -50,8 +50,9 @@ retaining Python for device and OCR work behind a versioned local API.
 
 ## Current Maturity
 
-The source is beyond the original scaffold and foundation phases. Version 1.4.0
-has historical release evidence. Production readiness still requires explicit
+The source is beyond the original scaffold and foundation phases. The current
+source candidate is `1.5.0-rc.2`; `v1.4.0` has historical release evidence.
+Production readiness still requires explicit
 target-machine validation covering database, installer, updater, dongle, camera,
 PLC, OCR, offline recovery, and Dongil behavior.
 

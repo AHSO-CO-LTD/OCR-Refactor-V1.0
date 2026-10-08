@@ -11,22 +11,37 @@
 - Dongle startup integration and first-run customer admin setup.
 - NSIS installer, online prerequisites, updater, recovery checkpoint, and GitHub release workflow.
 - Dongil registration, heartbeat, live outbox, machine information, and historical reconciliation.
+- DB-backed local authentication sessions, revocable logout/account-state
+  handling, remembered-login restore, camera WebSocket session checks, backend
+  loopback binding, and denied renderer-created windows. Static checks,
+  isolated migration/integration tests, and source backend runtime verification
+  are complete; packaged acceptance remains pending.
 
 ## Current Hardening Priorities
 
-1. Resolve free-angle ROI editing versus 90-degree runtime crop behavior without modifying Tool outside a separately approved Tool task.
-2. Complete target-machine acceptance for camera, PLC, dongle, installer, updater, database backup/restore, and Dongil connectivity loss.
-3. Add complete audit coverage for privileged mutations.
-4. Define and implement JWT expiry, server-side revocation/logout, login lockout, and rate limiting.
-5. Constrain local service network exposure and validate external URL/IPC policy.
-6. Remove or clearly isolate production demo fallback behavior.
-7. Split oversized frontend API, inspection, Electron main, and service-manager modules through approved behavior-preserving refactors.
-8. Promote stable frontend/backend contracts into `shared/` where this reduces real drift.
+1. Complete packaged target-machine acceptance for the additive `AuthSession`
+   migration, remembered login, camera, PLC, dongle, installer, updater,
+   database backup/restore, and Dongil connectivity loss.
+2. Verify packaged backend loopback binding, Electron external-window policy,
+   local IPC boundaries, log redaction, and Device Tool firewall/network policy.
+3. Add complete audit coverage for privileged mutations through a separately
+   inspected and approved plan.
+4. Remove or clearly isolate production demo fallback behavior through a
+   separately approved behavior-preserving change.
+5. Split oversized frontend API, inspection, Electron main, and service-manager
+   modules through separately approved behavior-preserving refactors.
+6. Promote stable frontend/backend contracts into `shared/` only where this
+   reduces demonstrated drift.
 
 ## Documentation Baseline
 
-The documentation refresh plan is tracked in
+The completed documentation refresh is tracked in
 [plans/2026-10-05-documentation-baseline-refresh.md](plans/2026-10-05-documentation-baseline-refresh.md).
+
+The current packaged acceptance gates are tracked in
+[plans/2026-10-05-auth-dongil-cold-boot-reliability.md](plans/2026-10-05-auth-dongil-cold-boot-reliability.md)
+and
+[plans/2026-10-06-local-auth-session-and-runtime-security.md](plans/2026-10-06-local-auth-session-and-runtime-security.md).
 
 ## Release Acceptance Gate
 
@@ -44,8 +59,17 @@ A release candidate is not production-ready until explicitly verified for:
 
 ## Deferred Decisions
 
+- Free-angle ROI/runtime crop equivalence. ROI is stable in current operations
+  and must not be changed without a new approved scope; Tool supports only
+  90-degree crop rotation increments today.
+- Login lockout and login rate limiting. The rejected five-attempt/60-second
+  policy must not be introduced or replaced implicitly.
+- JWT expiry, refresh tokens, and inactivity timeout. Current DB-backed sessions
+  remain valid until logout, revocation, invalid account state, or deletion.
 - User-level additive/removal permission overrides beyond the current replacement semantics.
 - Tool-side arbitrary-angle ROI crop support.
+- Device Tool binding/authentication changes; current exposure is handled as a
+  deployment/firewall concern unless a separate Tool task is explicitly approved.
 - Centralized structured logging and correlation IDs.
 - Formal production log retention automation.
 - Broader shared-contract extraction.

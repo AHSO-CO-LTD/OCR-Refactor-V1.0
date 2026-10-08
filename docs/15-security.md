@@ -36,14 +36,15 @@ Current limitations:
   policy; validity is controlled by the local session record instead.
 - Source now implements server-side logout revocation through JWT plus the
   per-process desktop token before Electron deletes its encrypted file and the
-  renderer session. Migration/source/package verification remains pending.
+  renderer session. Static and isolated database/runtime verification passed;
+  packaged verification remains pending.
 - Failed attempts are counted but do not currently enforce a lock threshold.
 - Login rate limiting is not implemented.
 
 The approved next security plan is documented in
 [plans/2026-10-06-local-auth-session-and-runtime-security.md](plans/2026-10-06-local-auth-session-and-runtime-security.md)
 and ADR 0009. It introduces revocable sessions only in the OCR-local backend and
-database; source implementation is complete but verification is pending. It
+database; source implementation and isolated verification are complete. It
 must not change the external Dongil Server. Account lockout and
 login rate limiting are explicitly deferred; the rejected five-attempt,
 60-second policy must not be implemented or silently replaced.
@@ -82,8 +83,8 @@ scheme and destination allowlist before opening it.
 ## Local Network Exposure
 
 - Electron calls backend and Tool through loopback URLs.
-- NestJS source binds explicitly to `127.0.0.1`; runtime/package verification is
-  still pending.
+- NestJS binds explicitly to `127.0.0.1`; a source runtime check on 2026-10-07
+  confirmed a loopback-only listener. Packaged verification remains pending.
 - `tool/config.json` currently binds Device Tool to `0.0.0.0`.
 - Device Tool camera and PLC endpoints do not implement application JWT authorization.
 
@@ -138,8 +139,8 @@ complete audit coverage.
 Before production acceptance, verify:
 
 - Tool firewall policy and packaged backend loopback binding.
-- Local session migration, logout/revocation, and the explicitly deferred
-  lockout/rate-limiting requirements.
+- Packaged local session migration and logout/revocation; lockout and login rate
+  limiting remain explicitly deferred.
 - IPC sender validation and external URL allowlisting.
 - Audit coverage for privileged changes.
 - Update artifact trust and backup integrity on the target workstation.

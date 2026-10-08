@@ -1,9 +1,10 @@
 # Release Setup Notes
 
-Status: Current release-script reference for application version `1.4.0`.
+Status: Current release-script reference for local candidate `1.5.0-rc.2`;
+packaged acceptance remains pending.
 
-Last source review: `2026-10-05`. This documentation pass did not execute a
-release build, installer, uninstall or publish workflow.
+Last source review: `2026-10-08`. The RC2 release build and packaged acceptance
+status are recorded in the associated plan; no publish is implied.
 
 The release process may stage an approved encrypted Tool bundle and compiled
 license artifacts. It must not modify `tool/` or original license source and
@@ -29,10 +30,10 @@ installs Node dependencies, installs Tool requirements into `tool/python-embed`,
 generates the Prisma Client, runs migrations, and seeds production data.
 
 When the online preflight installs Node.js or PostgreSQL, it records
-that ownership in `C:\ProgramData\AHSO OCR\runtime-ownership.json`. The
-uninstaller uses that file so the default clean uninstall removes only runtime
-frameworks installed by this setup, not frameworks that already existed on the
-customer PC.
+that ownership in `C:\ProgramData\AHSO OCR\runtime-ownership.json`. Normal and
+silent uninstall both default to app-only removal: database, ProgramData,
+configuration, logs, backups, and runtime frameworks are preserved. Interactive
+users may explicitly clear a keep option when destructive cleanup is intended.
 
 When setup installs PostgreSQL itself, the generated local PostgreSQL `postgres`
 superuser password is fixed to `0123456789` so service administrators can log in
@@ -42,6 +43,12 @@ instance.
 The staged `frontend-standalone` folder must contain its own `package.json` so
 the installer can install production Next.js dependencies beside the standalone
 server.
+
+The release preparation script sets
+`NEXT_PUBLIC_API_BASE_URL=http://127.0.0.1:3979/api` before `next build` and
+rejects any production browser bundle that still contains the dev API on port
+`3980`. Writing this variable during installation is not sufficient because
+Next.js embeds `NEXT_PUBLIC_*` values at build time.
 
 The staged backend runtime must include `native\dongle-checker.exe`; the backend
 license service loads that helper before calling `System8.dll`. The Python

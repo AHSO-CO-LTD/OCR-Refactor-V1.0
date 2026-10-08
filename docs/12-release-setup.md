@@ -1,10 +1,11 @@
 # Windows Setup And Update Flow
 
-Status: Implemented baseline for application version `1.4.0`.
+Status: Implemented baseline; local candidate `1.5.0-rc.2` was built after
+packaged testing found a dev API URL in the `1.5.0-rc.1` frontend bundle.
+Packaged RC2 acceptance remains pending. The last published release is `v1.4.0`.
 
-Last source review: `2026-10-05`. This document describes the checked-in
-installer/release implementation. The current documentation pass did not run an
-installer or publish a release.
+Last source review: `2026-10-08`. This document describes the checked-in
+installer/release implementation. A local candidate does not imply publication.
 
 Related records: [`../PROJECT_PROFILE.md`](../PROJECT_PROFILE.md),
 [`17-logging-and-diagnostics.md`](17-logging-and-diagnostics.md), and
@@ -113,6 +114,28 @@ The override accepts an extracted bundle directory or the exact release zip.
 The package structure is still validated. Zip overrides are also checked
 against the configured SHA-256.
 
+### Previous local candidate
+
+The 2026-10-07 build produced
+`release/AHSO-OCR-Setup-1.5.0-rc.1-x64.exe` with SHA-256
+`B7D00C2E48302B9EBA350E7EB5DF1218EF924B368CEF0FEBE6F47878A569B726`.
+It was built with Node `v22.23.3`, publish disabled, and the pinned encrypted
+Tool release `2026.Jul.22.3`. See
+[`plans/2026-10-07-release-candidate-1.5.0-rc.1.md`](plans/2026-10-07-release-candidate-1.5.0-rc.1.md)
+for full evidence and remaining packaged checks.
+
+Packaged testing invalidated RC1 for pilot use because its browser bundle called
+the development API on port `3980` while the packaged backend listened on
+`3979`. RC2 sets the production API URL before the frontend build and fails the
+release preparation if a dev API URL remains. See
+[`plans/2026-10-08-rc2-local-api-and-safe-uninstall.md`](plans/2026-10-08-rc2-local-api-and-safe-uninstall.md).
+
+The 2026-10-08 build produced
+`release/AHSO-OCR-Setup-1.5.0-rc.2-x64.exe` with SHA-256
+`EFEB014AA300844710FD58E83AD782CC0880BB0962E68C40BFA9E33A7149F73C`.
+Static verification found the required packaged API URL and no dev API URL;
+installer/uninstaller execution remains pending.
+
 ## Env Rule
 
 Real secrets are not committed.
@@ -178,8 +201,8 @@ Normal admin screens still hide and protect `dev`.
 
 ## Uninstall Rule
 
-The uninstaller shows options before removal starts. The default is a clean
-uninstall with no boxes checked.
+The uninstaller shows options before removal starts. The safe default has both
+keep options selected and removes only application files and shortcuts.
 
 When the uninstaller is invoked by an application update (`--updated`), it
 removes only the previous application files. It must not run runtime cleanup:
@@ -187,8 +210,9 @@ the PostgreSQL database, `C:\ProgramData\AHSO OCR`, runtime configuration,
 support credentials, recovery checkpoints, Node.js, PostgreSQL, and other
 frameworks are all preserved for the new version.
 
-- Clean uninstall: app files, shortcuts, local OCR database/config, and runtime
-  frameworks installed by this setup are removed.
+- Explicit destructive cleanup: if the user clears the keep options, app files,
+  shortcuts, selected local OCR database/config, and setup-owned runtime
+  frameworks are removed.
 - Keep database: app files are removed, but the local PostgreSQL database and
   runtime config are preserved for reinstall/update recovery.
 - Keep frameworks: app files and selected local data are removed, but runtime
@@ -204,8 +228,8 @@ If the database is kept, PostgreSQL is kept too even when framework cleanup is
 selected, because the preserved database depends on the local PostgreSQL
 runtime.
 
-An explicit silent uninstall that is not part of an application update uses
-the default clean mode.
+An explicit silent uninstall that is not part of an application update also
+uses app-only removal by default and preserves database/config/frameworks.
 
 ## Customer Admin Account
 

@@ -1,6 +1,6 @@
 # Kế hoạch vòng đời phiên cục bộ và bảo vệ runtime OCR
 
-Status: **Approved — Phases 0-5 source-complete; verification pending**
+Status: **Approved — Phases 0-6 source and isolated verification complete; packaged acceptance pending**
 Approved date: **2026-10-06**
 Source baseline: **v1.4.0**, branch **remote**
 
@@ -187,17 +187,46 @@ database credential hoặc Dongil machine credential.
 | Phase | Nội dung | Trạng thái |
 | --- | --- | --- |
 | 0 | Discovery, plan, ADR và scope boundary | Done |
-| 1 | Additive `AuthSession` migration và local session service | Source complete; validation pending |
-| 2 | JWT issuance/guard và camera WebSocket validation | Source complete; validation pending |
-| 3 | Logout IPC/API và account-state revocation hooks | Source complete; validation pending |
-| 4 | Loopback bind, external URL allowlist và IPC review | Source complete; validation pending |
-| 5 | Audit/docs/error handling | Source complete; validation pending |
-| 6 | Approved source verification | Pending |
+| 1 | Additive `AuthSession` migration và local session service | Done — schema/client and isolated migration verified |
+| 2 | JWT issuance/guard và camera WebSocket validation | Done — targeted unit/integration checks passed; packaged runtime pending |
+| 3 | Logout IPC/API và account-state revocation hooks | Done — targeted unit/integration checks passed; packaged runtime pending |
+| 4 | Loopback bind, external URL allowlist và IPC review | Done — targeted static checks and source runtime loopback check passed |
+| 5 | Audit/docs/error handling | Done — targeted checks and isolated DB audit verification passed |
+| 6 | Approved source verification | Done — static, isolated DB and source backend runtime checks passed |
 | 7 | Packaged build và target-machine acceptance | Deferred until all functions complete |
 
 Mỗi phase phải được điều tra lại trước khi sửa. Nếu phát hiện cần thay đổi
 Dongil Server, Device Tool, license, ROI, business contract hoặc migration theo
 hướng khác plan này thì dừng và báo lại; không tự mở rộng phạm vi.
+
+### 8.1. Bằng chứng Phase 6 ngày 2026-10-07
+
+- Baseline được kiểm tra tại commit `149b944` (`Feat: Fixing Remembered Login`).
+- `prisma validate` đạt và Prisma Client 6.19.3 được generate thành công. Prisma
+  chỉ cảnh báo cấu hình `package.json#prisma` sẽ deprecated ở Prisma 7; dự án
+  hiện vẫn dùng Prisma 6 nên chưa thay đổi cấu hình ngoài phạm vi.
+- Backend, Electron và frontend typecheck đều đạt.
+- Bảy targeted auth/session/camera test suites đạt `24/24` tests sau khi bổ sung
+  coverage cho tạo/thu hồi session, guard từ chối session revoked, remembered
+  logout transaction và Camera WebSocket session authorization.
+- Một targeted regression set rộng hơn đạt `40/40` tests cho auth, users,
+  inspections, products và PLC controller fixtures.
+- Non-fixing ESLint đạt trên các file backend/Electron/frontend thuộc phạm vi.
+- `git diff --check` đạt; không có diff trong `tool/`, protected license hoặc
+  `backend/src/dongil-sync/`.
+- Migration `AuthSession` được apply cùng đủ `49/49` migrations lên DB PostgreSQL
+  18 cô lập `ocrahso_codex_phase9b_authsession_20261007`; lần deploy thứ hai xác
+  nhận không còn migration chờ.
+- Guarded DB integration đạt `7/7` tests cho cấu trúc bảng/index/FK cascade,
+  password và remembered-login JWT có `sid`, logout làm JWT cũ bị từ chối,
+  role/deactivation revoke session, user delete cascade và audit không chứa
+  password/access token/raw remember token.
+- Backend source runtime chạy với DB test trả health `ok` và chỉ listen tại
+  `127.0.0.1:3981`; process do agent tạo đã dừng và port đã được giải phóng.
+- Bằng chứng cuối DB test: 49 migration hoàn tất, 0 failed, 0 test user,
+  0 `AuthSession`, 0 `RememberedLogin`; DB test sau đó đã được xóa.
+- Không migrate hoặc ghi vào DB workstation `ocrahso`; không seed, không chạy
+  Electron/camera/PLC, chưa build và chưa kiểm tra packaged installer.
 
 ## 9. Rủi ro và giảm thiểu
 

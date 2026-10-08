@@ -87,7 +87,7 @@ Payload:
   "machineId": "XXXX-XXXX-XXXX-XXXX",
   "machineTypeCode": "WASHING_MACHINE",
   "licenseStatus": "LICENSED",
-  "appVersion": "1.4.0"
+  "appVersion": "1.5.0-rc.2"
 }
 ```
 

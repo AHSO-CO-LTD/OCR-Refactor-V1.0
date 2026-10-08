@@ -1,6 +1,6 @@
 # 0009 — Local revocable authentication sessions
 
-Status: Accepted — implementation pending
+Status: Accepted — implemented; isolated verification complete, packaged acceptance pending
 
 ## Context
 
@@ -71,4 +71,3 @@ do not consume OCR user JWTs, so no Dongil Server change is required.
 - Revoked-session retention/cleanup can be planned separately if table growth
   becomes material; it is not part of this decision.
 - No external Dongil Server deployment or compatibility coordination is needed.
-

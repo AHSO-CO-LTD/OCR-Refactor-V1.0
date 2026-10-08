@@ -82,7 +82,8 @@ collapse them into one unqualified “verified” claim.
 ## Current Engineering Risks
 
 - ROI free-angle/runtime crop mismatch.
-- Incomplete session security and audit coverage.
+- Local session revocation passed isolated verification; packaged acceptance and
+  project-wide audit coverage remain incomplete.
 - Local Tool network exposure.
 - Runtime `.env` parser, backup, ACL and downgrade recovery are implemented but
   not yet verified in a packaged cold-boot acceptance run.

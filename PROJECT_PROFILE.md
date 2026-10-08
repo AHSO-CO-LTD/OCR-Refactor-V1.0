@@ -1,7 +1,7 @@
 # Project Profile
 
-Last source review: 2026-10-06
-Source baseline: `v1.4.0` tree on branch `remote`
+Last source review: 2026-10-08
+Current source candidate: `1.5.0-rc.2` on branch `remote`; last published release: `v1.4.0`
 
 ## Project
 
@@ -77,8 +77,9 @@ See [docs/14-database.md](docs/14-database.md).
   JWT keys in `localStorage` are removed and are never used for restore.
 - Current source creates a local PostgreSQL `AuthSession` for each password or
   remembered login and places its ID in JWT `sid`. HTTP guards and camera
-  WebSocket authorization reject revoked/inactive sessions. Source validation,
-  migration execution and packaged acceptance are still pending.
+  WebSocket authorization reject revoked/inactive sessions. Static checks and
+  isolated migration/runtime verification have passed; packaged acceptance is
+  still pending.
 
 JWT expiry remains intentionally unset under the accepted no-inactivity-timeout
 policy. Login rate limiting and enforced failed-attempt lockout are deferred;
@@ -142,6 +143,12 @@ See [docs/12-dongil-server-integration.md](docs/12-dongil-server-integration.md)
 ## Installer And Updater
 
 - Windows installer: per-machine NSIS with elevation.
+- Local release candidate `1.5.0-rc.1` was built without publishing on
+  2026-10-07 and passed artifact/manifest/checksum/protected-boundary checks,
+  but packaged testing found that its frontend bundle retained the dev API URL
+  on port `3980`. Local candidate `1.5.0-rc.2` corrects the production build
+  guard and safe uninstall defaults and was built without publishing on
+  2026-10-08; packaged acceptance remains pending.
 - Online preflight checks Node.js 22+, bundled Tool Python 3.11, PostgreSQL 14+,
   and network access only when a missing runtime must be downloaded.
 - The installer supports new databases, reuse, selection of a different name,
@@ -212,6 +219,17 @@ read-only during Phase 9B and was not migrated by that test. A later read-only
 `prisma migrate status` audit on 2026-10-06 found all 48 migrations applied and
 the workstation `ocrahso` schema up to date; the audit did not apply migrations
 or establish when or by whom they were deployed.
+
+On 2026-10-07, the additive `AuthSession` migration was applied with all 49
+migrations to a new guarded PostgreSQL 18 isolated database. A second deploy
+reported no pending migrations. Seven DB integration tests passed for table,
+index and cascade-FK structure, password and remembered-login `sid` issuance,
+logout rejection of the old JWT, role/deactivation revocation, deletion cascade,
+operator permissions and audit secret exclusion. A backend runtime check against
+that database returned healthy and listened only on `127.0.0.1`; its process was
+stopped, port `3981` was released, and the isolated database was removed. The
+workstation `ocrahso` database was not migrated or written by this verification.
+
 The user subsequently reported successful manual acceptance on the development
 Electron source runtime: real remembered-login opt-in survived application
 restart and a full Windows cold boot, operator Dongil controls respected the

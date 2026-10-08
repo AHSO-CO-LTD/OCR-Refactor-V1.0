@@ -20,7 +20,12 @@ describe('InspectionsController line result settings permissions', () => {
       await expect(
         controller.updateLineResultSettings(
           { showNgRecognizedText: false },
-          { id: `${role}-1`, username: role, role },
+          {
+            id: `${role}-1`,
+            username: role,
+            role,
+            sessionId: `${role}-session`,
+          },
         ),
       ).resolves.toEqual({ data: {} });
 
@@ -34,7 +39,12 @@ describe('InspectionsController line result settings permissions', () => {
     expect(() =>
       controller.updateLineResultSettings(
         { showNgRecognizedText: false },
-        { id: 'engineer-1', username: 'engineer', role: 'engineer' },
+        {
+          id: 'engineer-1',
+          username: 'engineer',
+          role: 'engineer',
+          sessionId: 'engineer-session',
+        },
       ),
     ).toThrow(ForbiddenException);
 
@@ -51,7 +61,12 @@ describe('InspectionsController line result settings permissions', () => {
             trainingImageSaveFolderPath: 'C:\\OCR\\TrainingImages',
             trainingImageSavePolicy: TrainingImageSavePolicy.ng,
           },
-          { id: `${role}-1`, username: role, role },
+          {
+            id: `${role}-1`,
+            username: role,
+            role,
+            sessionId: `${role}-session`,
+          },
         ),
       ).resolves.toEqual({ data: {} });
 
@@ -67,7 +82,12 @@ describe('InspectionsController line result settings permissions', () => {
     expect(() =>
       controller.updateLineResultSettings(
         { trainingImageEnabled: true },
-        { id: 'engineer-1', username: 'engineer', role: 'engineer' },
+        {
+          id: 'engineer-1',
+          username: 'engineer',
+          role: 'engineer',
+          sessionId: 'engineer-session',
+        },
       ),
     ).toThrow(ForbiddenException);
 
@@ -78,7 +98,12 @@ describe('InspectionsController line result settings permissions', () => {
     await expect(
       controller.updateLineResultSettings(
         { savePolicy: LineResultSavePolicy.none },
-        { id: 'engineer-1', username: 'engineer', role: 'engineer' },
+        {
+          id: 'engineer-1',
+          username: 'engineer',
+          role: 'engineer',
+          sessionId: 'engineer-session',
+        },
       ),
     ).resolves.toEqual({ data: {} });
 

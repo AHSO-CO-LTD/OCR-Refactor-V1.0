@@ -43,6 +43,10 @@ describe('AuthService remembered-login choice', () => {
     expect(harness.rememberedLogin.disableForLoginChoice).toHaveBeenCalledWith(
       'user-1',
     );
+    expect(harness.authSessions.create).toHaveBeenCalledWith(
+      'user-1',
+      'password',
+    );
   });
 
   it('keeps the opt-in path available for every authenticated role', async () => {

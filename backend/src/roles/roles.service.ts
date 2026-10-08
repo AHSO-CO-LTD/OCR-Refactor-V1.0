@@ -56,9 +56,9 @@ export class RolesService {
       }),
     ]);
 
-    const allowedPermissionKeys = allowedPermissions.map(
-      (permission) => permission.key,
-    ).sort();
+    const allowedPermissionKeys = allowedPermissions
+      .map((permission) => permission.key)
+      .sort();
     const previousPermissionKeys = existingPermissions.map(
       (permission) => permission.permissionKey,
     );

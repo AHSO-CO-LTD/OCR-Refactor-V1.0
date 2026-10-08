@@ -81,7 +81,10 @@ Do not rely on old status text that describes these areas as unimplemented.
 
 - Free-angle ROI display and the runtime crop path are not fully equivalent;
   Device Tool accepts only 90-degree crop rotation increments.
-- JWT expiry/revocation, login rate limiting, lockout enforcement, and complete audit writes are not implemented.
+- Local DB-backed JWT session revocation is implemented and has passed isolated
+  migration/integration/runtime verification; packaged acceptance remains
+  pending. JWT expiry is intentionally unset, login rate limiting and lockout
+  enforcement are deferred, and audit coverage is not yet complete project-wide.
 - Device Tool currently binds to all interfaces and has no application JWT layer.
 - Electron CR/LF/BOM-aware `.env` parsing and legacy ProgramData backup are
   implemented. Runtime Dongil changes are DB-only and do not rewrite `.env`;

@@ -3,7 +3,7 @@
 Local-first Windows desktop software for camera- and PLC-driven OCR inspection
 on an industrial washing line.
 
-Current source baseline: `v1.4.0`.
+Current release candidate: `1.5.0-rc.2`. Last published release: `v1.4.0`.
 
 ## Runtime Architecture
 

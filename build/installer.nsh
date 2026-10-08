@@ -756,8 +756,8 @@ Var UninstallKeepFrameworksCheckbox
 !macroend
 
 Function un.UninstallOptionsPageCreate
-  StrCpy $UninstallKeepDatabase "false"
-  StrCpy $UninstallKeepFrameworks "false"
+  StrCpy $UninstallKeepDatabase "true"
+  StrCpy $UninstallKeepFrameworks "true"
 
   nsDialogs::Create 1018
   Pop $0
@@ -769,16 +769,18 @@ Function un.UninstallOptionsPageCreate
   Pop $0
 
   !insertmacro AhsoCreateReadOnlyScrollBox 0u 30u 300u 48u $0
-  ${NSD_SetText} $0 "Default clean uninstall removes the app, local OCR database/config, and runtime frameworks installed by this setup. Frameworks that already existed before setup are not removed automatically."
+  ${NSD_SetText} $0 "The safe default removes only AHSO OCR application files and shortcuts. The local database, ProgramData configuration, logs, backups, and runtime frameworks are preserved."
 
   ${NSD_CreateCheckbox} 0u 90u 300u 14u "Keep local PostgreSQL database and runtime config"
   Pop $UninstallKeepDatabaseCheckbox
+  ${NSD_SetState} $UninstallKeepDatabaseCheckbox ${BST_CHECKED}
 
   ${NSD_CreateCheckbox} 0u 114u 300u 14u "Keep runtime frameworks installed by setup"
   Pop $UninstallKeepFrameworksCheckbox
+  ${NSD_SetState} $UninstallKeepFrameworksCheckbox ${BST_CHECKED}
 
   !insertmacro AhsoCreateReadOnlyScrollBox 0u 140u 300u 28u $0
-  ${NSD_SetText} $0 "You can select both checkboxes to remove only the AHSO OCR application files and shortcuts."
+  ${NSD_SetText} $0 "Clear a checkbox only when you intentionally want the corresponding local data or setup-owned runtime removed."
 
   nsDialogs::Show
 FunctionEnd
@@ -787,11 +789,15 @@ Function un.UninstallOptionsPageLeave
   ${NSD_GetState} $UninstallKeepDatabaseCheckbox $0
   ${If} $0 == ${BST_CHECKED}
     StrCpy $UninstallKeepDatabase "true"
+  ${Else}
+    StrCpy $UninstallKeepDatabase "false"
   ${EndIf}
 
   ${NSD_GetState} $UninstallKeepFrameworksCheckbox $0
   ${If} $0 == ${BST_CHECKED}
     StrCpy $UninstallKeepFrameworks "true"
+  ${Else}
+    StrCpy $UninstallKeepFrameworks "false"
   ${EndIf}
 FunctionEnd
 
@@ -805,8 +811,8 @@ FunctionEnd
   ${EndIf}
 
   ${If} ${Silent}
-    StrCpy $UninstallKeepDatabase "false"
-    StrCpy $UninstallKeepFrameworks "false"
+    StrCpy $UninstallKeepDatabase "true"
+    StrCpy $UninstallKeepFrameworks "true"
     Goto uninstall_options_done
   ${EndIf}
 

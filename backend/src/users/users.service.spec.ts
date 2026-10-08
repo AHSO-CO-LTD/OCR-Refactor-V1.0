@@ -6,9 +6,12 @@ import { UsersService } from './users.service';
 describe('UsersService login failure tracking', () => {
   it('records failed attempts without deactivating the account', async () => {
     const update = jest.fn().mockResolvedValue(undefined);
-    const service = new UsersService({
-      user: { update },
-    } as unknown as PrismaService, {} as AuthSessionService);
+    const service = new UsersService(
+      {
+        user: { update },
+      } as unknown as PrismaService,
+      {} as AuthSessionService,
+    );
 
     await service.markLoginFailure('user-1', 3);
 

@@ -44,11 +44,7 @@ export class UsersService {
     };
   }
 
-  async createUser(
-    dto: CreateUserDto,
-    canManageDev: boolean,
-    actorId: string,
-  ) {
+  async createUser(dto: CreateUserDto, canManageDev: boolean, actorId: string) {
     if (dto.role === RoleCode.dev && !canManageDev) {
       throw new BadRequestException('Only dev can create dev users');
     }

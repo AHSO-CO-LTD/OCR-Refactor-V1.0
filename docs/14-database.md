@@ -59,7 +59,8 @@ account deletion revoke it transactionally; `AuditLog` retains the event.
 `AuthSession` uses an additive user foreign key with cascade delete and an index
 on `(userId, revokedAt)`. Active sessions have `revokedAt = null`; logout, role
 change and account deactivation set revocation metadata instead of deleting the
-row. Migration execution and packaged compatibility verification remain pending.
+row. The migration and DB behavior have passed isolated PostgreSQL verification;
+packaged compatibility verification remains pending.
 
 ## Migration Policy
 
@@ -124,3 +125,12 @@ did not apply migrations or establish deployment provenance. No production data
 was copied and no seed ran. Real data-distribution compatibility and migration
 on other target machines remain unverified until their packaged pilot
 gate.
+
+On 2026-10-07, all 49 migrations were applied to the new guarded database
+`ocrahso_codex_phase9b_authsession_20261007`; a second deploy was idempotent.
+Seven integration tests verified the `AuthSession` columns, primary/index/FK
+structure, cascade delete, JWT `sid`, logout revocation, role/deactivation
+revocation and audit redaction. Final evidence showed 49 completed migrations,
+zero failed migrations and no remaining test users, sessions or remembered-login
+rows. The temporary database was then removed. This did not apply a migration to
+or write data into the workstation `ocrahso` database.

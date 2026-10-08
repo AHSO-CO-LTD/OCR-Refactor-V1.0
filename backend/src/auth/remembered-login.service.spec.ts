@@ -47,6 +47,14 @@ describe('RememberedLoginService', () => {
       1,
     );
     expect(harness.jwtService.signAsync).toHaveBeenCalledTimes(1);
+    expect(harness.authSessions.create).toHaveBeenCalledWith(
+      'user-1',
+      'remembered-login',
+    );
+    expect(harness.jwtService.signAsync).toHaveBeenCalledWith(
+      expect.objectContaining({ sid: 'session-1' }),
+      expect.any(Object),
+    );
     expect(harness.prisma.rememberedLogin.update).toHaveBeenCalledWith(
       expect.objectContaining({ where: { id: 'default' } }),
     );
@@ -62,6 +70,23 @@ describe('RememberedLoginService', () => {
     expect(
       harness.transaction.rememberedLogin.deleteMany,
     ).not.toHaveBeenCalled();
+  });
+
+  it('revokes the current session and remembered login in one transaction', async () => {
+    const harness = createHarness();
+
+    await expect(
+      harness.service.logoutSession('user-1', 'session-1'),
+    ).resolves.toEqual({ data: { loggedOut: true } });
+    expect(harness.authSessions.revokeCurrent).toHaveBeenCalledWith(
+      'user-1',
+      'session-1',
+      'logout',
+      harness.transaction,
+    );
+    expect(harness.transaction.rememberedLogin.deleteMany).toHaveBeenCalledWith(
+      { where: { userId: 'user-1' } },
+    );
   });
 
   it.each([
@@ -171,6 +196,7 @@ function createHarness(
   };
   const authSessions = {
     create: jest.fn().mockResolvedValue({ id: 'session-1' }),
+    revokeCurrent: jest.fn().mockResolvedValue(1),
   };
 
   return {

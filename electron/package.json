@@ -1,6 +1,6 @@
 {
   "name": "@ocr/electron",
-  "version": "1.4.0",
+  "version": "1.5.0-rc.2",
   "description": "Desktop shell for the AHSO OCR local station.",
   "author": "AHSO",
   "private": true,

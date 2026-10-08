@@ -1,12 +1,20 @@
-import { ForbiddenException, type ExecutionContext } from '@nestjs/common';
+import {
+  ForbiddenException,
+  UnauthorizedException,
+  type ExecutionContext,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Reflector } from '@nestjs/core';
 import { JwtService } from '@nestjs/jwt';
 import type { ModuleRef } from '@nestjs/core';
 import { RoleCode } from '@prisma/client';
-import { readFileSync } from 'node:fs';
+import * as bcrypt from 'bcrypt';
+import { readdirSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { PermissionsGuard } from '../src/auth/permissions.guard';
+import { AuthSessionService } from '../src/auth/auth-session.service';
+import { AuthService } from '../src/auth/auth.service';
+import { JwtAuthGuard } from '../src/auth/jwt-auth.guard';
 import { RememberedLoginService } from '../src/auth/remembered-login.service';
 import { PERMISSIONS } from '../src/common/constants/permissions';
 import { PrismaService } from '../src/database/prisma.service';
@@ -34,13 +42,15 @@ if (!/^ocrahso_codex_phase9b_[a-zA-Z0-9_]+$/.test(databaseName)) {
 
 describe('Phase 9B isolated database integration', () => {
   const prisma = new PrismaService();
-  const users = new UsersService(prisma);
+  const authSessions = new AuthSessionService(prisma);
+  const users = new UsersService(prisma, authSessions);
   const config = new ConfigService({
     JWT_SECRET: 'phase9b-isolated-test-secret',
     DESKTOP_INTERNAL_TOKEN: 'phase9b-desktop-token',
   });
   let dongleAllowed = true;
   const systemService = {
+    assertLoginAllowed: jest.fn(() => Promise.resolve(true)),
     assertAutoLoginAllowed: jest.fn(() => Promise.resolve(dongleAllowed)),
   } as unknown as SystemService;
   const rememberedLogin = new RememberedLoginService(
@@ -49,6 +59,15 @@ describe('Phase 9B isolated database integration', () => {
     prisma,
     systemService,
     users,
+    authSessions,
+  );
+  const auth = new AuthService(
+    config,
+    new JwtService(),
+    systemService,
+    users,
+    authSessions,
+    rememberedLogin,
   );
 
   beforeAll(async () => {
@@ -138,9 +157,65 @@ describe('Phase 9B isolated database integration', () => {
       FROM "_prisma_migrations"
     `;
 
-    expect(Number(history[0]?.completed)).toBe(48);
     expect(Number(history[0]?.failed)).toBe(0);
     expect(await prisma.rememberedLogin.count()).toBe(0);
+
+    const migrationDirectoryCount = readdirSync(
+      resolve(process.cwd(), 'prisma', 'migrations'),
+      { withFileTypes: true },
+    ).filter((entry) => entry.isDirectory()).length;
+    expect(Number(history[0]?.completed)).toBe(migrationDirectoryCount);
+
+    const authSessionMigration = await prisma.$queryRaw<
+      Array<{ migration_name: string; finished_at: Date | null }>
+    >`
+      SELECT migration_name, finished_at
+      FROM "_prisma_migrations"
+      WHERE migration_name = '20261006130000_auth_sessions'
+        AND rolled_back_at IS NULL
+    `;
+    expect(authSessionMigration).toHaveLength(1);
+    expect(authSessionMigration[0]?.finished_at).not.toBeNull();
+
+    const columns = await prisma.$queryRaw<
+      Array<{ column_name: string; is_nullable: string }>
+    >`
+      SELECT column_name, is_nullable
+      FROM information_schema.columns
+      WHERE table_schema = 'public' AND table_name = 'AuthSession'
+      ORDER BY ordinal_position
+    `;
+    expect(columns).toEqual([
+      { column_name: 'id', is_nullable: 'NO' },
+      { column_name: 'userId', is_nullable: 'NO' },
+      { column_name: 'createdAt', is_nullable: 'NO' },
+      { column_name: 'revokedAt', is_nullable: 'YES' },
+      { column_name: 'revokeReason', is_nullable: 'YES' },
+    ]);
+
+    const foreignKey = await prisma.$queryRaw<
+      Array<{ delete_rule: string; update_rule: string }>
+    >`
+      SELECT rc.delete_rule, rc.update_rule
+      FROM information_schema.referential_constraints rc
+      WHERE rc.constraint_schema = 'public'
+        AND rc.constraint_name = 'AuthSession_userId_fkey'
+    `;
+    expect(foreignKey).toEqual([
+      { delete_rule: 'CASCADE', update_rule: 'CASCADE' },
+    ]);
+
+    const indexes = await prisma.$queryRaw<Array<{ indexname: string }>>`
+      SELECT indexname
+      FROM pg_indexes
+      WHERE schemaname = 'public' AND tablename = 'AuthSession'
+    `;
+    expect(indexes.map((index) => index.indexname)).toEqual(
+      expect.arrayContaining([
+        'AuthSession_pkey',
+        'AuthSession_userId_revokedAt_idx',
+      ]),
+    );
 
     const configuration = await prisma.dongilSyncConfiguration.create({
       data: {
@@ -159,6 +234,104 @@ describe('Phase 9B isolated database integration', () => {
       where: { id: 'default' },
     });
     expect(normalized.machineTypeCode).toBe(LOCAL_DONGIL_MACHINE_TYPE_CODE);
+  });
+
+  it('creates sid-backed sessions and rejects a JWT after logout', async () => {
+    const password = 'phase9b-auth-password';
+    const passwordHash = await bcrypt.hash(password, 4);
+    const user = await prisma.user.create({
+      data: {
+        username: 'phase9b_auth_flow',
+        passwordHash,
+        fullName: 'Phase 9B auth flow',
+        roleCode: RoleCode.operator,
+      },
+    });
+
+    const login = await auth.login({
+      username: user.username,
+      password,
+      rememberLogin: false,
+    });
+    const passwordPayload = await new JwtService().verifyAsync<{
+      sub: string;
+      sid: string;
+    }>(login.data.accessToken, {
+      secret: config.getOrThrow<string>('JWT_SECRET'),
+    });
+    expect(passwordPayload.sub).toBe(user.id);
+    expect(passwordPayload.sid).toBeTruthy();
+    expect(
+      await prisma.authSession.findUnique({
+        where: { id: passwordPayload.sid },
+      }),
+    ).toMatchObject({ userId: user.id, revokedAt: null });
+
+    const remembered = await rememberedLogin.enable(
+      user.id,
+      'phase9b-auth-machine',
+    );
+    const restored = await rememberedLogin.restore(
+      remembered.data.token,
+      'phase9b-auth-machine',
+    );
+    expect(restored.data.status).toBe('REMEMBER_RESTORED');
+    if (restored.data.status !== 'REMEMBER_RESTORED') {
+      throw new Error('Expected remembered login to restore.');
+    }
+    const restoredSession = restored.data as {
+      status: 'REMEMBER_RESTORED';
+      accessToken: string;
+    };
+
+    const restoredPayload = await new JwtService().verifyAsync<{
+      sub: string;
+      sid: string;
+    }>(restoredSession.accessToken, {
+      secret: config.getOrThrow<string>('JWT_SECRET'),
+    });
+    expect(restoredPayload.sid).not.toBe(passwordPayload.sid);
+
+    const request = {
+      headers: { authorization: `Bearer ${restoredSession.accessToken}` },
+    };
+    const guard = new JwtAuthGuard(config, new JwtService(), authSessions);
+    await expect(guard.canActivate(authContext(request))).resolves.toBe(true);
+    expect(request).toMatchObject({
+      user: { id: user.id, sessionId: restoredPayload.sid },
+    });
+
+    await rememberedLogin.logoutSession(user.id, restoredPayload.sid);
+    expect(await prisma.rememberedLogin.count()).toBe(0);
+    const loggedOutSession = await prisma.authSession.findUniqueOrThrow({
+      where: { id: restoredPayload.sid },
+    });
+    expect(loggedOutSession.revokedAt).toBeInstanceOf(Date);
+    expect(loggedOutSession.revokeReason).toBe('logout');
+    await expect(
+      guard.canActivate(
+        authContext({
+          headers: { authorization: `Bearer ${restoredSession.accessToken}` },
+        }),
+      ),
+    ).rejects.toBeInstanceOf(UnauthorizedException);
+
+    expect(
+      await authSessions.findActive(passwordPayload.sid, user.id),
+    ).not.toBe(null);
+    await authSessions.revokeCurrent(user.id, passwordPayload.sid, 'logout');
+
+    const authAudit = await prisma.auditLog.findMany({
+      where: {
+        actorId: user.id,
+        action: { startsWith: 'auth.' },
+      },
+      select: { details: true },
+    });
+    const serializedAudit = JSON.stringify(authAudit);
+    expect(serializedAudit).not.toContain(password);
+    expect(serializedAudit).not.toContain(login.data.accessToken);
+    expect(serializedAudit).not.toContain(remembered.data.token);
   });
 
   it('persists only a remember-token hash and restores every role', async () => {
@@ -225,6 +398,14 @@ describe('Phase 9B isolated database integration', () => {
         roleCode: RoleCode.operator,
       },
     });
+    const roleSessionA = await authSessions.create(
+      roleChangeUser.id,
+      'password',
+    );
+    const roleSessionB = await authSessions.create(
+      roleChangeUser.id,
+      'remembered-login',
+    );
     await rememberedLogin.enable(roleChangeUser.id, 'phase9b-role-machine');
     await users.updateUser(
       roleChangeUser.id,
@@ -234,10 +415,48 @@ describe('Phase 9B isolated database integration', () => {
     );
     expect(await prisma.rememberedLogin.count()).toBe(0);
     expect(
+      await prisma.authSession.count({
+        where: {
+          id: { in: [roleSessionA.id, roleSessionB.id] },
+          revokedAt: { not: null },
+          revokeReason: 'role-change',
+        },
+      }),
+    ).toBe(2);
+    expect(
+      await prisma.auditLog.count({
+        where: {
+          action: 'auth.session.revoke-role-change',
+          target: roleChangeUser.id,
+        },
+      }),
+    ).toBe(1);
+    expect(
       await prisma.auditLog.count({
         where: { action: 'auth.remember.revoke-role-change' },
       }),
     ).toBe(1);
+
+    const inactiveUser = await prisma.user.create({
+      data: {
+        username: 'phase9b_inactive',
+        passwordHash: 'phase9b-non-login-hash',
+        fullName: 'Phase 9B inactive',
+        roleCode: RoleCode.operator,
+      },
+    });
+    const inactiveSession = await authSessions.create(
+      inactiveUser.id,
+      'password',
+    );
+    await rememberedLogin.enable(inactiveUser.id, 'phase9b-inactive-machine');
+    await users.updateUser(inactiveUser.id, { active: false }, true, actor.id);
+    const revokedInactiveSession = await prisma.authSession.findUniqueOrThrow({
+      where: { id: inactiveSession.id },
+    });
+    expect(revokedInactiveSession.revokedAt).toBeInstanceOf(Date);
+    expect(revokedInactiveSession.revokeReason).toBe('account-state');
+    expect(await prisma.rememberedLogin.count()).toBe(0);
 
     const deleteUser = await prisma.user.create({
       data: {
@@ -247,9 +466,13 @@ describe('Phase 9B isolated database integration', () => {
         roleCode: RoleCode.operator,
       },
     });
+    const deleteSession = await authSessions.create(deleteUser.id, 'password');
     await rememberedLogin.enable(deleteUser.id, 'phase9b-delete-machine');
     await users.deleteUser(deleteUser.id, actor.id, true);
     expect(await prisma.rememberedLogin.count()).toBe(0);
+    expect(
+      await prisma.authSession.findUnique({ where: { id: deleteSession.id } }),
+    ).toBeNull();
     expect(
       await prisma.auditLog.count({
         where: {
@@ -307,7 +530,10 @@ describe('Phase 9B isolated database integration', () => {
       {} as never,
       users,
     );
-    const actor = users.toSessionUser(loaded!);
+    const actor = {
+      ...users.toSessionUser(loaded!),
+      sessionId: 'phase9b-session',
+    };
     await expect(
       controller.saveSettings(reconnectDto(), actor, 'phase9b-desktop-token'),
     ).rejects.toBeInstanceOf(ForbiddenException);
@@ -385,6 +611,12 @@ function permissionContext(handler: unknown, userId: string) {
     switchToHttp: () => ({
       getRequest: () => ({ user: { id: userId } }),
     }),
+  } as unknown as ExecutionContext;
+}
+
+function authContext(request: object) {
+  return {
+    switchToHttp: () => ({ getRequest: () => request }),
   } as unknown as ExecutionContext;
 }
 
