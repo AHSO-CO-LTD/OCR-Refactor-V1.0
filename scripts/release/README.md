@@ -1,10 +1,10 @@
 # Release Setup Notes
 
-Status: Current release-script reference for stable source `1.5.0`; installed
-RC2 acceptance was reported successful by the user and publication is pending.
+Status: Current release-script reference for published stable `v1.5.0`.
+Installed RC2 acceptance was reported successful by the user before promotion.
 
-Last source review: `2026-10-09`. The RC2 release build and user-reported
-installed acceptance are recorded in the associated plan; no publish is implied.
+Last source review: `2026-10-12`. Stable publication evidence and the remaining
+target-machine acceptance scope are recorded in the associated release plan.
 
 The release process may stage an approved encrypted Tool bundle and compiled
 license artifacts. It must not modify `tool/` or original license source and

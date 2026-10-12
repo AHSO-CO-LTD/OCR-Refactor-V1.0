@@ -1,11 +1,11 @@
 # Windows Setup And Update Flow
 
-Status: Stable source `1.5.0` is being prepared for publication after local
-candidate `1.5.0-rc.2` corrected the dev API URL found in RC1. The user reported
-successful installed-RC2 acceptance on 2026-10-09. Publication remains pending
-and the last published release is `v1.4.0`.
+Status: Stable `v1.5.0` was published on 2026-10-12 after local candidate
+`1.5.0-rc.2` corrected the dev API URL found in RC1. The user reported
+successful installed-RC2 acceptance on 2026-10-09. Target-machine update and
+rollback acceptance remain separate.
 
-Last source review: `2026-10-09`. This document describes the checked-in
+Last source review: `2026-10-12`. This document describes the checked-in
 installer/release implementation. A local candidate does not imply publication.
 
 Related records: [`../PROJECT_PROFILE.md`](../PROJECT_PROFILE.md),
@@ -140,6 +140,22 @@ restart/cold boot, in-app restart and safe default uninstall preservation
 working. This is user-reported acceptance rather than an agent-captured
 installer transcript. Update rollback, downgrade recovery and destructive
 uninstall options were not separately evidenced.
+
+### Published stable release
+
+Tag `v1.5.0` points to release commit
+`f0b3bc01ca6f48458284361c2e6e06c97c32dbd8`. GitHub Actions run
+`38199196122` completed successfully and published exactly these updater assets:
+
+- `AHSO-OCR-Setup-1.5.0-x64.exe` (`112853917` bytes; SHA-256
+  `3DEBBA5034B6744D8C1287AEFB3DD5F221262054F1FBB28A547DDB83F2462662`)
+- `AHSO-OCR-Setup-1.5.0-x64.exe.blockmap` (`118874` bytes)
+- `latest.yml` (`353` bytes)
+
+The downloaded `latest.yml` reports version `1.5.0`, the expected installer
+name, and the same installer size. The release is public, non-draft,
+non-prerelease, and GitHub reports it as latest. CI-generated artifacts may
+differ byte-for-byte from a local build because the builds are independent.
 
 ## Env Rule
 

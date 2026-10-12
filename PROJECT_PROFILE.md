@@ -1,8 +1,8 @@
 # Project Profile
 
 Last source review: 2026-10-12
-Current source version: `1.5.0` on branch `remote`; publication is pending and
-the last published release remains `v1.4.0`.
+Current source version: `1.5.0` on branch `remote`; the latest published stable
+release is `v1.5.0`.
 
 ## Project
 
@@ -152,8 +152,10 @@ See [docs/12-dongil-server-integration.md](docs/12-dongil-server-integration.md)
   guard and safe uninstall defaults and was built without publishing on
   2026-10-08. The user subsequently reported successful installed-RC2
   acceptance for local API/login, remembered login across restart/cold boot,
-  in-app restart, safe uninstall defaults, PLC, camera and Dongil. Publication
-  and release-asset verification remain pending.
+  in-app restart, safe uninstall defaults, PLC, camera and Dongil. Stable
+  `v1.5.0` was published on 2026-10-12 after the local and CI release gates
+  passed. The target-machine update/rollback path remains a separate acceptance
+  item.
 - Online preflight checks Node.js 22+, bundled Tool Python 3.11, PostgreSQL 14+,
   and network access only when a missing runtime must be downloaded.
 - The installer supports new databases, reuse, selection of a different name,
@@ -247,7 +249,14 @@ the local API/login path, remembered login across repeated restart and cold
 boot, in-app restart, default app-only uninstall preservation, PLC, camera and
 Dongil operation. Both manual acceptance sets are user-reported rather than
 agent-captured. They do not separately prove every revocation/WebSocket case,
-update/rollback, downgrade recovery, representative production-data migration,
-or release publication. Changed source files previously passed non-fixing
-ESLint; full frontend and backend lint remain blocked by documented baseline
-issues outside this change set.
+update/rollback, downgrade recovery, or representative production-data
+migration.
+
+On 2026-10-12, stable `v1.5.0` was published from release commit
+`f0b3bc01ca6f48458284361c2e6e06c97c32dbd8`. GitHub Actions run
+`38199196122` passed and published the installer, blockmap, and `latest.yml` as
+a non-draft, non-prerelease latest release. The release workflow and manifest
+were verified after upload; installation through the updater on a target
+workstation remains unobserved. Changed source files previously passed
+non-fixing ESLint; full frontend and backend lint remain blocked by documented
+baseline issues outside this change set.

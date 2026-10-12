@@ -19,7 +19,7 @@ Python Device Tool owns camera, OCR, Modbus TCP, and SLMP operations.
 
 ## Current Source Baseline
 
-- Version metadata: `1.5.0`; last published release: `v1.4.0`.
+- Version metadata: `1.5.0`; last published release: `v1.5.0`.
 - Git branch used by this checkout: `remote`.
 - Frontend dev port: `3970`.
 - Backend dev port: `3980`.

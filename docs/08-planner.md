@@ -1,6 +1,6 @@
 # Current Planner
 
-Last source review: 2026-10-09
+Last source review: 2026-10-12
 
 ## Delivered
 
@@ -24,6 +24,8 @@ Last source review: 2026-10-09
 - User-reported installed-RC2 acceptance on 2026-10-09 for local API/login,
   remembered login across repeated restart/cold boot, in-app restart, default
   uninstall preservation, PLC, camera and Dongil operation.
+- Stable `v1.5.0` publication on 2026-10-12 with a successful Windows Setup
+  workflow and verified installer, blockmap, and updater manifest assets.
 
 The installed acceptance is a user report, not agent-captured evidence. It does
 not imply that every update/rollback, downgrade, representative-data migration,
@@ -37,25 +39,15 @@ session revocation/WebSocket or hardware failure case was separately exercised.
 - [RC1 release candidate](plans/2026-10-07-release-candidate-1.5.0-rc.1.md): historical invalidated candidate because of the embedded dev API URL.
 - [RC2 API and safe uninstall](plans/2026-10-08-rc2-local-api-and-safe-uninstall.md): done, including user-reported packaged acceptance.
 - [Documentation progress refresh](plans/2026-10-09-documentation-progress-refresh.md): current documentation audit.
+- [Stable v1.5.0 release](plans/2026-10-12-release-v1.5.0.md): published and verified.
 
-## Next Release Path
+## Next Acceptance Path
 
-1. Publish the approved stable `v1.5.0` release and verify its updater assets.
-2. If promoting to final, align all workspace, lockfile, Swagger and release
-   metadata before creating the release commit.
-3. Recheck Git status, protected boundaries, version consistency, artifact
-   policy and release workflow inputs.
-4. Commit and push the approved documentation/version changes only when
-   explicitly requested.
-5. Push the corresponding immutable tag and let `Windows Setup` build the
-   installer with the pinned private Tool artifact.
-6. Verify the workflow, GitHub Release metadata, installer/blockmap/latest.yml,
-   checksums and download availability.
-7. Preserve RC2 acceptance notes and record any final-version delta; if the
-   final build differs materially, repeat the affected acceptance cases.
-
-No `v1.5.0*` tag or GitHub Release exists at this review point. The latest
-published release remains `v1.4.0`.
+1. Let a representative `v1.4.0` workstation discover stable `v1.5.0`.
+2. Verify download, explicit install confirmation, preserved database/config,
+   restart, preflight, login/session restore, PLC, camera, and Dongil operation.
+3. Exercise the rollback/recovery path separately and retain its logs.
+4. Start deeper dependency and runtime hardening only under a new approved plan.
 
 ## Residual Risks And Deferred Work
 
@@ -78,17 +70,16 @@ published release remains `v1.4.0`.
 No Dongil Server source/API/database/business-flow, Device Tool, protected
 license or ROI change is allowed in the release path.
 
-## Current Source Snapshot — 2026-10-09
+## Current Source Snapshot - 2026-10-12
 
 - Branch: `remote`.
-- HEAD and `origin/remote`:
-  `e152c9d4c5fe203c94682279b1fa9ab7cf9c6620` (`Fix Auto login`).
+- Release commit and immutable tag target:
+  `f0b3bc01ca6f48458284361c2e6e06c97c32dbd8` (`release: v1.5.0`).
 - Workspace, lockfile and Swagger version: `1.5.0`.
 - Prisma migration directories: 49.
-- Worktree was clean before this documentation refresh.
-- Latest local tag and GitHub Release: `v1.4.0`; no `v1.5.0*` remote tag.
-- RC2 local installer SHA-256:
-  `EFEB014AA300844710FD58E83AD782CC0880BB0962E68C40BFA9E33A7149F73C`.
+- Latest local tag and GitHub Release: `v1.5.0`.
+- Published CI installer SHA-256:
+  `3DEBBA5034B6744D8C1287AEFB3DD5F221262054F1FBB28A547DDB83F2462662`.
 - `tool/` and protected license boundaries remain outside documentation edits.
 
 ## Definition Of Done For Future Features

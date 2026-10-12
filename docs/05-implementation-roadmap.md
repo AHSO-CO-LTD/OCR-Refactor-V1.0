@@ -20,8 +20,9 @@
 
 ## Current Hardening Priorities
 
-1. Decide the public release version, align metadata if promoting RC2 to a
-   final version, then commit/push/tag and verify the GitHub Actions artifacts.
+1. Validate the published `v1.5.0` update and rollback path on a representative
+   target workstation without changing the accepted server, Tool, license, or
+   ROI behavior.
 2. Preserve detailed acceptance evidence for update/rollback, representative
    production-data migration, session revocation/WebSocket closure and
    downgrade recovery; the user-reported RC2 pass does not isolate these cases.
