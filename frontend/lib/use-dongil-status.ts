@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { getDesktopBridge, type DesktopDongilStatus } from "@/lib/desktop";
+import { getAccessToken } from "@/lib/session";
 
 export function useDongilStatus(refreshMs = 5_000) {
   const [status, setStatus] = useState<DesktopDongilStatus | null>(null);
@@ -15,8 +16,14 @@ export function useDongilStatus(refreshMs = 5_000) {
       setLoading(false);
       return null;
     }
+    const accessToken = getAccessToken();
+    if (!accessToken) {
+      setError("An active session is required.");
+      setLoading(false);
+      return null;
+    }
     try {
-      const response = await bridge.getDongilStatus();
+      const response = await bridge.getDongilStatus(accessToken);
       const nextStatus = response.data ?? null;
       setStatus(nextStatus);
       setError(null);

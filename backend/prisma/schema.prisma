@@ -114,6 +114,32 @@ model User {
   inspectionJobs      InspectionJob[]     @relation("InspectionJobStartedBy")
   endedInspectionJobs InspectionJob[]     @relation("InspectionJobEndedBy")
   testSessionReports  TestSessionReport[]
+  rememberedLogin     RememberedLogin?
+  authSessions        AuthSession[]
+}
+
+model RememberedLogin {
+  id             String   @id @default("default")
+  userId         String   @unique
+  machineId      String   @unique
+  tokenHash      String   @unique
+  roleCodeAtSave RoleCode
+  enabledAt      DateTime @default(now())
+  lastRestoredAt DateTime?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model AuthSession {
+  id           String    @id @default(cuid())
+  userId       String
+  createdAt    DateTime  @default(now())
+  revokedAt    DateTime?
+  revokeReason String?
+  user         User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, revokedAt])
 }
 
 model Role {
@@ -293,13 +319,15 @@ model LicenseLog {
 
 model DongilSyncConfiguration {
   id                      String   @id @default("default")
-  serverUrl               String
-  machineId               String
+  serverUrl               String?
+  machineId               String?
   machineTypeCode         String   @default("WASHING_MACHINE")
-  licenseStatus           String
+  licenseStatus           String?
   assignedMachineTypeCode String?
   registrationStatus      String?
   autoConnectEnabled      Boolean  @default(false)
+  configVersion           Int      @default(2)
+  legacyEnvImportedAt     DateTime?
   lastRegisteredAt        DateTime?
   lastConfigSyncAt        DateTime?
   createdAt               DateTime @default(now())

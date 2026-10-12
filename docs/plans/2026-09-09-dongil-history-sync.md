@@ -1,6 +1,12 @@
 # Dongil washing-history synchronization
 
-Status: In Progress
+Status: Implemented; installed Dongil operation accepted by user report, full reconciliation matrix pending
+
+Implementation status reviewed against source on `2026-10-09`. The migration,
+worker, API, permissions and Processing UI are present. The user reported
+installed RC2 Dongil operation working, and the earlier source pilot reported
+outbox replay after temporary LAN loss. A full connected-server historical
+snapshot/reconciliation matrix was not independently captured by the agent.
 
 ## Objective
 

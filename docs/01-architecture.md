@@ -1,164 +1,90 @@
 # System Architecture
 
-## High-Level Architecture
+## Component View
 
 ```text
-LOCAL PC / INDUSTRIAL PC
+Windows industrial PC
 
-+------------------------------------------------------------+
-|                    DESKTOP APP (.exe)                     |
-|                                                            |
-|  Electron Main Process                                    |
-|  - app lifecycle                                          |
-|  - single instance                                        |
-|  - local service startup/shutdown                         |
-|  - dongle/license check                                   |
-|  - auto update hooks                                      |
-|                                                            |
-|  Electron Renderer                                        |
-|  - Next.js + React + TypeScript                           |
-|  - dashboards                                             |
-|  - config screens                                         |
-|  - history and reports                                    |
-|  - role-aware UI                                          |
-+-----------------------------+------------------------------+
-                              |
-                              | REST
-                              v
-+------------------------------------------------------------+
-|                        NestJS API                         |
-|                                                            |
-|  - auth                                                   |
-|  - users / roles / permissions                            |
-|  - product config                                         |
-|  - camera config                                          |
-|  - ROI config                                             |
-|  - inspection orchestration                               |
-|  - history and reports                                    |
-|  - websocket gateway for camera stream proxy              |
-|  - calls Device/OCR Tool via REST/WebSocket               |
-+-----------------------------+------------------------------+
-                              |
-                              | REST / WebSocket
-                              v
-+-----------------------------+------------------------------+
-|            Python FastAPI Device/OCR Tool in tool/        |
-|                                                            |
-|  - camera discovery, connect, grab, live stream           |
-|  - OCR ROI inference                                      |
-|  - YOLO model runtime                                     |
-|  - preprocessing                                          |
-|  - structured OCR result payloads                         |
-+-----------------------------+------------------------------+
-                              |
-                              | SQL through backend only
-                              v
-+------------------------------------------------------------+
-|                        PostgreSQL                         |
-|                                                            |
-|  - users                                                  |
-|  - roles                                                  |
-|  - permissions                                            |
-|  - products                                               |
-|  - configs                                                |
-|  - inspection logs                                        |
-+------------------------------------------------------------+
+Electron main process
+  - elevation and single instance
+  - startup and shutdown state machines
+  - service ownership and watchdog
+  - updater and rollback recovery
+  - restricted preload IPC
+        |
+        v
+Next.js renderer ---- REST/WebSocket ----> NestJS backend
+                                            |        |
+                                            |        +--> Dongil Server
+                                            |
+                                            +--> PostgreSQL / Prisma
+                                            |
+                                            +--> Device Tool /tool/v1
+                                                   - Basler camera
+                                                   - YOLO/OCR
+                                                   - Modbus TCP / SLMP
 ```
 
-## Recommended Responsibility Split
+## Electron Responsibilities
 
-### Electron
+- Require Administrator for packaged runtime.
+- Enforce a single application instance.
+- Load ProgramData runtime configuration.
+- Start or reuse healthy local services without taking over unrelated processes.
+- Run database deployment migrations before backend startup.
+- Display startup state and block on license failure.
+- Coordinate hardware cleanup, owned-service shutdown, updates, and rollback.
+- Persist desktop-only preferences outside business data.
 
-Electron is the desktop container and should own:
+Electron does not own business authorization or production data.
 
-- opening the desktop window
-- enforcing single instance behavior
-- starting and stopping local services
-- boot-time dongle/license validation
-- app-level shutdown and recovery flows
-- packaging as `.exe`
+## Frontend Responsibilities
 
-### Next.js
+- Render login, setup, Line, configuration, reports, users, roles, and settings.
+- Apply i18n, touch-first interaction, loading/error/empty states, and permission-aware visibility.
+- Keep only minimal session and UI preference data in application-owned browser storage.
+- Call NestJS only; never access Tool, database, dongle, or Dongil directly.
 
-Next.js is the UI layer and should own:
+## Backend Responsibilities
 
-- all screens and layouts
-- forms and validation
-- role-aware rendering
-- local user interaction
-- dashboard visualization
-- realtime status display when data is provided by backend
+- Authenticate users and enforce permissions.
+- Own product, camera identity, ROI, PLC, inspection, reporting, and sync rules.
+- Persist durable state through Prisma.
+- Adapt Device Tool REST/WebSocket contracts.
+- Maintain machine runtime state independent of page navigation.
+- Persist and deliver Dongil outbox/history synchronization.
+- Expose Swagger documentation.
 
-The frontend must not talk directly to camera SDKs, PLC libraries, or AI/OCR libraries.
+## Device Tool Boundary
 
-### NestJS
+The Tool is a separately versioned read-only submodule. It owns device transport
+and OCR execution. Current relevant namespaces include:
 
-NestJS is the local business backend and should own:
+- `/tool/v1/basler_area/*`
+- `/tool/v1/camera/*`
+- `/tool/v1/AI/yolo_ocr/*`
+- `/tool/v1/modbus_tcp/*`
+- `/tool/v1/slmp/*`
+- `/tool/v1/comm/*`
 
-- authentication and session management
-- permission enforcement
-- CRUD for system data
-- orchestration of inspection jobs
-- persistence and retrieval of business data
-- API contract normalization
-- outbound calls to the Device/OCR Tool in `tool/`
+Backend converts application DTOs to these contracts and normalizes failures.
 
-### Python + FastAPI Device/OCR Tool
+## Data And Contract Boundaries
 
-The Python/FastAPI service in `tool/` is the local device and OCR worker and should own:
+- PostgreSQL is backend-only.
+- `shared/` is not yet an active contract source.
+- Backend DTOs and frontend `lib/api.ts` currently duplicate some contracts.
+- Device Tool payload changes require coordinated consumer review.
+- Dongil contracts use stable machine credentials and result IDs.
 
-- camera device discovery, connection, grab, and live stream
-- frame preprocessing
-- OCR
-- detection
-- model inference
-- returning structured recognition results
+## Security Boundaries
 
-The archived previous implementation stays in `tool-test/` for reference only.
+- Renderer is sandboxed with Node integration disabled.
+- Preload exposes an explicit IPC surface.
+- Backend guards remain authoritative.
+- Electron internal backend endpoints use a random runtime token.
+- Device Tool network exposure requires deployment controls because the Tool has no application JWT layer.
 
-### PostgreSQL
+## Decisions
 
-PostgreSQL stores all durable app data:
-
-- users
-- roles
-- permissions
-- products
-- settings
-- inspection logs
-- history and reports
-- license metadata if needed
-
-## Core Design Rules
-
-- UI is stateless with regard to security decisions.
-- Backend is the source of truth for permissions.
-- Device/OCR Tool is replaceable and isolated behind backend APIs.
-- Frontend calls backend only.
-- All critical actions must be validated server-side.
-- Offline operation must remain possible.
-
-## Local-First Deployment Model
-
-The app is not a cloud SaaS product. It is a local desktop system intended to run on one machine in the production environment.
-
-Recommended runtime behavior:
-
-- start Electron
-- check dongle
-- start or connect to local backend, frontend, and Device/OCR Tool services
-- connect to local PostgreSQL
-- open the UI only after essential services are ready
-
-## Suggested Repository Shape
-
-```text
-frontend/   # Next.js renderer and Electron shell
-backend/    # NestJS backend
-tool/       # FastAPI Device/OCR Tool
-tool-test/  # archived previous Device Tool implementation
-shared/     # shared types, schemas, constants
-docs/
-infra/
-scripts/
-```
+Accepted architecture records are under [adr](adr/).

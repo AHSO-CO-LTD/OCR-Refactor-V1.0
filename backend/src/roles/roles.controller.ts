@@ -56,6 +56,7 @@ export class RolesController {
     return this.rolesService.setRolePermissions(
       roleCode,
       dto.permissions,
+      user.id,
       user.role === 'dev',
     );
   }

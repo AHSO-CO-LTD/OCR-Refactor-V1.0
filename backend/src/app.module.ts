@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
+import { AuthSessionModule } from './auth/auth-session.module';
 import { AuthModule } from './auth/auth.module';
 import { CameraModule } from './camera/camera.module';
 import { DatabaseModule } from './database/database.module';
@@ -22,6 +23,7 @@ import { UsersModule } from './users/users.module';
       envFilePath: ['.env', '../.env'],
     }),
     DatabaseModule,
+    AuthSessionModule,
     DongilSyncModule,
     UsersModule,
     AuthModule,

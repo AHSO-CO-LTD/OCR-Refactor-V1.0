@@ -119,6 +119,12 @@ const translations = {
     "auth.showPassword": "Show password",
     "auth.hidePassword": "Hide password",
     "auth.rememberLogin": "Remember login",
+    "auth.rememberUnavailable":
+      "Secure Windows storage is unavailable. Sign-in will still work, but this account cannot be remembered.",
+    "auth.rememberEnableFailed":
+      "Signed in, but this account could not be remembered.",
+    "auth.rememberCleanupFailed":
+      "Signed in, but the old remembered-login file could not be cleaned up yet.",
     "auth.login": "Login",
     "auth.loginSuccess": "Signed in successfully.",
     "auth.checking": "Checking...",
@@ -141,6 +147,18 @@ const translations = {
     "login.cameraCheck": "Camera",
     "login.autoLoginChecking":
       "Valid dongle detected. Restoring the remembered session...",
+    "login.rememberError.REMEMBER_LOCAL_TOKEN_INVALID":
+      "The saved sign-in data was invalid. Sign in again.",
+    "login.rememberError.REMEMBER_TOKEN_INVALID":
+      "The saved sign-in token is no longer valid. Sign in again.",
+    "login.rememberError.REMEMBER_MACHINE_MISMATCH":
+      "The saved account belongs to another machine. Sign in again.",
+    "login.rememberError.REMEMBER_ROLE_CHANGED":
+      "The account role changed. Sign in again to confirm access.",
+    "login.rememberError.REMEMBER_USER_INACTIVE":
+      "The saved account is inactive or unavailable. Sign in with an active account.",
+    "login.rememberError.REMEMBER_DONGLE_REQUIRED":
+      "Insert the physical license dongle, then retry startup.",
     "login.startupHardwareTitle": "Preparing machine hardware",
     "login.startupHardwareHint":
       "PLC and camera checks are best-effort. Their failure does not block manual login.",
@@ -502,6 +520,8 @@ const translations = {
     "session.accountMenu": "Account menu",
     "session.hiddenDev": "hidden dev",
     "session.logout": "Logout",
+    "session.logoutFailed":
+      "Could not complete sign-out. Check the local service and try again.",
     "devRolePreview.title": "Role preview",
     "devRolePreview.note": "UI only. API permissions remain Developer.",
     "devRolePreview.activeSuffix": "Preview",
@@ -571,6 +591,7 @@ const translations = {
     "settings.dongilMachineId": "Machine ID",
     "settings.dongilMachineName": "Machine name",
     "settings.dongilMachineType": "Machine type",
+    "settings.dongilAssignedMachineType": "Server-assigned machine type",
     "settings.dongilMachineActive": "Machine active",
     "settings.dongilFactory": "Factory",
     "settings.dongilLine": "Line",
@@ -581,6 +602,16 @@ const translations = {
     "settings.dongilTesting": "Testing...",
     "settings.dongilTestSuccess": "Server responded in {latency} ms.",
     "settings.dongilTestFailed": "Could not reach Dongil Server.",
+    "settings.dongilDiagnosticRegistrationNotReady":
+      "The machine registration or credential is not ready.",
+    "settings.dongilDiagnosticStages": "Connection diagnostics",
+    "settings.dongilDiagnosticStage.URL_VALIDATION": "Server address",
+    "settings.dongilDiagnosticStage.SERVER_HEALTH": "Server health",
+    "settings.dongilDiagnosticStage.REGISTRATION": "Registration",
+    "settings.dongilDiagnosticStage.MACHINE_TYPE": "Machine type",
+    "settings.dongilDiagnosticStatus.PASSED": "Passed",
+    "settings.dongilDiagnosticStatus.FAILED": "Failed",
+    "settings.dongilDiagnosticStatus.SKIPPED": "Skipped",
     "settings.dongilSaveConnect": "Save configuration",
     "settings.dongilSave": "Save configuration",
     "settings.dongilSaving": "Saving...",
@@ -630,6 +661,8 @@ const translations = {
     "settings.dongilState.REGISTRATION_REJECTED": "Registration rejected",
     "settings.dongilState.NEEDS_CREDENTIAL_RECOVERY":
       "Credential recovery required",
+    "settings.dongilState.MACHINE_TYPE_MISMATCH":
+      "Machine type does not match the server assignment",
     "settings.dongilState.DISABLED": "Not configured",
     "settings.dongilState.CONNECTING": "Connecting",
     "settings.dongilState.ONLINE": "Connected",
@@ -1737,6 +1770,12 @@ const translations = {
     "auth.showPassword": "Hiện mật khẩu",
     "auth.hidePassword": "Ẩn mật khẩu",
     "auth.rememberLogin": "Ghi nhớ đăng nhập",
+    "auth.rememberUnavailable":
+      "Không thể dùng bộ nhớ bảo mật của Windows. Bạn vẫn có thể đăng nhập nhưng không thể ghi nhớ tài khoản này.",
+    "auth.rememberEnableFailed":
+      "Đã đăng nhập nhưng không thể ghi nhớ tài khoản này.",
+    "auth.rememberCleanupFailed":
+      "Đã đăng nhập nhưng chưa thể dọn dữ liệu ghi nhớ cũ.",
     "auth.login": "Đăng nhập",
     "auth.checking": "Đang kiểm tra...",
     "auth.signingIn": "Đang đăng nhập...",
@@ -1748,6 +1787,18 @@ const translations = {
     "login.dongleGate": "Khóa dongle",
     "login.autoLoginChecking":
       "Đã nhận dongle hợp lệ. Đang khôi phục phiên đăng nhập đã ghi nhớ...",
+    "login.rememberError.REMEMBER_LOCAL_TOKEN_INVALID":
+      "Dữ liệu đăng nhập đã lưu không hợp lệ. Vui lòng đăng nhập lại.",
+    "login.rememberError.REMEMBER_TOKEN_INVALID":
+      "Mã đăng nhập đã lưu không còn hợp lệ. Vui lòng đăng nhập lại.",
+    "login.rememberError.REMEMBER_MACHINE_MISMATCH":
+      "Tài khoản đã lưu thuộc về máy khác. Vui lòng đăng nhập lại.",
+    "login.rememberError.REMEMBER_ROLE_CHANGED":
+      "Vai trò tài khoản đã thay đổi. Vui lòng đăng nhập lại để xác nhận quyền.",
+    "login.rememberError.REMEMBER_USER_INACTIVE":
+      "Tài khoản đã lưu không hoạt động hoặc không còn tồn tại. Vui lòng dùng tài khoản đang hoạt động.",
+    "login.rememberError.REMEMBER_DONGLE_REQUIRED":
+      "Hãy cắm dongle bản quyền thật rồi thử lại bước khởi động.",
     "login.startupHardwareTitle": "Chuẩn bị phần cứng máy",
     "login.startupHardwareHint":
       "Kiểm tra PLC và camera là best-effort. Lỗi phần cứng không chặn đăng nhập thủ công.",
@@ -2107,6 +2158,8 @@ const translations = {
     "session.accountMenu": "Menu tài khoản",
     "session.hiddenDev": "dev ẩn",
     "session.logout": "Đăng xuất",
+    "session.logoutFailed":
+      "Không thể hoàn tất đăng xuất. Hãy kiểm tra dịch vụ local rồi thử lại.",
     "devRolePreview.title": "Xem thử giao diện theo vai trò",
     "devRolePreview.note": "Chỉ đổi giao diện. Quyền API vẫn là Developer.",
     "devRolePreview.activeSuffix": "Đang xem thử",
@@ -2167,6 +2220,7 @@ const translations = {
     "settings.dongilMachineId": "Machine ID",
     "settings.dongilMachineName": "Tên máy",
     "settings.dongilMachineType": "Loại máy",
+    "settings.dongilAssignedMachineType": "Loại máy do server chỉ định",
     "settings.dongilMachineActive": "Trạng thái kích hoạt",
     "settings.dongilFactory": "Nhà máy",
     "settings.dongilLine": "Chuyền",
@@ -2177,6 +2231,16 @@ const translations = {
     "settings.dongilTesting": "Đang kiểm tra...",
     "settings.dongilTestSuccess": "Server phản hồi trong {latency} ms.",
     "settings.dongilTestFailed": "Không thể kết nối Dongil Server.",
+    "settings.dongilDiagnosticRegistrationNotReady":
+      "Đăng ký máy hoặc thông tin xác thực chưa sẵn sàng.",
+    "settings.dongilDiagnosticStages": "Chẩn đoán kết nối",
+    "settings.dongilDiagnosticStage.URL_VALIDATION": "Địa chỉ server",
+    "settings.dongilDiagnosticStage.SERVER_HEALTH": "Tình trạng server",
+    "settings.dongilDiagnosticStage.REGISTRATION": "Đăng ký máy",
+    "settings.dongilDiagnosticStage.MACHINE_TYPE": "Loại máy",
+    "settings.dongilDiagnosticStatus.PASSED": "Đạt",
+    "settings.dongilDiagnosticStatus.FAILED": "Lỗi",
+    "settings.dongilDiagnosticStatus.SKIPPED": "Bỏ qua",
     "settings.dongilSaveConnect": "Lưu cấu hình",
     "settings.dongilSave": "Lưu cấu hình",
     "settings.dongilSaving": "Đang lưu...",
@@ -2225,6 +2289,8 @@ const translations = {
     "settings.dongilState.REGISTRATION_REJECTED": "Đăng ký bị từ chối",
     "settings.dongilState.NEEDS_CREDENTIAL_RECOVERY":
       "Cần cấp lại thông tin xác thực",
+    "settings.dongilState.MACHINE_TYPE_MISMATCH":
+      "Loại máy không khớp với chỉ định trên server",
     "settings.dongilState.DISABLED": "Chưa cấu hình",
     "settings.dongilState.CONNECTING": "Đang kết nối",
     "settings.dongilState.ONLINE": "Đã kết nối",

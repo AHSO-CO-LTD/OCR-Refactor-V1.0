@@ -1,5 +1,13 @@
 # PLC runtime
 
+Status: Implemented operational baseline.
+
+Last source review: `2026-10-09`. The checked-in backend and Device Tool HTTP
+contracts are the source of truth. The user reported installed-RC2 PLC and
+camera operation working; this documentation refresh did not itself exercise
+physical PLC or camera hardware or isolate each failure/recovery case. See
+[`adr/0004-plc-through-device-tool.md`](adr/0004-plc-through-device-tool.md).
+
 ## Desktop login startup integration
 
 As soon as the backend is online, Electron starts the license check and the PLC
@@ -73,8 +81,14 @@ Mỗi key có tên, address, trạng thái bật/tắt và một trong ba thao t
 - `POST /api/plc/outputs/error-pulse`.
 - `POST /api/plc/custom-keys/:id/execute`.
 - `GET /api/plc/machine/status`: trạng thái flow vận hành.
+- `GET/PUT /api/plc/machine/inactivity-settings`: đọc/lưu thời gian không hoạt động.
+- `GET/PUT /api/plc/machine/stop-settings`: đọc/lưu quy tắc dừng máy.
+- `POST /api/plc/machine/activity`: ghi nhận hoạt động cho bộ đếm thời gian.
 - `GET /api/plc/machine/frame`: frame gần nhất do runtime chụp khi camera live tắt.
 - `PATCH /api/plc/machine/controls`: cập nhật `manual/auto`, camera live và AI thời gian thực độc lập.
+- `PATCH /api/plc/machine/test-mode`: bật/tắt chế độ kiểm thử output.
+- `PATCH /api/plc/machine/test-output`: ghi output trong chế độ kiểm thử.
+- `POST /api/plc/machine/test-result-pulse`: thử xung kết quả trong chế độ kiểm thử.
 - `POST /api/plc/machine/start`: bắt đầu chờ tín hiệu chốt PLC.
 - `POST /api/plc/machine/stop`: kết thúc vận hành bằng thao tác app.
 - `POST /api/plc/machine/grab`: thực thi nút Grab thủ công; endpoint này không bao giờ phát xung PLC.

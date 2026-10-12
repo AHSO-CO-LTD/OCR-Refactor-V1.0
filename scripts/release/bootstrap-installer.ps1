@@ -87,7 +87,8 @@ function Write-EnvFile {
   $lines = $Values.GetEnumerator() |
     Sort-Object Key |
     ForEach-Object { "{0}={1}" -f $_.Key, $_.Value }
-  Set-Content -LiteralPath $Path -Encoding UTF8 -Value $lines
+  $utf8WithoutBom = New-Object System.Text.UTF8Encoding($false)
+  [System.IO.File]::WriteAllLines($Path, [string[]]$lines, $utf8WithoutBom)
   Protect-ProgramDataFile -Path $Path -AllowAuthenticatedRead
 }
 
@@ -190,21 +191,36 @@ function Read-EnvFile {
     return $result
   }
 
-  foreach ($line in Get-Content -LiteralPath $Path) {
+  $content = [System.IO.File]::ReadAllText($Path)
+  if ($content.Length -gt 0 -and $content[0] -eq [char]0xFEFF) {
+    $content = $content.Substring(1)
+  }
+  $lines = [System.Text.RegularExpressions.Regex]::Split($content, "`r`n|`n|`r")
+
+  for ($index = 0; $index -lt $lines.Length; $index += 1) {
+    $line = $lines[$index]
     $trimmed = $line.Trim()
     if (-not $trimmed -or $trimmed.StartsWith("#")) {
       continue
     }
 
     $separatorIndex = $trimmed.IndexOf("=")
-    if ($separatorIndex -lt 0) {
+    if ($separatorIndex -le 0) {
+      Write-BootstrapLog "Ignored invalid runtime environment assignment at line $($index + 1)."
       continue
     }
 
     $key = $trimmed.Substring(0, $separatorIndex).Trim()
+    if ($key -notmatch '^[A-Za-z_][A-Za-z0-9_]*$') {
+      Write-BootstrapLog "Ignored invalid runtime environment key at line $($index + 1): $key"
+      continue
+    }
     $value = $trimmed.Substring($separatorIndex + 1).Trim()
     if ($value.Length -ge 2 -and (($value.StartsWith('"') -and $value.EndsWith('"')) -or ($value.StartsWith("'") -and $value.EndsWith("'")))) {
       $value = $value.Substring(1, $value.Length - 2)
+    }
+    if ($result.ContainsKey($key)) {
+      Write-BootstrapLog "Duplicate runtime environment key detected; the last value will be used: $key"
     }
     $result[$key] = $value
   }

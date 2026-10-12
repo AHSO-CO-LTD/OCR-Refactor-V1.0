@@ -96,17 +96,23 @@ export function LoginSystemStatus({ className, onChange }: Props) {
   }, [apiError, onChange, t]);
 
   useEffect(() => {
-    const timer = window.setTimeout(() => {
-      void loadStatus();
-    }, 0);
-    const interval = window.setInterval(
-      () => void loadStatus(),
-      LICENSE_WATCHDOG_INTERVAL_MS,
-    );
+    let cancelled = false;
+    let nextCheckTimer: number | null = null;
+    async function poll() {
+      await loadStatus();
+      if (!cancelled) {
+        nextCheckTimer = window.setTimeout(
+          () => void poll(),
+          LICENSE_WATCHDOG_INTERVAL_MS,
+        );
+      }
+    }
+
+    void poll();
 
     return () => {
-      window.clearTimeout(timer);
-      window.clearInterval(interval);
+      cancelled = true;
+      if (nextCheckTimer !== null) window.clearTimeout(nextCheckTimer);
     };
   }, [loadStatus]);
 

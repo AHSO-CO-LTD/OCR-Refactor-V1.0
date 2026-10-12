@@ -19,20 +19,25 @@ import {
   type MachineRuntimeState,
 } from '../plc/machine-runtime.service';
 import {
+  classifyDongilFailure,
   DongilApiClient,
   DongilApiError,
   type DongilBatchItem,
   type DongilMachineConfig,
   type DongilRegistrationStatus,
 } from './dongil-api.client';
+import { LOCAL_DONGIL_MACHINE_TYPE_CODE } from './dongil-sync.constants';
 import type { BootstrapDongilSyncDto } from './dto/bootstrap-dongil-sync.dto';
 import type { RegistrationStatusDto } from './dto/registration-status.dto';
+import type { TestDongilConnectionDto } from './dto/test-dongil-connection.dto';
 
 const CONFIGURATION_ID = 'default';
 const WORKER_INTERVAL_MS = 5_000;
 const DEFAULT_HEARTBEAT_INTERVAL_MS = 10_000;
 const OUTBOX_WORKER_LEASE_ID = 'default';
 const OUTBOX_WORKER_LEASE_MS = 120_000;
+const DONGIL_CONFIGURATION_VERSION = 2;
+const CREDENTIAL_RECOVERY_ERROR_CODE = 'DONGIL_CREDENTIAL_RECOVERY_REQUIRED';
 function describeError(error: unknown) {
   return error instanceof Error ? error.message : 'Unknown Dongil Server error';
 }
@@ -40,7 +45,7 @@ function describeError(error: unknown) {
 type RuntimeConfiguration = {
   serverUrl: string;
   machineId: string;
-  machineTypeCode: string;
+  machineTypeCode: typeof LOCAL_DONGIL_MACHINE_TYPE_CODE;
   licenseStatus: 'LICENSED' | 'UNLICENSED';
   appVersion?: string;
   credential: string;
@@ -52,6 +57,7 @@ type DongilConnectionState =
   | 'REGISTRATION_APPROVED'
   | 'REGISTRATION_REJECTED'
   | 'NEEDS_CREDENTIAL_RECOVERY'
+  | 'MACHINE_TYPE_MISMATCH'
   | 'CONNECTING'
   | 'ONLINE'
   | 'RETRYING'
@@ -100,6 +106,7 @@ export class DongilSyncService implements OnModuleInit, OnModuleDestroy {
   private socketIdentityKey: string | null = null;
   private workerTimer: NodeJS.Timeout | null = null;
   private heartbeatTimer: NodeJS.Timeout | null = null;
+  private socketValidationRetryTimer: NodeJS.Timeout | null = null;
   private workerRunning = false;
   private bootstrapPromise: Promise<{ data: unknown }> | null = null;
   private connectionState: DongilConnectionState = 'DISABLED';
@@ -113,13 +120,11 @@ export class DongilSyncService implements OnModuleInit, OnModuleDestroy {
   ) {}
 
   async onModuleInit() {
+    await this.importLegacyConfiguration();
     await this.prisma.dongilSyncOutbox.updateMany({
       where: {
         status: {
-          in: [
-            DongilSyncOutboxStatus.SENDING,
-            DongilSyncOutboxStatus.BLOCKED_CONFIG,
-          ],
+          in: [DongilSyncOutboxStatus.SENDING],
         },
       },
       data: {
@@ -165,15 +170,77 @@ export class DongilSyncService implements OnModuleInit, OnModuleDestroy {
     this.connectionState = 'CONNECTING';
     this.lastErrorMessage = null;
     this.bootstrapPromise = this.performBootstrap(dto)
-      .catch((error) => {
-        this.connectionState = 'ERROR';
-        this.lastErrorMessage = describeError(error);
+      .catch(async (error: unknown) => {
+        const classification = classifyDongilFailure(error);
+        const message = describeError(error);
+        if (classification === 'CREDENTIAL_RECOVERY') {
+          await this.enterCredentialRecovery(message);
+        } else {
+          this.connectionState =
+            classification === 'RETRYABLE' ? 'RETRYING' : 'ERROR';
+          this.lastErrorMessage = message;
+          if (classification === 'PERMANENT') {
+            await this.prisma.dongilSyncConfiguration.updateMany({
+              where: { id: CONFIGURATION_ID },
+              data: { autoConnectEnabled: false },
+            });
+          }
+        }
+        this.logger.warn(
+          `[dongil.bootstrap.failed] ${JSON.stringify({
+            classification,
+            ...(error instanceof DongilApiError
+              ? {
+                  correlationId: error.correlationId,
+                  path: error.path,
+                  status: error.status,
+                  code: error.code,
+                }
+              : { type: error instanceof Error ? error.name : 'UnknownError' }),
+          })}`,
+        );
         throw error;
       })
       .finally(() => {
         this.bootstrapPromise = null;
       });
     return this.bootstrapPromise;
+  }
+
+  async reconnect(dto: BootstrapDongilSyncDto, actorId: string) {
+    try {
+      const result = await this.bootstrap(dto);
+      await this.prisma.auditLog.create({
+        data: {
+          actorId,
+          action: 'dongil.connection.reconnect',
+          target: CONFIGURATION_ID,
+          details: {
+            result: 'SUCCESS',
+            machineId: dto.machineId,
+            serverUrl: this.normalizeServerUrl(dto.serverUrl),
+          },
+        },
+      });
+      return result;
+    } catch (error) {
+      await this.prisma.auditLog.create({
+        data: {
+          actorId,
+          action: 'dongil.connection.reconnect',
+          target: CONFIGURATION_ID,
+          details: {
+            result: 'FAILED',
+            machineId: dto.machineId,
+            errorCode:
+              error instanceof DongilApiError
+                ? error.code
+                : 'DONGIL_RECONNECT_FAILED',
+          },
+        },
+      });
+      throw error;
+    }
   }
 
   async getStatus() {
@@ -205,11 +272,15 @@ export class DongilSyncService implements OnModuleInit, OnModuleDestroy {
         socketConnected: this.socket?.connected === true,
         serverUrl: this.runtime?.serverUrl ?? configuration?.serverUrl ?? null,
         machineId: this.runtime?.machineId ?? configuration?.machineId ?? null,
-        machineTypeCode:
-          this.runtime?.machineTypeCode ??
-          configuration?.machineTypeCode ??
-          null,
+        machineTypeCode: LOCAL_DONGIL_MACHINE_TYPE_CODE,
         assignedMachineTypeCode: configuration?.assignedMachineTypeCode ?? null,
+        configVersion:
+          configuration?.configVersion ?? DONGIL_CONFIGURATION_VERSION,
+        configurationSource: configuration?.serverUrl
+          ? configuration.legacyEnvImportedAt
+            ? 'LEGACY_ENV_IMPORTED'
+            : 'DATABASE'
+          : 'NOT_CONFIGURED',
         machineInfo: machineInfo
           ? {
               displayName: machineInfo.displayName,
@@ -235,7 +306,7 @@ export class DongilSyncService implements OnModuleInit, OnModuleDestroy {
         lastConfigSyncAt: configuration?.lastConfigSyncAt ?? null,
         lastError: this.lastErrorMessage
           ? {
-              code: 'DONGIL_CONNECTION_ERROR',
+              code: this.getConnectionErrorCode(),
               message: this.lastErrorMessage,
               at: new Date(),
             }
@@ -250,76 +321,245 @@ export class DongilSyncService implements OnModuleInit, OnModuleDestroy {
     };
   }
 
-  async testConnection(serverUrl: string) {
-    const normalized = this.normalizeServerUrl(serverUrl);
+  async testConnection(dto: TestDongilConnectionDto) {
     const startedAt = Date.now();
-    const response = await fetch(`${normalized}/api/v1/health`, {
-      headers: { accept: 'application/json' },
-      signal: AbortSignal.timeout(5_000),
-    });
-    if (!response.ok) {
-      throw new Error(
-        `Dongil Server health check failed with HTTP ${response.status}.`,
+    const stages: Array<{
+      id: 'URL_VALIDATION' | 'SERVER_HEALTH' | 'REGISTRATION' | 'MACHINE_TYPE';
+      status: 'PASSED' | 'FAILED' | 'SKIPPED';
+      code?: string;
+    }> = [];
+    let normalized: string;
+    try {
+      normalized = this.normalizeServerUrl(dto.serverUrl);
+      stages.push({ id: 'URL_VALIDATION', status: 'PASSED' });
+    } catch {
+      stages.push(
+        {
+          id: 'URL_VALIDATION',
+          status: 'FAILED',
+          code: 'DONGIL_URL_INVALID',
+        },
+        { id: 'SERVER_HEALTH', status: 'SKIPPED' },
+        { id: 'REGISTRATION', status: 'SKIPPED' },
+        { id: 'MACHINE_TYPE', status: 'SKIPPED' },
       );
+      return {
+        data: {
+          serverUrl: null,
+          reachable: false,
+          latencyMs: Date.now() - startedAt,
+          stages,
+        },
+      };
     }
-    const payload = (await response.json()) as { data?: { status?: unknown } };
-    if (payload.data?.status !== 'ok') {
-      throw new Error('Dongil Server health response is not ready.');
+
+    try {
+      const response = await fetch(`${normalized}/api/v1/health`, {
+        headers: { accept: 'application/json' },
+        signal: AbortSignal.timeout(5_000),
+      });
+      const payload = response.ok
+        ? ((await response.json()) as { data?: { status?: unknown } })
+        : null;
+      if (!response.ok || payload?.data?.status !== 'ok') {
+        stages.push({
+          id: 'SERVER_HEALTH',
+          status: 'FAILED',
+          code: 'DONGIL_SERVER_HEALTH_FAILED',
+        });
+      } else {
+        stages.push({ id: 'SERVER_HEALTH', status: 'PASSED' });
+      }
+    } catch {
+      stages.push({
+        id: 'SERVER_HEALTH',
+        status: 'FAILED',
+        code: 'DONGIL_SERVER_UNAVAILABLE',
+      });
+    }
+
+    if (stages.some((stage) => stage.status === 'FAILED')) {
+      stages.push(
+        { id: 'REGISTRATION', status: 'SKIPPED' },
+        { id: 'MACHINE_TYPE', status: 'SKIPPED' },
+      );
+      return {
+        data: {
+          serverUrl: normalized,
+          reachable: false,
+          latencyMs: Date.now() - startedAt,
+          stages,
+        },
+      };
+    }
+
+    if (dto.machineId && dto.credential) {
+      let registration: DongilRegistrationStatus;
+      try {
+        registration = await new DongilApiClient(
+          normalized,
+        ).getRegistrationStatus(dto.machineId, dto.credential);
+      } catch (error) {
+        const classification = classifyDongilFailure(error);
+        stages.push(
+          {
+            id: 'REGISTRATION',
+            status: 'FAILED',
+            code:
+              classification === 'CREDENTIAL_RECOVERY'
+                ? 'DONGIL_CREDENTIAL_INVALID'
+                : 'DONGIL_REGISTRATION_CHECK_FAILED',
+          },
+          { id: 'MACHINE_TYPE', status: 'SKIPPED' },
+        );
+        return {
+          data: {
+            serverUrl: normalized,
+            reachable: true,
+            latencyMs: Date.now() - startedAt,
+            stages,
+          },
+        };
+      }
+      stages.push(
+        registration.registrationStatus === 'APPROVED' &&
+          registration.credentialReady
+          ? { id: 'REGISTRATION', status: 'PASSED' }
+          : {
+              id: 'REGISTRATION',
+              status: 'FAILED',
+              code: 'DONGIL_REGISTRATION_NOT_READY',
+            },
+      );
+      if (this.hasMachineTypeMismatch(registration.assignedMachineTypeCode)) {
+        stages.push({
+          id: 'MACHINE_TYPE',
+          status: 'FAILED',
+          code: 'DONGIL_MACHINE_TYPE_MISMATCH',
+        });
+      } else {
+        stages.push({ id: 'MACHINE_TYPE', status: 'PASSED' });
+      }
+    } else {
+      stages.push(
+        { id: 'REGISTRATION', status: 'SKIPPED' },
+        { id: 'MACHINE_TYPE', status: 'SKIPPED' },
+      );
     }
     return {
       data: {
         serverUrl: normalized,
         reachable: true,
         latencyMs: Date.now() - startedAt,
+        stages,
       },
     };
   }
 
   async configure(dto: BootstrapDongilSyncDto) {
+    return this.persistConfiguration(dto);
+  }
+
+  async saveConfiguration(dto: BootstrapDongilSyncDto, actorId: string) {
+    return this.persistConfiguration(dto, actorId);
+  }
+
+  private async persistConfiguration(
+    dto: BootstrapDongilSyncDto,
+    actorId?: string,
+  ) {
     const serverUrl = this.normalizeServerUrl(dto.serverUrl);
-    const existing = await this.prisma.dongilSyncConfiguration.findUnique({
-      where: { id: CONFIGURATION_ID },
-    });
-    const identityChanged =
-      !existing ||
-      existing.serverUrl !== serverUrl ||
-      existing.machineId !== dto.machineId;
-    const configuration = await this.prisma.dongilSyncConfiguration.upsert({
-      where: { id: CONFIGURATION_ID },
-      create: {
-        id: CONFIGURATION_ID,
-        serverUrl,
-        machineId: dto.machineId,
-        machineTypeCode: dto.machineTypeCode,
-        licenseStatus: dto.licenseStatus,
-        autoConnectEnabled: false,
-      },
-      update: {
-        serverUrl,
-        machineId: dto.machineId,
-        machineTypeCode: dto.machineTypeCode,
-        licenseStatus: dto.licenseStatus,
-        ...(identityChanged
-          ? {
-              registrationStatus: null,
-              assignedMachineTypeCode: null,
-              autoConnectEnabled: false,
-            }
-          : {}),
-      },
-    });
+    const persist = async (client: Prisma.TransactionClient) => {
+      const existing = await client.dongilSyncConfiguration.findUnique({
+        where: { id: CONFIGURATION_ID },
+      });
+      const identityChanged =
+        !existing ||
+        existing.serverUrl !== serverUrl ||
+        existing.machineId !== dto.machineId;
+      const configuration = await client.dongilSyncConfiguration.upsert({
+        where: { id: CONFIGURATION_ID },
+        create: {
+          id: CONFIGURATION_ID,
+          serverUrl,
+          machineId: dto.machineId,
+          machineTypeCode: LOCAL_DONGIL_MACHINE_TYPE_CODE,
+          licenseStatus: dto.licenseStatus,
+          autoConnectEnabled: false,
+          configVersion: DONGIL_CONFIGURATION_VERSION,
+        },
+        update: {
+          serverUrl,
+          machineId: dto.machineId,
+          machineTypeCode: LOCAL_DONGIL_MACHINE_TYPE_CODE,
+          licenseStatus: dto.licenseStatus,
+          configVersion: DONGIL_CONFIGURATION_VERSION,
+          ...(identityChanged
+            ? {
+                registrationStatus: null,
+                assignedMachineTypeCode: null,
+                autoConnectEnabled: false,
+              }
+            : {}),
+        },
+      });
+      if (identityChanged) {
+        await client.dongilSyncOutbox.updateMany({
+          where: { status: DongilSyncOutboxStatus.BLOCKED_CONFIG },
+          data: {
+            status: DongilSyncOutboxStatus.PENDING,
+            nextAttemptAt: new Date(),
+            lastErrorCode: null,
+            lastErrorMessage: null,
+          },
+        });
+      }
+      if (actorId) {
+        await client.auditLog.create({
+          data: {
+            actorId,
+            action: 'dongil.config.update',
+            target: CONFIGURATION_ID,
+            details: {
+              before: existing
+                ? {
+                    serverUrl: existing.serverUrl,
+                    machineId: existing.machineId,
+                    machineTypeCode: existing.machineTypeCode,
+                    licenseStatus: existing.licenseStatus,
+                    autoConnectEnabled: existing.autoConnectEnabled,
+                  }
+                : null,
+              after: {
+                serverUrl: configuration.serverUrl,
+                machineId: configuration.machineId,
+                machineTypeCode: configuration.machineTypeCode,
+                licenseStatus: configuration.licenseStatus,
+                autoConnectEnabled: configuration.autoConnectEnabled,
+              },
+              identityChanged,
+            },
+          },
+        });
+      }
+      return { configuration, identityChanged };
+    };
+    const { configuration, identityChanged } = await this.prisma.$transaction(
+      (transaction) => persist(transaction),
+    );
     if (identityChanged) {
       this.disconnectSocket();
       this.runtime = null;
       this.connectionState = 'DISABLED';
     }
+    this.lastErrorMessage = null;
     return {
       data: { serverUrl: configuration.serverUrl, state: this.connectionState },
     };
   }
 
   getRuntimeForHistorySync() {
-    if (!this.runtime) return null;
+    if (!this.runtime || this.connectionState !== 'ONLINE') return null;
     return {
       serverUrl: this.runtime.serverUrl,
       machineId: this.runtime.machineId,
@@ -327,20 +567,78 @@ export class DongilSyncService implements OnModuleInit, OnModuleDestroy {
     };
   }
 
-  async resetConfiguration() {
+  async resetConfiguration(actorId?: string) {
+    await this.prisma.$transaction(async (transaction) => {
+      const existing = await transaction.dongilSyncConfiguration.findUnique({
+        where: { id: CONFIGURATION_ID },
+      });
+      const configuration = await transaction.dongilSyncConfiguration.upsert({
+        where: { id: CONFIGURATION_ID },
+        create: {
+          id: CONFIGURATION_ID,
+          serverUrl: null,
+          machineId: null,
+          machineTypeCode: LOCAL_DONGIL_MACHINE_TYPE_CODE,
+          licenseStatus: null,
+          autoConnectEnabled: false,
+          configVersion: DONGIL_CONFIGURATION_VERSION,
+          legacyEnvImportedAt: new Date(),
+        },
+        update: {
+          serverUrl: null,
+          machineId: null,
+          machineTypeCode: LOCAL_DONGIL_MACHINE_TYPE_CODE,
+          licenseStatus: null,
+          assignedMachineTypeCode: null,
+          registrationStatus: null,
+          autoConnectEnabled: false,
+          configVersion: DONGIL_CONFIGURATION_VERSION,
+          legacyEnvImportedAt: existing?.legacyEnvImportedAt ?? new Date(),
+          lastRegisteredAt: null,
+          lastConfigSyncAt: null,
+        },
+      });
+      await transaction.dongilProductAssignment.deleteMany();
+      await transaction.dongilMachineInfo.deleteMany({
+        where: { id: CONFIGURATION_ID },
+      });
+      if (actorId) {
+        await transaction.auditLog.create({
+          data: {
+            actorId,
+            action: 'dongil.config.reset',
+            target: CONFIGURATION_ID,
+            details: {
+              before: existing
+                ? {
+                    serverUrl: existing.serverUrl,
+                    machineId: existing.machineId,
+                    machineTypeCode: existing.machineTypeCode,
+                    licenseStatus: existing.licenseStatus,
+                    assignedMachineTypeCode: existing.assignedMachineTypeCode,
+                    registrationStatus: existing.registrationStatus,
+                    autoConnectEnabled: existing.autoConnectEnabled,
+                  }
+                : null,
+              after: {
+                serverUrl: configuration.serverUrl,
+                machineId: configuration.machineId,
+                machineTypeCode: configuration.machineTypeCode,
+                licenseStatus: configuration.licenseStatus,
+                autoConnectEnabled: configuration.autoConnectEnabled,
+              },
+            },
+          },
+        });
+      }
+    });
+
     this.disconnectSocket();
     this.runtime = null;
     this.connectionState = 'DISABLED';
     this.lastConnectedAt = null;
     this.lastHeartbeatAckAt = null;
     this.lastErrorMessage = null;
-
-    await this.prisma.$transaction([
-      this.prisma.dongilSyncConfiguration.deleteMany({
-        where: { id: CONFIGURATION_ID },
-      }),
-      this.prisma.dongilProductAssignment.deleteMany(),
-    ]);
 
     return { data: { state: this.connectionState } };
   }
@@ -366,20 +664,30 @@ export class DongilSyncService implements OnModuleInit, OnModuleDestroy {
     const serverUrl = this.normalizeServerUrl(dto.serverUrl);
     const registration = await new DongilApiClient(serverUrl).register({
       machineId: dto.machineId,
-      machineTypeCode: dto.machineTypeCode,
+      machineTypeCode: LOCAL_DONGIL_MACHINE_TYPE_CODE,
       licenseStatus: dto.licenseStatus,
       appVersion: dto.appVersion,
     });
-    const state: DongilConnectionState =
-      registration.registrationStatus === 'APPROVED'
+    const machineTypeMismatch = this.hasMachineTypeMismatch(
+      registration.assignedMachineTypeCode,
+    );
+    const state: DongilConnectionState = machineTypeMismatch
+      ? 'MACHINE_TYPE_MISMATCH'
+      : registration.registrationStatus === 'APPROVED'
         ? registration.requiresCredentialRecovery
           ? 'NEEDS_CREDENTIAL_RECOVERY'
           : 'REGISTRATION_APPROVED'
         : registration.registrationStatus === 'REJECTED'
           ? 'REGISTRATION_REJECTED'
           : 'REGISTRATION_PENDING';
+    if (machineTypeMismatch) {
+      this.disconnectSocket();
+      this.runtime = null;
+    }
     this.connectionState = state;
-    this.lastErrorMessage = null;
+    this.lastErrorMessage = machineTypeMismatch
+      ? this.describeMachineTypeMismatch(registration.assignedMachineTypeCode)
+      : null;
     await this.prisma.dongilSyncConfiguration.update({
       where: { id: CONFIGURATION_ID },
       data: {
@@ -402,8 +710,12 @@ export class DongilSyncService implements OnModuleInit, OnModuleDestroy {
       machineId: dto.machineId,
       registration,
     });
-    const state: DongilConnectionState =
-      registration.registrationStatus === 'APPROVED'
+    const machineTypeMismatch = this.hasMachineTypeMismatch(
+      registration.assignedMachineTypeCode,
+    );
+    const state: DongilConnectionState = machineTypeMismatch
+      ? 'MACHINE_TYPE_MISMATCH'
+      : registration.registrationStatus === 'APPROVED'
         ? registration.credentialReady
           ? 'REGISTRATION_APPROVED'
           : 'NEEDS_CREDENTIAL_RECOVERY'
@@ -417,7 +729,9 @@ export class DongilSyncService implements OnModuleInit, OnModuleDestroy {
     } else if (this.connectionState !== 'ONLINE') {
       this.connectionState = state;
     }
-    this.lastErrorMessage = null;
+    this.lastErrorMessage = machineTypeMismatch
+      ? this.describeMachineTypeMismatch(registration.assignedMachineTypeCode)
+      : null;
     await this.prisma.dongilSyncConfiguration.updateMany({
       where: { id: CONFIGURATION_ID, serverUrl, machineId: dto.machineId },
       data: {
@@ -492,6 +806,12 @@ export class DongilSyncService implements OnModuleInit, OnModuleDestroy {
       machineId: dto.machineId,
       registration,
     });
+    if (this.hasMachineTypeMismatch(registration.assignedMachineTypeCode)) {
+      return this.blockMachineTypeMismatch(
+        registration.assignedMachineTypeCode,
+        registration.registrationStatus,
+      );
+    }
     if (
       registration.registrationStatus !== 'APPROVED' ||
       !registration.credentialReady
@@ -515,44 +835,90 @@ export class DongilSyncService implements OnModuleInit, OnModuleDestroy {
       return { data: { state: this.connectionState, ...registration } };
     }
 
-    this.runtime = {
-      serverUrl,
-      machineId: dto.machineId,
-      machineTypeCode: dto.machineTypeCode,
-      licenseStatus: dto.licenseStatus,
-      appVersion: dto.appVersion,
-      credential,
-    };
     const config: DongilMachineConfig = await client.getCurrentConfig(
       dto.machineId,
       credential,
     );
-    await this.persistAssignments(config);
-    if (config.assignedMachineType.code !== dto.machineTypeCode) {
-      this.logger.warn(
-        `Dongil machine type mismatch: local=${dto.machineTypeCode}; assigned=${config.assignedMachineType.code}`,
+    if (this.hasMachineTypeMismatch(config.assignedMachineType.code)) {
+      return this.blockMachineTypeMismatch(
+        config.assignedMachineType.code,
+        'APPROVED',
       );
     }
+    await this.persistAssignments(config);
+    this.runtime = {
+      serverUrl,
+      machineId: dto.machineId,
+      machineTypeCode: LOCAL_DONGIL_MACHINE_TYPE_CODE,
+      licenseStatus: dto.licenseStatus,
+      appVersion: dto.appVersion,
+      credential,
+    };
     await this.prisma.dongilSyncConfiguration.update({
       where: { id: CONFIGURATION_ID },
       data: {
         assignedMachineTypeCode: config.assignedMachineType.code,
         registrationStatus: 'APPROVED',
-        // A successful credential/config bootstrap is enough to resume HTTP
-        // synchronization after restart; WebSocket acknowledgement is not a
-        // prerequisite for the history worker.
+        // Preserve the reconnect intent. Data delivery resumes only after the
+        // socket acceptance path refreshes registration and machine type.
         autoConnectEnabled: true,
         lastRegisteredAt: new Date(),
         lastConfigSyncAt: new Date(),
       },
     });
+    await this.prisma.dongilSyncOutbox.updateMany({
+      where: {
+        status: DongilSyncOutboxStatus.BLOCKED_CONFIG,
+        lastErrorCode: CREDENTIAL_RECOVERY_ERROR_CODE,
+      },
+      data: {
+        status: DongilSyncOutboxStatus.PENDING,
+        nextAttemptAt: new Date(),
+        lastErrorCode: null,
+        lastErrorMessage: null,
+      },
+    });
     this.connectSocket();
-    void this.flushOutbox();
     return {
       data: {
         state: 'READY',
         assignedMachineTypeCode: config.assignedMachineType.code,
         assignmentCount: config.assignments.length,
+      },
+    };
+  }
+
+  private hasMachineTypeMismatch(assignedMachineTypeCode: string) {
+    return assignedMachineTypeCode !== LOCAL_DONGIL_MACHINE_TYPE_CODE;
+  }
+
+  private describeMachineTypeMismatch(assignedMachineTypeCode: string) {
+    return `Local machine type ${LOCAL_DONGIL_MACHINE_TYPE_CODE} does not match Dongil Server assignment ${assignedMachineTypeCode}.`;
+  }
+
+  private async blockMachineTypeMismatch(
+    assignedMachineTypeCode: string,
+    registrationStatus: DongilRegistrationStatus['registrationStatus'] = 'APPROVED',
+  ) {
+    const message = this.describeMachineTypeMismatch(assignedMachineTypeCode);
+    this.disconnectSocket();
+    this.runtime = null;
+    this.connectionState = 'MACHINE_TYPE_MISMATCH';
+    this.lastErrorMessage = message;
+    this.logger.warn(message);
+    await this.prisma.dongilSyncConfiguration.updateMany({
+      where: { id: CONFIGURATION_ID },
+      data: {
+        machineTypeCode: LOCAL_DONGIL_MACHINE_TYPE_CODE,
+        assignedMachineTypeCode,
+        registrationStatus,
+        autoConnectEnabled: false,
+      },
+    });
+    return {
+      data: {
+        state: 'MACHINE_TYPE_MISMATCH' as const,
+        assignedMachineTypeCode,
       },
     };
   }
@@ -657,47 +1023,290 @@ export class DongilSyncService implements OnModuleInit, OnModuleDestroy {
     this.socketIdentityKey = identityKey;
     socket.on(
       'server:accepted',
-      (payload: { heartbeatIntervalMs?: unknown }) => {
-        this.connectionState = 'ONLINE';
-        this.lastConnectedAt = new Date();
-        this.lastErrorMessage = null;
-        void this.prisma.dongilSyncConfiguration.updateMany({
-          where: { id: CONFIGURATION_ID },
-          data: { autoConnectEnabled: true },
-        });
-        socket.emit('machine:hello', {
-          machineTypeCode: runtime.machineTypeCode,
-          licenseStatus: runtime.licenseStatus,
-          appVersion: runtime.appVersion,
-        });
-        const interval =
-          typeof payload?.heartbeatIntervalMs === 'number' &&
-          payload.heartbeatIntervalMs >= 1_000
-            ? payload.heartbeatIntervalMs
-            : DEFAULT_HEARTBEAT_INTERVAL_MS;
-        this.startHeartbeat(interval);
+      (payload: {
+        assignedMachineTypeCode?: unknown;
+        heartbeatIntervalMs?: unknown;
+      }) => {
+        void this.handleSocketAccepted(socket, runtime, payload).catch(
+          (error: unknown) => {
+            void this.handleSocketValidationFailure(socket, error);
+          },
+        );
       },
     );
-    socket.on('server:heartbeat-ack', () => {
+    socket.on('server:heartbeat-ack', (payload: unknown) => {
+      const heartbeat = payload as {
+        assignedMachineTypeCode?: unknown;
+        machineTypeMismatch?: unknown;
+      } | null;
+      const assignedMachineTypeCode =
+        typeof heartbeat?.assignedMachineTypeCode === 'string'
+          ? heartbeat.assignedMachineTypeCode
+          : null;
+      if (
+        heartbeat?.machineTypeMismatch === true ||
+        (assignedMachineTypeCode !== null &&
+          this.hasMachineTypeMismatch(assignedMachineTypeCode))
+      ) {
+        void this.blockMachineTypeMismatch(
+          assignedMachineTypeCode ?? 'UNKNOWN',
+        ).catch((error: unknown) => {
+          this.logger.error(
+            `Could not persist Dongil machine type mismatch: ${describeError(error)}`,
+          );
+        });
+        return;
+      }
       this.connectionState = 'ONLINE';
       this.lastHeartbeatAckAt = new Date();
       this.lastErrorMessage = null;
     });
-    socket.on('server:rejected', (payload: { message?: unknown }) => {
-      this.connectionState = 'ERROR';
-      this.lastErrorMessage =
-        typeof payload?.message === 'string'
-          ? payload.message
-          : 'Dongil Server rejected the socket.';
+    socket.on('server:registration-updated', (payload: unknown) => {
+      const update = payload as { assignedMachineTypeCode?: unknown } | null;
+      if (typeof update?.assignedMachineTypeCode !== 'string') return;
+      if (this.hasMachineTypeMismatch(update.assignedMachineTypeCode)) {
+        void this.blockMachineTypeMismatch(
+          update.assignedMachineTypeCode,
+        ).catch((error: unknown) => {
+          this.logger.error(
+            `Could not persist Dongil registration type mismatch: ${describeError(error)}`,
+          );
+        });
+        return;
+      }
+      void this.handleSocketAccepted(socket, runtime, {
+        assignedMachineTypeCode: update.assignedMachineTypeCode,
+      }).catch((error: unknown) => {
+        void this.handleSocketValidationFailure(socket, error);
+      });
     });
+    socket.on(
+      'server:rejected',
+      (payload: { code?: unknown; message?: unknown }) => {
+        const code = typeof payload?.code === 'string' ? payload.code : null;
+        this.connectionState =
+          code === 'MACHINE_CREDENTIAL_INVALID'
+            ? 'NEEDS_CREDENTIAL_RECOVERY'
+            : 'ERROR';
+        this.lastErrorMessage =
+          typeof payload?.message === 'string'
+            ? payload.message
+            : 'Dongil Server rejected the socket.';
+        if (code === 'MACHINE_CREDENTIAL_INVALID') {
+          void this.enterCredentialRecovery(
+            this.lastErrorMessage ?? 'Dongil machine credential is invalid.',
+          ).catch((error: unknown) => {
+            this.logger.error(
+              `Could not persist Dongil credential recovery state: ${describeError(error)}`,
+            );
+          });
+        }
+      },
+    );
     socket.on('disconnect', () => {
       this.clearHeartbeat();
-      if (this.runtime) this.connectionState = 'RETRYING';
+      if (
+        this.runtime &&
+        ![
+          'ERROR',
+          'MACHINE_TYPE_MISMATCH',
+          'NEEDS_CREDENTIAL_RECOVERY',
+        ].includes(this.connectionState)
+      ) {
+        this.connectionState = 'RETRYING';
+      }
     });
     socket.on('connect_error', (error: Error) => {
+      if (
+        [
+          'ERROR',
+          'MACHINE_TYPE_MISMATCH',
+          'NEEDS_CREDENTIAL_RECOVERY',
+        ].includes(this.connectionState)
+      ) {
+        return;
+      }
       this.connectionState = 'RETRYING';
       this.lastErrorMessage = error.message;
       this.logger.warn(`Dongil WebSocket connection failed: ${error.message}`);
+    });
+  }
+
+  private async handleSocketAccepted(
+    socket: Socket,
+    runtime: RuntimeConfiguration,
+    payload: {
+      assignedMachineTypeCode?: unknown;
+      heartbeatIntervalMs?: unknown;
+    },
+  ) {
+    const assignedMachineTypeCode =
+      typeof payload?.assignedMachineTypeCode === 'string'
+        ? payload.assignedMachineTypeCode
+        : null;
+    if (!assignedMachineTypeCode) {
+      this.connectionState = 'ERROR';
+      this.lastErrorMessage =
+        'Dongil Server acceptance response is missing the assigned machine type.';
+      await this.prisma.dongilSyncConfiguration.updateMany({
+        where: { id: CONFIGURATION_ID },
+        data: { autoConnectEnabled: false },
+      });
+      if (this.socket === socket) {
+        this.disconnectSocket();
+        this.runtime = null;
+      }
+      return;
+    }
+    if (this.hasMachineTypeMismatch(assignedMachineTypeCode)) {
+      await this.blockMachineTypeMismatch(assignedMachineTypeCode);
+      return;
+    }
+
+    const client = new DongilApiClient(runtime.serverUrl);
+    const registration = await client.getRegistrationStatus(
+      runtime.machineId,
+      runtime.credential,
+    );
+    if (this.socket !== socket || this.runtime !== runtime) return;
+    await this.persistMachineInfo({
+      serverUrl: runtime.serverUrl,
+      machineId: runtime.machineId,
+      registration,
+    });
+    if (this.hasMachineTypeMismatch(registration.assignedMachineTypeCode)) {
+      await this.blockMachineTypeMismatch(
+        registration.assignedMachineTypeCode,
+        registration.registrationStatus,
+      );
+      return;
+    }
+    if (
+      registration.registrationStatus !== 'APPROVED' ||
+      !registration.credentialReady
+    ) {
+      this.connectionState =
+        registration.registrationStatus === 'REJECTED'
+          ? 'REGISTRATION_REJECTED'
+          : registration.registrationStatus === 'APPROVED'
+            ? 'NEEDS_CREDENTIAL_RECOVERY'
+            : 'REGISTRATION_PENDING';
+      this.lastErrorMessage =
+        this.connectionState === 'NEEDS_CREDENTIAL_RECOVERY'
+          ? 'Dongil machine credential recovery is required.'
+          : null;
+      await this.prisma.dongilSyncConfiguration.updateMany({
+        where: { id: CONFIGURATION_ID },
+        data: {
+          registrationStatus: registration.registrationStatus,
+          assignedMachineTypeCode: registration.assignedMachineTypeCode,
+          autoConnectEnabled: false,
+        },
+      });
+      if (this.socket === socket) {
+        this.disconnectSocket();
+        this.runtime = null;
+      }
+      return;
+    }
+
+    const config = await client.getCurrentConfig(
+      runtime.machineId,
+      runtime.credential,
+    );
+    if (this.socket !== socket || this.runtime !== runtime) return;
+    if (this.hasMachineTypeMismatch(config.assignedMachineType.code)) {
+      await this.blockMachineTypeMismatch(
+        config.assignedMachineType.code,
+        'APPROVED',
+      );
+      return;
+    }
+    await this.persistAssignments(config);
+    if (this.socket !== socket || this.runtime !== runtime) return;
+    await this.prisma.dongilSyncConfiguration.updateMany({
+      where: { id: CONFIGURATION_ID },
+      data: {
+        registrationStatus: 'APPROVED',
+        assignedMachineTypeCode: config.assignedMachineType.code,
+        autoConnectEnabled: true,
+        lastConfigSyncAt: new Date(),
+      },
+    });
+    if (this.socket !== socket || this.runtime !== runtime) return;
+
+    this.connectionState = 'ONLINE';
+    this.lastConnectedAt = new Date();
+    this.lastErrorMessage = null;
+    socket.emit('machine:hello', {
+      machineTypeCode: runtime.machineTypeCode,
+      licenseStatus: runtime.licenseStatus,
+      appVersion: runtime.appVersion,
+    });
+    const interval =
+      typeof payload?.heartbeatIntervalMs === 'number' &&
+      payload.heartbeatIntervalMs >= 1_000
+        ? payload.heartbeatIntervalMs
+        : DEFAULT_HEARTBEAT_INTERVAL_MS;
+    this.startHeartbeat(interval);
+    void this.flushOutbox();
+  }
+
+  private async handleSocketValidationFailure(socket: Socket, error: unknown) {
+    if (this.socket !== socket) return;
+    const classification = classifyDongilFailure(error);
+    const message = describeError(error);
+    const diagnostic =
+      error instanceof DongilApiError
+        ? {
+            correlationId: error.correlationId,
+            path: error.path,
+            status: error.status,
+            code: error.code,
+          }
+        : { type: error instanceof Error ? error.name : 'UnknownError' };
+    this.logger.warn(
+      `[dongil.socket.validation.failed] ${JSON.stringify({ classification, ...diagnostic })}`,
+    );
+    if (classification === 'CREDENTIAL_RECOVERY') {
+      await this.enterCredentialRecovery(message);
+      return;
+    }
+    if (classification === 'PERMANENT') {
+      this.connectionState = 'ERROR';
+      this.lastErrorMessage = message;
+      await this.prisma.dongilSyncConfiguration.updateMany({
+        where: { id: CONFIGURATION_ID },
+        data: { autoConnectEnabled: false },
+      });
+      if (this.socket === socket) {
+        this.disconnectSocket();
+        this.runtime = null;
+      }
+      return;
+    }
+
+    this.connectionState = 'RETRYING';
+    this.lastErrorMessage = message;
+    this.clearHeartbeat();
+    socket.disconnect();
+    if (this.socketValidationRetryTimer) {
+      clearTimeout(this.socketValidationRetryTimer);
+    }
+    this.socketValidationRetryTimer = setTimeout(() => {
+      this.socketValidationRetryTimer = null;
+      if (this.socket === socket && this.runtime) socket.connect();
+    }, 2_000);
+  }
+
+  private async enterCredentialRecovery(message: string) {
+    this.connectionState = 'NEEDS_CREDENTIAL_RECOVERY';
+    this.lastErrorMessage = message;
+    this.disconnectSocket();
+    this.runtime = null;
+    await this.prisma.dongilSyncConfiguration.updateMany({
+      where: { id: CONFIGURATION_ID },
+      data: { autoConnectEnabled: false },
     });
   }
 
@@ -725,7 +1334,9 @@ export class DongilSyncService implements OnModuleInit, OnModuleDestroy {
 
   private async flushOutbox() {
     const runtime = this.runtime;
-    if (this.workerRunning || !runtime) return;
+    if (this.workerRunning || !runtime || this.connectionState !== 'ONLINE') {
+      return;
+    }
     if (!(await this.acquireOutboxWorkerLease())) return;
     try {
       const historyRun = await this.prisma.dongilHistorySyncRun.findFirst({
@@ -768,18 +1379,14 @@ export class DongilSyncService implements OnModuleInit, OnModuleDestroy {
       );
       if (washingRows.length > 0) {
         const keepRunning = await this.sendOutboxGroup(washingRows, () =>
-          client.sendWashingBatch(
-            runtime.machineId,
-            runtime.credential,
-            {
-              localBatchId: randomUUID(),
-              items: washingRows.map((row) => ({
-                ...this.toResultPayload(row),
-                okCount: row.okCount!,
-                ngCount: row.ngCount!,
-              })),
-            },
-          ),
+          client.sendWashingBatch(runtime.machineId, runtime.credential, {
+            localBatchId: randomUUID(),
+            items: washingRows.map((row) => ({
+              ...this.toResultPayload(row),
+              okCount: row.okCount!,
+              ngCount: row.ngCount!,
+            })),
+          }),
         );
         if (!keepRunning) return;
       }
@@ -839,18 +1446,41 @@ export class DongilSyncService implements OnModuleInit, OnModuleDestroy {
         error instanceof DongilApiError
           ? error.code
           : 'DONGIL_SERVER_UNAVAILABLE';
-      await this.markBatchFailed(
-        rows.map((row) => row.id),
-        rows[0]?.attemptCount ?? 0,
-        code,
-        message,
+      const classification = classifyDongilFailure(error);
+      this.logger.warn(
+        `[dongil.outbox.batch.failed] ${JSON.stringify({
+          classification,
+          itemCount: rows.length,
+          firstLocalResultId: rows[0]?.localResultId ?? null,
+          lastLocalResultId: rows.at(-1)?.localResultId ?? null,
+          code,
+          ...(error instanceof DongilApiError
+            ? {
+                correlationId: error.correlationId,
+                path: error.path,
+                status: error.status,
+              }
+            : {}),
+        })}`,
       );
-      if (
-        error instanceof DongilApiError &&
-        [401, 403].includes(error.status)
-      ) {
-        this.disconnectSocket();
-        this.runtime = null;
+      if (classification === 'RETRYABLE') {
+        await this.markBatchFailed(
+          rows.map((row) => row.id),
+          rows[0]?.attemptCount ?? 0,
+          code,
+          message,
+        );
+      } else {
+        await this.markBatchBlocked(
+          rows.map((row) => row.id),
+          classification === 'CREDENTIAL_RECOVERY'
+            ? CREDENTIAL_RECOVERY_ERROR_CODE
+            : code,
+          message,
+        );
+      }
+      if (classification === 'CREDENTIAL_RECOVERY') {
+        await this.enterCredentialRecovery(message);
         return false;
       }
       return true;
@@ -914,6 +1544,18 @@ export class DongilSyncService implements OnModuleInit, OnModuleDestroy {
     });
   }
 
+  private async markBatchBlocked(ids: string[], code: string, message: string) {
+    await this.prisma.dongilSyncOutbox.updateMany({
+      where: { id: { in: ids } },
+      data: {
+        status: DongilSyncOutboxStatus.BLOCKED_CONFIG,
+        attemptCount: { increment: 1 },
+        lastErrorCode: code,
+        lastErrorMessage: message.slice(0, 500),
+      },
+    });
+  }
+
   private nextRetryAt(attempt: number) {
     const base = Math.min(5_000 * 2 ** Math.min(attempt, 7), 10 * 60_000);
     return new Date(Date.now() + base + Math.floor(Math.random() * 2_000));
@@ -950,21 +1592,138 @@ export class DongilSyncService implements OnModuleInit, OnModuleDestroy {
 
   private disconnectSocket() {
     this.clearHeartbeat();
+    if (this.socketValidationRetryTimer) {
+      clearTimeout(this.socketValidationRetryTimer);
+      this.socketValidationRetryTimer = null;
+    }
     this.socket?.removeAllListeners();
     this.socket?.disconnect();
     this.socket = null;
     this.socketIdentityKey = null;
   }
 
+  private async importLegacyConfiguration() {
+    const existing = await this.prisma.dongilSyncConfiguration.findUnique({
+      where: { id: CONFIGURATION_ID },
+    });
+    if (existing?.serverUrl) {
+      try {
+        const normalized = this.normalizeServerUrl(existing.serverUrl);
+        await this.prisma.dongilSyncConfiguration.update({
+          where: { id: CONFIGURATION_ID },
+          data: {
+            serverUrl: normalized,
+            machineTypeCode: LOCAL_DONGIL_MACHINE_TYPE_CODE,
+            configVersion: DONGIL_CONFIGURATION_VERSION,
+          },
+        });
+      } catch {
+        this.lastErrorMessage =
+          'Dongil database configuration contains an invalid server URL.';
+        this.logger.warn(
+          'Dongil database configuration contains an invalid server URL; legacy env import was skipped.',
+        );
+      }
+      return;
+    }
+    if (existing?.legacyEnvImportedAt) return;
+
+    const legacyValue = process.env.DONGIL_SERVER_URL?.trim();
+    if (!legacyValue) return;
+
+    let serverUrl: string;
+    try {
+      serverUrl = this.normalizeServerUrl(legacyValue);
+    } catch {
+      this.lastErrorMessage =
+        'Legacy Dongil Server URL is invalid and was not imported.';
+      this.logger.warn(
+        'Legacy Dongil Server URL is invalid and was not imported.',
+      );
+      return;
+    }
+
+    await this.prisma.$transaction(async (transaction) => {
+      const importedAt = new Date();
+      const configuration = await transaction.dongilSyncConfiguration.upsert({
+        where: { id: CONFIGURATION_ID },
+        create: {
+          id: CONFIGURATION_ID,
+          serverUrl,
+          machineId: null,
+          machineTypeCode: LOCAL_DONGIL_MACHINE_TYPE_CODE,
+          licenseStatus: null,
+          autoConnectEnabled: false,
+          configVersion: DONGIL_CONFIGURATION_VERSION,
+          legacyEnvImportedAt: importedAt,
+        },
+        update: {
+          serverUrl,
+          machineTypeCode: LOCAL_DONGIL_MACHINE_TYPE_CODE,
+          configVersion: DONGIL_CONFIGURATION_VERSION,
+          legacyEnvImportedAt: importedAt,
+        },
+      });
+      await transaction.auditLog.create({
+        data: {
+          actorId: null,
+          action: 'dongil.config.migrate-env',
+          target: CONFIGURATION_ID,
+          details: {
+            before: existing
+              ? {
+                  serverUrl: existing.serverUrl,
+                  machineTypeCode: existing.machineTypeCode,
+                  configVersion: existing.configVersion,
+                }
+              : null,
+            after: {
+              serverUrl: configuration.serverUrl,
+              machineTypeCode: configuration.machineTypeCode,
+              configVersion: configuration.configVersion,
+            },
+          },
+        },
+      });
+    });
+    this.logger.log(
+      'Imported legacy Dongil Server configuration into the database.',
+    );
+  }
+
   private normalizeServerUrl(value: string): string {
-    const normalized = value.trim().replace(/\/+$/, '');
-    const url = new URL(normalized);
+    const url = new URL(value.trim());
     if (!['http:', 'https:'].includes(url.protocol) || !url.hostname) {
       throw new Error(
         'Dongil Server URL must use http or https and include a hostname.',
       );
     }
-    return normalized;
+    if (url.username || url.password) {
+      throw new Error('Dongil Server URL must not contain credentials.');
+    }
+    if ((url.pathname && url.pathname !== '/') || url.search || url.hash) {
+      throw new Error('Dongil Server URL must not contain a path or query.');
+    }
+    return `${url.protocol}//${url.host}`;
+  }
+
+  private getConnectionErrorCode() {
+    if (this.connectionState === 'MACHINE_TYPE_MISMATCH') {
+      return 'DONGIL_MACHINE_TYPE_MISMATCH';
+    }
+    if (this.connectionState === 'NEEDS_CREDENTIAL_RECOVERY') {
+      return CREDENTIAL_RECOVERY_ERROR_CODE;
+    }
+    if (this.connectionState === 'RETRYING') {
+      return 'DONGIL_SERVER_UNAVAILABLE';
+    }
+    if (
+      this.lastErrorMessage?.includes('configuration contains an invalid') ||
+      this.lastErrorMessage?.includes('URL is invalid')
+    ) {
+      return 'DONGIL_CONFIGURATION_INVALID';
+    }
+    return 'DONGIL_CONNECTION_ERROR';
   }
 
   private getMachineRuntimeStatus(): { state: MachineRuntimeState } {

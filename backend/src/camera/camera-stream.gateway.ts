@@ -5,13 +5,17 @@ import { Buffer } from 'node:buffer';
 import type { IncomingMessage, Server } from 'node:http';
 import type { Duplex } from 'node:stream';
 import WebSocket, { type RawData, WebSocketServer } from 'ws';
+import { AuthSessionService } from '../auth/auth-session.service';
 import { DeviceToolService } from '../device-tool/device-tool.service';
 
 type JwtPayload = {
   sub: string;
   username: string;
   role: string;
+  sid: string;
 };
+
+const SESSION_REVALIDATION_INTERVAL_MS = 15_000;
 
 @Injectable()
 export class CameraStreamGateway {
@@ -23,6 +27,7 @@ export class CameraStreamGateway {
     private readonly configService: ConfigService,
     private readonly deviceToolService: DeviceToolService,
     private readonly jwtService: JwtService,
+    private readonly authSessions: AuthSessionService,
   ) {}
 
   attach(httpServer: Server) {
@@ -51,34 +56,64 @@ export class CameraStreamGateway {
         return;
       }
 
-      if (!this.isAuthorized(url)) {
-        this.reject(socket, 401, 'Unauthorized');
-        return;
-      }
-
-      this.server.handleUpgrade(request, socket, head, (client) => {
-        this.server.emit('connection', client, request);
-      });
+      void this.authorizeUpgrade(url)
+        .then((session) => {
+          if (!session) {
+            this.reject(socket, 401, 'Unauthorized');
+            return;
+          }
+          this.server.handleUpgrade(request, socket, head, (client) => {
+            this.monitorSession(client, session.id, session.userId);
+            this.server.emit('connection', client, request);
+          });
+        })
+        .catch(() => this.reject(socket, 401, 'Unauthorized'));
     });
 
     this.attached = true;
   }
 
-  private isAuthorized(url: URL) {
+  private async authorizeUpgrade(url: URL) {
     const token = url.searchParams.get('token');
 
     if (!token) {
-      return false;
+      return null;
     }
 
     try {
-      this.jwtService.verify<JwtPayload>(token, {
+      const payload = await this.jwtService.verifyAsync<JwtPayload>(token, {
         secret: this.configService.getOrThrow<string>('JWT_SECRET'),
       });
-      return true;
+      if (!payload.sub || !payload.sid) return null;
+      const session = await this.authSessions.findActive(
+        payload.sid,
+        payload.sub,
+      );
+      return session?.user.active
+        ? { id: session.id, userId: session.userId }
+        : null;
     } catch {
-      return false;
+      return null;
     }
+  }
+
+  private monitorSession(client: WebSocket, sessionId: string, userId: string) {
+    const timer = setInterval(() => {
+      void this.authSessions
+        .findActive(sessionId, userId)
+        .then((session) => {
+          if (!session?.user.active && client.readyState === WebSocket.OPEN) {
+            client.close(1008, 'Session is no longer valid');
+          }
+        })
+        .catch(() => {
+          if (client.readyState === WebSocket.OPEN) {
+            client.close(1011, 'Session validation failed');
+          }
+        });
+    }, SESSION_REVALIDATION_INTERVAL_MS);
+    timer.unref();
+    client.once('close', () => clearInterval(timer));
   }
 
   private async proxyCameraStream(client: WebSocket, request: IncomingMessage) {

@@ -17,6 +17,7 @@ import {
 import { randomUUID } from 'node:crypto';
 import { PrismaService } from '../database/prisma.service';
 import {
+  classifyDongilFailure,
   DongilApiClient,
   DongilApiError,
   type DongilReconcileScope,
@@ -92,20 +93,26 @@ export class DongilHistorySyncService implements OnModuleInit, OnModuleDestroy {
     ]);
     if (!run) return { data: null };
 
-    const [totalScopes, completedScopes, verifiedCount, currentScope] = await Promise.all([
-      this.prisma.dongilHistorySyncScope.count({ where: { runId: run.id } }),
-      this.prisma.dongilHistorySyncScope.count({
-        where: { runId: run.id, completedAt: { not: null } },
-      }),
-      this.prisma.dongilHistorySyncItem.count({
-        where: { runId: run.id, verifiedAt: { not: null } },
-      }),
-      this.prisma.dongilHistorySyncScope.findFirst({
-        where: { runId: run.id, completedAt: null },
-        orderBy: { createdAt: 'asc' },
-        select: { scope: true, scopeKey: true, counterReconciledAt: true, idsVerifiedAt: true },
-      }),
-    ]);
+    const [totalScopes, completedScopes, verifiedCount, currentScope] =
+      await Promise.all([
+        this.prisma.dongilHistorySyncScope.count({ where: { runId: run.id } }),
+        this.prisma.dongilHistorySyncScope.count({
+          where: { runId: run.id, completedAt: { not: null } },
+        }),
+        this.prisma.dongilHistorySyncItem.count({
+          where: { runId: run.id, verifiedAt: { not: null } },
+        }),
+        this.prisma.dongilHistorySyncScope.findFirst({
+          where: { runId: run.id, completedAt: null },
+          orderBy: { createdAt: 'asc' },
+          select: {
+            scope: true,
+            scopeKey: true,
+            counterReconciledAt: true,
+            idsVerifiedAt: true,
+          },
+        }),
+      ]);
     const uploadConfirmed = run.acceptedCount + run.replayedCount;
     const deliveryComplete = run.uploadCompletedAt !== null;
     const phase =
@@ -190,7 +197,9 @@ export class DongilHistorySyncService implements OnModuleInit, OnModuleDestroy {
       },
     });
     if (active) {
-      throw new ConflictException('A Dongil history synchronization run already exists.');
+      throw new ConflictException(
+        'A Dongil history synchronization run already exists.',
+      );
     }
 
     await this.backfillHistoricalOutbox();
@@ -203,7 +212,9 @@ export class DongilHistorySyncService implements OnModuleInit, OnModuleDestroy {
       orderBy: [{ inspectedAt: 'asc' }, { id: 'asc' }],
     });
     if (allOutbox.length === 0) {
-      throw new BadRequestException('No eligible washing results are available for history synchronization.');
+      throw new BadRequestException(
+        'No eligible washing results are available for history synchronization.',
+      );
     }
 
     const requiresUpload = allOutbox.filter(
@@ -223,21 +234,38 @@ export class DongilHistorySyncService implements OnModuleInit, OnModuleDestroy {
 
     let run: { id: string };
     try {
-      run = await this.prisma.dongilHistorySyncRun.create({
-        data: {
-          state: DongilHistorySyncRunState.PREPARING,
-          snapshotTotal: 0,
-          totalBatches: 0,
-          startedById: actorId,
-        },
-        select: { id: true },
+      run = await this.prisma.$transaction(async (transaction) => {
+        const created = await transaction.dongilHistorySyncRun.create({
+          data: {
+            state: DongilHistorySyncRunState.PREPARING,
+            snapshotTotal: 0,
+            totalBatches: 0,
+            startedById: actorId,
+          },
+          select: { id: true },
+        });
+        await transaction.auditLog.create({
+          data: {
+            actorId,
+            action: 'dongil.history-sync.start',
+            target: created.id,
+            details: {
+              eligibleCount: outbox.length,
+              uploadCount: requiresUpload.length,
+              verificationOnlyCount: requiresVerificationOnly.length,
+            },
+          },
+        });
+        return created;
       });
     } catch (error) {
       if (
         error instanceof Prisma.PrismaClientKnownRequestError &&
         error.code === 'P2002'
       ) {
-        throw new ConflictException('A Dongil history synchronization run already exists.');
+        throw new ConflictException(
+          'A Dongil history synchronization run already exists.',
+        );
       }
       throw error;
     }
@@ -253,38 +281,55 @@ export class DongilHistorySyncService implements OnModuleInit, OnModuleDestroy {
     );
     const scopes = new Map<
       string,
-      { scope: DongilReconcileScope; scopeKey: string; total: number; ok: number; ng: number }
+      {
+        scope: DongilReconcileScope;
+        scopeKey: string;
+        total: number;
+        ok: number;
+        ng: number;
+      }
     >();
     for (const row of allOutbox) {
-      const { scope, scopeKey } = resolveScope(row.localSessionId, row.inspectedAt);
+      const { scope, scopeKey } = resolveScope(
+        row.localSessionId,
+        row.inspectedAt,
+      );
       const key = `${scope}\u0000${scopeKey}`;
       if (!affectedScopeKeys.has(key)) continue;
-      const current = scopes.get(key) ?? { scope, scopeKey, total: 0, ok: 0, ng: 0 };
+      const current = scopes.get(key) ?? {
+        scope,
+        scopeKey,
+        total: 0,
+        ok: 0,
+        ng: 0,
+      };
       current.total += 1;
       if (row.result === InspectionResult.OK) current.ok += 1;
       else current.ng += 1;
       scopes.set(key, current);
     }
     for (let index = 0; index < outbox.length; index += BATCH_LIMIT) {
-      const chunk = outbox.slice(index, index + BATCH_LIMIT).map((item, offset) => {
-        const alreadyDelivered = item.status === DongilSyncOutboxStatus.SENT;
-        return {
-          runId: run.id,
-          outboxId: item.id,
-          localResultId: item.localResultId,
-          inspectedAt: item.inspectedAt,
-          localSessionId: item.localSessionId,
-          productCode: item.productCode,
-          result: item.result,
-          okCount: item.okCount!,
-          ngCount: item.ngCount!,
-          sequence: index + offset + 1,
-          status: alreadyDelivered
-            ? DongilHistorySyncItemStatus.CONFIRMED
-            : DongilHistorySyncItemStatus.PENDING,
-          confirmedAt: alreadyDelivered ? item.sentAt ?? new Date() : null,
-        };
-      });
+      const chunk = outbox
+        .slice(index, index + BATCH_LIMIT)
+        .map((item, offset) => {
+          const alreadyDelivered = item.status === DongilSyncOutboxStatus.SENT;
+          return {
+            runId: run.id,
+            outboxId: item.id,
+            localResultId: item.localResultId,
+            inspectedAt: item.inspectedAt,
+            localSessionId: item.localSessionId,
+            productCode: item.productCode,
+            result: item.result,
+            okCount: item.okCount!,
+            ngCount: item.ngCount!,
+            sequence: index + offset + 1,
+            status: alreadyDelivered
+              ? DongilHistorySyncItemStatus.CONFIRMED
+              : DongilHistorySyncItemStatus.PENDING,
+            confirmedAt: alreadyDelivered ? (item.sentAt ?? new Date()) : null,
+          };
+        });
       await this.prisma.dongilHistorySyncItem.createMany({ data: chunk });
     }
 
@@ -412,13 +457,19 @@ export class DongilHistorySyncService implements OnModuleInit, OnModuleDestroy {
       if (run.state === DongilHistorySyncRunState.BLOCKED) {
         await this.prisma.dongilHistorySyncRun.update({
           where: { id: run.id },
-          data: { state: DongilHistorySyncRunState.RUNNING, lastErrorCode: null, lastErrorMessage: null },
+          data: {
+            state: DongilHistorySyncRunState.RUNNING,
+            lastErrorCode: null,
+            lastErrorMessage: null,
+          },
         });
       }
       if (!(await this.isRunRunning(run.id))) return;
       await this.flushRun(run, runtime);
     } catch (error) {
-      this.logger.error(`Dongil history sync worker failed: ${describeError(error)}`);
+      this.logger.error(
+        `Dongil history sync worker failed: ${describeError(error)}`,
+      );
     } finally {
       this.running = false;
       await this.releaseLease();
@@ -433,7 +484,12 @@ export class DongilHistorySyncService implements OnModuleInit, OnModuleDestroy {
     const next = await this.prisma.dongilHistorySyncItem.findFirst({
       where: {
         runId: run.id,
-        status: { in: [DongilHistorySyncItemStatus.PENDING, DongilHistorySyncItemStatus.FAILED] },
+        status: {
+          in: [
+            DongilHistorySyncItemStatus.PENDING,
+            DongilHistorySyncItemStatus.FAILED,
+          ],
+        },
         nextAttemptAt: { lte: new Date() },
       },
       orderBy: { sequence: 'asc' },
@@ -485,7 +541,12 @@ export class DongilHistorySyncService implements OnModuleInit, OnModuleDestroy {
     const rows = await this.prisma.dongilHistorySyncItem.findMany({
       where: {
         runId,
-        status: { in: [DongilHistorySyncItemStatus.PENDING, DongilHistorySyncItemStatus.FAILED] },
+        status: {
+          in: [
+            DongilHistorySyncItemStatus.PENDING,
+            DongilHistorySyncItemStatus.FAILED,
+          ],
+        },
         ...(first.localBatchId
           ? { localBatchId: batchId }
           : { localBatchId: null, sequence: { gte: first.sequence } }),
@@ -514,7 +575,10 @@ export class DongilHistorySyncService implements OnModuleInit, OnModuleDestroy {
     await this.prisma.$transaction([
       this.prisma.dongilHistorySyncItem.updateMany({
         where: { id: { in: validRows.map((row) => row.id) } },
-        data: { status: DongilHistorySyncItemStatus.SENDING, localBatchId: batchId },
+        data: {
+          status: DongilHistorySyncItemStatus.SENDING,
+          localBatchId: batchId,
+        },
       }),
       this.prisma.dongilSyncOutbox.updateMany({
         where: { id: { in: validRows.map((row) => row.outboxId) } },
@@ -526,30 +590,33 @@ export class DongilHistorySyncService implements OnModuleInit, OnModuleDestroy {
       }),
     ]);
     try {
-      const response = await new DongilApiClient(runtime.serverUrl).sendWashingBatch(
-        runtime.machineId,
-        runtime.credential,
-        {
-          localBatchId: batchId,
-          items: validRows.map((item) => {
-            const source = outboxById.get(item.outboxId)!;
-            return {
-              localResultId: item.localResultId,
-              productCode: item.productCode,
-              productName: source.productName ?? item.productCode,
-              result: item.result === InspectionResult.OK ? 'OK' : 'NG',
-              localSessionId: item.localSessionId ?? undefined,
-              inspectedAt: item.inspectedAt.toISOString(),
-              okCount: item.okCount,
-              ngCount: item.ngCount,
-            };
-          }),
-        },
+      const response = await new DongilApiClient(
+        runtime.serverUrl,
+      ).sendWashingBatch(runtime.machineId, runtime.credential, {
+        localBatchId: batchId,
+        items: validRows.map((item) => {
+          const source = outboxById.get(item.outboxId)!;
+          return {
+            localResultId: item.localResultId,
+            productCode: item.productCode,
+            productName: source.productName ?? item.productCode,
+            result: item.result === InspectionResult.OK ? 'OK' : 'NG',
+            localSessionId: item.localSessionId ?? undefined,
+            inspectedAt: item.inspectedAt.toISOString(),
+            okCount: item.okCount,
+            ngCount: item.ngCount,
+          };
+        }),
+      });
+      const outcomes = new Map(
+        response.items.map((item) => [item.localResultId, item]),
       );
-      const outcomes = new Map(response.items.map((item) => [item.localResultId, item]));
       for (const item of validRows) {
         const outcome = outcomes.get(item.localResultId);
-        if (outcome?.disposition === 'ACCEPTED' || outcome?.disposition === 'REPLAYED') {
+        if (
+          outcome?.disposition === 'ACCEPTED' ||
+          outcome?.disposition === 'REPLAYED'
+        ) {
           const disposition =
             outcome.disposition === 'ACCEPTED'
               ? DongilDeliveryDisposition.ACCEPTED
@@ -582,7 +649,8 @@ export class DongilHistorySyncService implements OnModuleInit, OnModuleDestroy {
           await this.markItemsFailed(
             [item],
             outcome?.error?.code ?? 'DONGIL_ITEM_FAILED',
-            outcome?.error?.message ?? 'Dongil Server did not confirm the item.',
+            outcome?.error?.message ??
+              'Dongil Server did not confirm the item.',
             true,
           );
         }
@@ -594,7 +662,10 @@ export class DongilHistorySyncService implements OnModuleInit, OnModuleDestroy {
         first.localBatchId !== null || first.attemptCount > 0,
       );
     } catch (error) {
-      const code = error instanceof DongilApiError ? error.code : 'DONGIL_SERVER_UNAVAILABLE';
+      const code =
+        error instanceof DongilApiError
+          ? error.code
+          : 'DONGIL_SERVER_UNAVAILABLE';
       this.logger.error(
         `[dongil-history.batch.failed] ${JSON.stringify({
           runId,
@@ -613,7 +684,7 @@ export class DongilHistorySyncService implements OnModuleInit, OnModuleDestroy {
         first.sequence,
         first.localBatchId !== null || first.attemptCount > 0,
       );
-      if (error instanceof DongilApiError && [401, 403].includes(error.status)) {
+      if (classifyDongilFailure(error) !== 'RETRYABLE') {
         await this.blockRun(runId, code, describeError(error));
       }
     }
@@ -644,17 +715,24 @@ export class DongilHistorySyncService implements OnModuleInit, OnModuleDestroy {
     try {
       if (!scope.counterReconciledAt) {
         const isFinalCounterCheck = scope.idsVerifiedAt !== null;
-        const counter = await client.reconcile(runtime.machineId, runtime.credential, {
-          scope: scope.scope as DongilReconcileScope,
-          scopeKey: scope.scopeKey,
-          total: scope.total,
-          ok: scope.ok,
-          ng: scope.ng,
-          reportedAt: new Date().toISOString(),
-        });
+        const counter = await client.reconcile(
+          runtime.machineId,
+          runtime.credential,
+          {
+            scope: scope.scope as DongilReconcileScope,
+            scopeKey: scope.scopeKey,
+            total: scope.total,
+            ok: scope.ok,
+            ng: scope.ng,
+            reportedAt: new Date().toISOString(),
+          },
+        );
         await this.prisma.dongilHistorySyncScope.update({
           where: { id: scope.id },
-          data: { counterMatched: counter.matched, counterReconciledAt: new Date() },
+          data: {
+            counterMatched: counter.matched,
+            counterReconciledAt: new Date(),
+          },
         });
         if (!counter.matched && !isFinalCounterCheck) {
           await this.expandMismatchedScopeForFullVerification(
@@ -664,7 +742,8 @@ export class DongilHistorySyncService implements OnModuleInit, OnModuleDestroy {
           );
         }
         if (isFinalCounterCheck && !counter.matched) {
-          const message = 'Counter reconciliation still differs after every local result ID was verified.';
+          const message =
+            'Counter reconciliation still differs after every local result ID was verified.';
           await this.prisma.dongilHistorySyncScope.update({
             where: { id: scope.id },
             data: {
@@ -680,10 +759,15 @@ export class DongilHistorySyncService implements OnModuleInit, OnModuleDestroy {
           return;
         }
       }
-      const verificationWhere = this.scopeItemWhere(runId, scope.scope, scope.scopeKey, {
-        status: DongilHistorySyncItemStatus.CONFIRMED,
-        verifiedAt: null,
-      });
+      const verificationWhere = this.scopeItemWhere(
+        runId,
+        scope.scope,
+        scope.scopeKey,
+        {
+          status: DongilHistorySyncItemStatus.CONFIRMED,
+          verifiedAt: null,
+        },
+      );
       const items = await this.prisma.dongilHistorySyncItem.findMany({
         where: verificationWhere,
         orderBy: { sequence: 'asc' },
@@ -723,7 +807,8 @@ export class DongilHistorySyncService implements OnModuleInit, OnModuleDestroy {
                   verifiedAt: null,
                   nextAttemptAt: new Date(),
                   lastErrorCode: 'SERVER_RECONCILIATION_MISSING',
-                  lastErrorMessage: 'The server did not contain this local result.',
+                  lastErrorMessage:
+                    'The server did not contain this local result.',
                 },
               }),
               this.prisma.dongilSyncOutbox.update({
@@ -751,9 +836,11 @@ export class DongilHistorySyncService implements OnModuleInit, OnModuleDestroy {
             data: { counterReconciledAt: null, idsVerifiedAt: null },
           });
         } else {
-          const unverifiedCount = await this.prisma.dongilHistorySyncItem.count({
-            where: verificationWhere,
-          });
+          const unverifiedCount = await this.prisma.dongilHistorySyncItem.count(
+            {
+              where: verificationWhere,
+            },
+          );
           if (unverifiedCount === 0) {
             await this.prisma.dongilHistorySyncScope.update({
               where: { id: scope.id },
@@ -772,14 +859,22 @@ export class DongilHistorySyncService implements OnModuleInit, OnModuleDestroy {
       }
       await this.prisma.dongilHistorySyncScope.update({
         where: { id: scope.id },
-        data: { idsVerifiedAt: new Date(), completedAt: new Date(), lastErrorCode: null, lastErrorMessage: null },
+        data: {
+          idsVerifiedAt: new Date(),
+          completedAt: new Date(),
+          lastErrorCode: null,
+          lastErrorMessage: null,
+        },
       });
       await this.prisma.dongilHistorySyncRun.update({
         where: { id: runId },
         data: { lastErrorCode: null, lastErrorMessage: null },
       });
     } catch (error) {
-      const code = error instanceof DongilApiError ? error.code : 'DONGIL_RECONCILIATION_FAILED';
+      const code =
+        error instanceof DongilApiError
+          ? error.code
+          : 'DONGIL_RECONCILIATION_FAILED';
       const message = describeError(error);
       this.logger.error(
         `[dongil-history.reconcile.failed] ${JSON.stringify({
@@ -797,7 +892,7 @@ export class DongilHistorySyncService implements OnModuleInit, OnModuleDestroy {
         where: { id: runId },
         data: { lastErrorCode: code, lastErrorMessage: message.slice(0, 500) },
       });
-      if (error instanceof DongilApiError && [401, 403].includes(error.status)) {
+      if (classifyDongilFailure(error) !== 'RETRYABLE') {
         await this.blockRun(runId, code, message);
       }
     }
@@ -838,8 +933,12 @@ export class DongilHistorySyncService implements OnModuleInit, OnModuleDestroy {
         _max: { sequence: true },
       }),
     ]);
-    const existingOutboxIds = new Set(existingItems.map((item) => item.outboxId));
-    const missingRows = scopeRows.filter((row) => !existingOutboxIds.has(row.id));
+    const existingOutboxIds = new Set(
+      existingItems.map((item) => item.outboxId),
+    );
+    const missingRows = scopeRows.filter(
+      (row) => !existingOutboxIds.has(row.id),
+    );
     let nextSequence = (sequenceAggregate._max.sequence ?? 0) + 1;
 
     await this.prisma.$transaction(async (transaction) => {
@@ -872,7 +971,7 @@ export class DongilHistorySyncService implements OnModuleInit, OnModuleDestroy {
                 : DongilHistorySyncItemStatus.PENDING,
             confirmedAt:
               row.status === DongilSyncOutboxStatus.SENT
-                ? row.sentAt ?? new Date()
+                ? (row.sentAt ?? new Date())
                 : null,
           })),
         });
@@ -943,25 +1042,32 @@ export class DongilHistorySyncService implements OnModuleInit, OnModuleDestroy {
     firstSequence: number,
     isRetry: boolean,
   ) {
-    const [confirmed, accepted, replayed, failed, latestFailure] = await Promise.all([
-      this.prisma.dongilHistorySyncItem.count({
-        where: { runId, status: DongilHistorySyncItemStatus.CONFIRMED },
-      }),
-      this.prisma.dongilHistorySyncItem.count({
-        where: { runId, deliveryDisposition: DongilDeliveryDisposition.ACCEPTED },
-      }),
-      this.prisma.dongilHistorySyncItem.count({
-        where: { runId, deliveryDisposition: DongilDeliveryDisposition.REPLAYED },
-      }),
-      this.prisma.dongilHistorySyncItem.count({
-        where: { runId, status: DongilHistorySyncItemStatus.FAILED },
-      }),
-      this.prisma.dongilHistorySyncItem.findFirst({
-        where: { runId, status: DongilHistorySyncItemStatus.FAILED },
-        orderBy: { updatedAt: 'desc' },
-        select: { lastErrorCode: true, lastErrorMessage: true },
-      }),
-    ]);
+    const [confirmed, accepted, replayed, failed, latestFailure] =
+      await Promise.all([
+        this.prisma.dongilHistorySyncItem.count({
+          where: { runId, status: DongilHistorySyncItemStatus.CONFIRMED },
+        }),
+        this.prisma.dongilHistorySyncItem.count({
+          where: {
+            runId,
+            deliveryDisposition: DongilDeliveryDisposition.ACCEPTED,
+          },
+        }),
+        this.prisma.dongilHistorySyncItem.count({
+          where: {
+            runId,
+            deliveryDisposition: DongilDeliveryDisposition.REPLAYED,
+          },
+        }),
+        this.prisma.dongilHistorySyncItem.count({
+          where: { runId, status: DongilHistorySyncItemStatus.FAILED },
+        }),
+        this.prisma.dongilHistorySyncItem.findFirst({
+          where: { runId, status: DongilHistorySyncItemStatus.FAILED },
+          orderBy: { updatedAt: 'desc' },
+          select: { lastErrorCode: true, lastErrorMessage: true },
+        }),
+      ]);
     await this.prisma.dongilHistorySyncRun.update({
       where: { id: runId },
       data: {
@@ -980,7 +1086,9 @@ export class DongilHistorySyncService implements OnModuleInit, OnModuleDestroy {
   }
 
   private async backfillHistoricalOutbox() {
-    const captures = await this.prisma.$queryRaw<HistoricalCapture[]>(Prisma.sql`
+    const captures = await this.prisma.$queryRaw<
+      HistoricalCapture[]
+    >(Prisma.sql`
       SELECT
         log."plcCaptureId" AS "plcCaptureId",
         log."jobId" AS "jobId",
@@ -1138,20 +1246,29 @@ export class DongilHistorySyncService implements OnModuleInit, OnModuleDestroy {
       },
       orderBy: { startedAt: 'desc' },
     });
-    if (!run) throw new BadRequestException('No active Dongil history synchronization run exists.');
+    if (!run)
+      throw new BadRequestException(
+        'No active Dongil history synchronization run exists.',
+      );
     return run;
   }
 
   private assertRuntimeAvailable() {
     if (!this.dongilSync.getRuntimeForHistorySync()) {
-      throw new BadRequestException('Connect to Dongil Server before synchronizing history.');
+      throw new BadRequestException(
+        'Connect to Dongil Server before synchronizing history.',
+      );
     }
   }
 
   private async blockRun(runId: string, code: string, message: string) {
     await this.prisma.dongilHistorySyncRun.updateMany({
       where: { id: runId, state: DongilHistorySyncRunState.RUNNING },
-      data: { state: DongilHistorySyncRunState.BLOCKED, lastErrorCode: code, lastErrorMessage: message.slice(0, 500) },
+      data: {
+        state: DongilHistorySyncRunState.BLOCKED,
+        lastErrorCode: code,
+        lastErrorMessage: message.slice(0, 500),
+      },
     });
   }
 
@@ -1170,7 +1287,11 @@ export class DongilHistorySyncService implements OnModuleInit, OnModuleDestroy {
     const result = await this.prisma.dongilSyncWorkerLease.updateMany({
       where: {
         id: LEASE_ID,
-        OR: [{ expiresAt: null }, { expiresAt: { lte: now } }, { ownerId: this.workerId }],
+        OR: [
+          { expiresAt: null },
+          { expiresAt: { lte: now } },
+          { ownerId: this.workerId },
+        ],
       },
       data: { ownerId: this.workerId, expiresAt },
     });
@@ -1186,7 +1307,8 @@ export class DongilHistorySyncService implements OnModuleInit, OnModuleDestroy {
 }
 
 function resolveScope(localSessionId: string | null, inspectedAt: Date) {
-  if (localSessionId) return { scope: 'SESSION' as const, scopeKey: localSessionId };
+  if (localSessionId)
+    return { scope: 'SESSION' as const, scopeKey: localSessionId };
   return { scope: 'DAY' as const, scopeKey: formatVietnamDate(inspectedAt) };
 }
 
@@ -1218,7 +1340,9 @@ function nextRetryAt(attempt: number) {
 }
 
 function describeError(error: unknown) {
-  return error instanceof Error ? error.message : 'Unknown Dongil history synchronization error';
+  return error instanceof Error
+    ? error.message
+    : 'Unknown Dongil history synchronization error';
 }
 
 function toSafeDongilDiagnostic(error: unknown) {
@@ -1228,6 +1352,7 @@ function toSafeDongilDiagnostic(error: unknown) {
       path: error.path,
       httpStatus: error.status,
       code: error.code,
+      correlationId: error.correlationId,
       message: error.message,
       responseBody: redactDiagnosticBody(error.responseBody),
     };

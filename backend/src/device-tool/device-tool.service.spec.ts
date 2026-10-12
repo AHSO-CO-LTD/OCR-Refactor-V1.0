@@ -203,3 +203,164 @@ describe('DeviceToolService intentional camera disconnect', () => {
     expect(ensureCameraConnected).toHaveBeenCalledWith(camera);
   });
 });
+
+describe('DeviceToolService camera discovery', () => {
+  const currentIdentity = cameraIdentity({
+    id: 'camera-current',
+    serial: 'CURRENT-001',
+    displayName: 'Camera Current',
+    lastSeenAt: new Date('2026-10-06T04:00:00.000Z'),
+  });
+  const historicalIdentity = cameraIdentity({
+    id: 'camera-historical',
+    serial: 'HISTORICAL-001',
+    displayName: 'Camera Historical',
+    lastSeenAt: new Date('2026-08-14T09:04:56.612Z'),
+  });
+
+  it('returns no available camera when Device Tool detects no device', async () => {
+    const findMany = jest.fn();
+    const service = cameraDiscoveryService({
+      cameraIdentity: {
+        findMany,
+        upsert: jest.fn(),
+      },
+    });
+    mockToolDevices(service, []);
+
+    await expect(service.listCameraDevices()).resolves.toEqual({ data: [] });
+    expect(findMany).not.toHaveBeenCalled();
+  });
+
+  it('keeps saved identities visible but marks them unavailable when no device is detected', async () => {
+    const findMany = jest.fn().mockResolvedValue([
+      currentIdentity,
+      historicalIdentity,
+    ]);
+    const service = cameraDiscoveryService({
+      cameraIdentity: {
+        findMany,
+        upsert: jest.fn(),
+      },
+    });
+    mockToolDevices(service, []);
+
+    const result = await service.listCameraIdentities();
+
+    expect(result.data).toEqual([
+      expect.objectContaining({
+        serial: currentIdentity.serial,
+        detected: false,
+        connectable: false,
+      }),
+      expect.objectContaining({
+        serial: historicalIdentity.serial,
+        detected: false,
+        connectable: false,
+      }),
+    ]);
+    expect(findMany).toHaveBeenCalledTimes(1);
+  });
+
+  it('marks only serials returned by Device Tool as currently detected', async () => {
+    const findMany = jest
+      .fn()
+      .mockResolvedValueOnce([currentIdentity])
+      .mockResolvedValueOnce([currentIdentity, historicalIdentity]);
+    const upsert = jest.fn().mockResolvedValue(currentIdentity);
+    const service = cameraDiscoveryService({
+      cameraIdentity: { findMany, upsert },
+    });
+    mockToolDevices(service, [
+      {
+        name: 'Basler Current',
+        model: 'acA3800-10gm',
+        serial: currentIdentity.serial,
+        vendor: 'Basler',
+        interface: 'BaslerGigE',
+      },
+    ]);
+
+    const result = await service.listCameraIdentities();
+
+    expect(result.data).toEqual([
+      expect.objectContaining({
+        serial: currentIdentity.serial,
+        detected: true,
+        connectable: true,
+      }),
+      expect.objectContaining({
+        serial: historicalIdentity.serial,
+        detected: false,
+        connectable: false,
+      }),
+    ]);
+    expect(upsert).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { serial: currentIdentity.serial } }),
+    );
+    expect(findMany).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        where: { serial: { in: [currentIdentity.serial] } },
+      }),
+    );
+  });
+});
+
+function cameraDiscoveryService(prisma: {
+  cameraIdentity: {
+    findMany: jest.Mock;
+    upsert: jest.Mock;
+  };
+}) {
+  return new DeviceToolService(
+    { get: jest.fn().mockReturnValue(undefined) } as unknown as ConfigService,
+    prisma as unknown as PrismaService,
+  );
+}
+
+function mockToolDevices(service: DeviceToolService, devices: unknown[]) {
+  jest
+    .spyOn(
+      service as unknown as {
+        requestToolJson: () => Promise<unknown[]>;
+      },
+      'requestToolJson',
+    )
+    .mockResolvedValue(devices);
+}
+
+function cameraIdentity(
+  overrides: Partial<{
+    active: boolean;
+    createdAt: Date;
+    displayName: string;
+    driver: string;
+    id: string;
+    identifiedAt: Date | null;
+    interfaceName: string | null;
+    lastSeenAt: Date | null;
+    modelName: string | null;
+    serial: string;
+    toolName: string | null;
+    updatedAt: Date;
+    vendor: string | null;
+  }> = {},
+) {
+  return {
+    active: true,
+    createdAt: new Date('2026-07-01T00:00:00.000Z'),
+    displayName: 'Camera',
+    driver: 'basler_area',
+    id: 'camera-id',
+    identifiedAt: new Date('2026-07-01T00:00:00.000Z'),
+    interfaceName: 'BaslerGigE',
+    lastSeenAt: new Date('2026-07-01T00:00:00.000Z'),
+    modelName: 'acA3800-10gm',
+    serial: 'SERIAL-001',
+    toolName: 'Basler Camera',
+    updatedAt: new Date('2026-07-01T00:00:00.000Z'),
+    vendor: 'Basler',
+    ...overrides,
+  };
+}

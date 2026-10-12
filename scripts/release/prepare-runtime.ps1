@@ -11,6 +11,12 @@ $ErrorActionPreference = "Stop"
 $repoRoot = Resolve-Path (Join-Path $PSScriptRoot "..\..")
 $runtimeRoot = Join-Path $repoRoot "release-runtime"
 $manifestPath = Join-Path $runtimeRoot "runtime-manifest.json"
+$packagedApiBaseUrl = "http://127.0.0.1:3979/api"
+$forbiddenPackagedApiBaseUrls = @(
+  "http://localhost:3980/api",
+  "http://127.0.0.1:3980/api",
+  "http://localhost:3979/api"
+)
 
 function Get-FileSha256 {
   param([string]$Path)
@@ -62,6 +68,38 @@ function Assert-ChildPath {
   }
 }
 
+function Assert-FrontendProductionApiUrl {
+  param([string]$ExpectedApiBaseUrl)
+
+  $staticRoot = Join-Path $repoRoot "frontend\.next\static"
+  if (-not (Test-Path -LiteralPath $staticRoot)) {
+    throw "Frontend production static output was not found at $staticRoot"
+  }
+
+  $javascriptFiles = @(Get-ChildItem -LiteralPath $staticRoot -Recurse -File -Filter "*.js")
+  if ($javascriptFiles.Count -eq 0) {
+    throw "Frontend production static output contains no JavaScript files."
+  }
+
+  $expectedUrlFound = $false
+  foreach ($file in $javascriptFiles) {
+    $content = [System.IO.File]::ReadAllText($file.FullName)
+    if ($content.Contains($ExpectedApiBaseUrl)) {
+      $expectedUrlFound = $true
+    }
+
+    foreach ($forbiddenUrl in $forbiddenPackagedApiBaseUrls) {
+      if ($content.Contains($forbiddenUrl)) {
+        throw "Frontend production bundle contains forbidden API URL '$forbiddenUrl' in $($file.FullName)"
+      }
+    }
+  }
+
+  if (-not $expectedUrlFound) {
+    throw "Frontend production bundle does not contain required API URL '$ExpectedApiBaseUrl'."
+  }
+}
+
 Assert-ChildPath -Parent $repoRoot -Child $runtimeRoot
 
 if (Test-Path $runtimeRoot) {
@@ -71,11 +109,20 @@ if (Test-Path $runtimeRoot) {
 New-Item -ItemType Directory -Force -Path $runtimeRoot | Out-Null
 
 Push-Location $repoRoot
+$hadPreviousApiBaseUrl = Test-Path Env:NEXT_PUBLIC_API_BASE_URL
+$previousApiBaseUrl = $env:NEXT_PUBLIC_API_BASE_URL
 try {
   npm.cmd run build -w @ocr/backend
+  $env:NEXT_PUBLIC_API_BASE_URL = $packagedApiBaseUrl
   npm.cmd run build -w @ocr/frontend
+  Assert-FrontendProductionApiUrl -ExpectedApiBaseUrl $packagedApiBaseUrl
   npm.cmd run build -w @ocr/electron
 } finally {
+  if ($hadPreviousApiBaseUrl) {
+    $env:NEXT_PUBLIC_API_BASE_URL = $previousApiBaseUrl
+  } else {
+    Remove-Item Env:NEXT_PUBLIC_API_BASE_URL -ErrorAction SilentlyContinue
+  }
   Pop-Location
 }
 

@@ -16,18 +16,19 @@ import { Input } from "@/components/ui/input";
 import { useVirtualKeyboard } from "@/components/ui/virtual-keyboard";
 import {
   ApiError,
-  disconnectCamera,
   getSetupStatus,
   login,
-  restoreRememberedSession,
 } from "@/lib/api";
+import {
+  getDesktopBridge,
+  type RememberedLoginStatus,
+} from "@/lib/desktop";
 import { useI18n } from "@/lib/i18n";
 import {
   getPostLoginRoute,
 } from "@/lib/operator-startup-preferences";
 import {
-  clearSession,
-  getRememberedAccessToken,
+  clearLegacyRememberedSession,
   saveSession,
 } from "@/lib/session";
 
@@ -41,6 +42,10 @@ export default function LoginPage() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [rememberLogin, setRememberLogin] = useState(false);
+  const [rememberCapability, setRememberCapability] = useState<{
+    available: boolean;
+    hasLocalCredential: boolean;
+  } | null>(null);
   const [setupState, setSetupState] = useState<
     "checking" | "ready" | "required"
   >("checking");
@@ -53,6 +58,31 @@ export default function LoginPage() {
     "system" | "autoLogin" | "manual"
   >("system");
   const startupAttemptedRef = useRef(false);
+
+  useEffect(() => {
+    clearLegacyRememberedSession();
+    const bridge = getDesktopBridge();
+    if (!bridge) {
+      const timerId = window.setTimeout(
+        () =>
+          setRememberCapability({
+            available: false,
+            hasLocalCredential: false,
+          }),
+        0,
+      );
+      return () => window.clearTimeout(timerId);
+    }
+    bridge
+      .getRememberedLoginCapability()
+      .then(setRememberCapability)
+      .catch(() =>
+        setRememberCapability({
+          available: false,
+          hasLocalCredential: false,
+        }),
+      );
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -82,6 +112,7 @@ export default function LoginPage() {
       !gateStatus.apiConnected ||
       !gateStatus.licenseReady ||
       setupState !== "ready" ||
+      rememberCapability === null ||
       startupAttemptedRef.current
     ) {
       if (!gateStatus.checking && !gateStatus.licenseReady) {
@@ -95,21 +126,34 @@ export default function LoginPage() {
     let cancelled = false;
 
     async function runStartupFlow() {
-      const rememberedToken = getRememberedAccessToken();
+      const bridge = getDesktopBridge();
+      if (!bridge || rememberCapability?.hasLocalCredential !== true) {
+        if (!cancelled) setStartupMode("manual");
+        return;
+      }
 
-      if (rememberedToken) {
-        setStartupMode("autoLogin");
-        try {
-          const response = await getCurrentSessionWithTimeout(rememberedToken);
-          if (cancelled) return;
-          saveSession(rememberedToken, response.data.user, { remember: true });
+      setStartupMode("autoLogin");
+      try {
+        const response = await bridge.restoreRememberedLogin();
+        if (cancelled) return;
+        if (
+          response.data.status === "REMEMBER_RESTORED" &&
+          response.data.accessToken &&
+          response.data.user
+        ) {
+          saveSession(response.data.accessToken, response.data.user);
           router.replace(getPostLoginRoute());
           return;
-        } catch {
-          if (cancelled) return;
-          silentlyDisconnectCamera(rememberedToken);
-          clearSession();
         }
+        if (
+          response.data.status !== "NO_REMEMBERED_LOGIN" &&
+          response.data.status !== "REMEMBER_SECURE_STORAGE_UNAVAILABLE"
+        ) {
+          setError(rememberedLoginMessage(response.data.status, t));
+        }
+      } catch {
+        if (cancelled) return;
+        setError(t("auth.connectionError"));
       }
 
       if (cancelled) return;
@@ -124,8 +168,10 @@ export default function LoginPage() {
     gateStatus.apiConnected,
     gateStatus.checking,
     gateStatus.licenseReady,
+    rememberCapability,
     router,
     setupState,
+    t,
   ]);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -142,10 +188,22 @@ export default function LoginPage() {
     setLoading(true);
 
     try {
-      const response = await login(username, password);
-      saveSession(response.data.accessToken, response.data.user, {
-        remember: rememberLogin,
-      });
+      const response = await login(username, password, rememberLogin);
+      saveSession(response.data.accessToken, response.data.user);
+      const bridge = getDesktopBridge();
+      if (rememberLogin && bridge) {
+        try {
+          await bridge.enableRememberedLogin(response.data.accessToken);
+        } catch {
+          toast.error(t("auth.rememberEnableFailed"));
+        }
+      } else if (bridge) {
+        try {
+          await bridge.disableRememberedLogin(response.data.accessToken);
+        } catch {
+          toast.error(t("auth.rememberCleanupFailed"));
+        }
+      }
       toast.success(t("auth.loginSuccess"));
       router.replace(getPostLoginRoute());
     } catch (cause) {
@@ -272,11 +330,17 @@ export default function LoginPage() {
                       onChange={(event) =>
                         setRememberLogin(event.target.checked)
                       }
+                      disabled={rememberCapability?.available !== true}
                       className="h-5 w-5 border border-slate-300 accent-cyan-700"
                       type="checkbox"
                     />
                     <span>{t("auth.rememberLogin")}</span>
                   </label>
+                  {rememberCapability?.available === false ? (
+                    <p className="mt-1 text-sm text-amber-700">
+                      {t("auth.rememberUnavailable")}
+                    </p>
+                  ) : null}
                 </>
               ) : null}
 
@@ -305,19 +369,9 @@ export default function LoginPage() {
   );
 }
 
-function silentlyDisconnectCamera(accessToken: string | null | undefined) {
-  if (!accessToken) {
-    return;
-  }
-
-  void disconnectCamera(accessToken).catch(() => undefined);
-}
-
-function getCurrentSessionWithTimeout(accessToken: string) {
-  const controller = new AbortController();
-  const timeoutId = window.setTimeout(() => controller.abort(), 8000);
-
-  return restoreRememberedSession(accessToken, {
-    signal: controller.signal,
-  }).finally(() => window.clearTimeout(timeoutId));
+function rememberedLoginMessage(
+  status: RememberedLoginStatus,
+  t: (key: string) => string,
+) {
+  return t(`login.rememberError.${status}`);
 }

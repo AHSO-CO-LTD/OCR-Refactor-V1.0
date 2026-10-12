@@ -1,6 +1,5 @@
 import { Controller, Get, Post, Query, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
-import { CurrentUser } from '../auth/current-user.decorator';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RequirePermissions } from '../auth/permissions.decorator';
 import { PermissionsGuard } from '../auth/permissions.guard';
@@ -26,13 +25,6 @@ export class DongilHistorySyncController {
     return this.historySync.listInvalid(Number(page), Number(limit));
   }
 
-  @Post('start')
-  @RequirePermissions(PERMISSIONS.DONGIL_HISTORY_SYNC_MANAGE)
-  @ApiOperation({ summary: 'Create and start a durable Dongil history synchronization snapshot' })
-  start(@CurrentUser() user: { id: string }) {
-    return this.historySync.start(user.id);
-  }
-
   @Post('pause')
   @RequirePermissions(PERMISSIONS.DONGIL_HISTORY_SYNC_MANAGE)
   pause() {
@@ -47,7 +39,10 @@ export class DongilHistorySyncController {
 
   @Post('cancel')
   @RequirePermissions(PERMISSIONS.DONGIL_HISTORY_SYNC_MANAGE)
-  @ApiOperation({ summary: 'Cancel the active Dongil history synchronization run without deleting local results' })
+  @ApiOperation({
+    summary:
+      'Cancel the active Dongil history synchronization run without deleting local results',
+  })
   cancel() {
     return this.historySync.cancel();
   }

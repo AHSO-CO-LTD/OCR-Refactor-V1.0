@@ -108,5 +108,10 @@ describe('PlcController simulator access', () => {
 });
 
 function user(role: string): AuthenticatedRequest['user'] {
-  return { id: `${role}-1`, username: role, role };
+  return {
+    id: `${role}-1`,
+    username: role,
+    role,
+    sessionId: `${role}-session`,
+  };
 }

@@ -53,14 +53,14 @@ async function bootstrap() {
   const swaggerConfig = new DocumentBuilder()
     .setTitle('OCR Metal Core Washing API')
     .setDescription('Local REST API for OCR inspection desktop system.')
-    .setVersion('1.4.0')
+    .setVersion('1.5.0')
     .addBearerAuth()
     .build();
   const swaggerDocument = SwaggerModule.createDocument(app, swaggerConfig);
   SwaggerModule.setup('api/docs', app, swaggerDocument);
 
   const port = readPortEnv('BACKEND_PORT', 3980);
-  await app.listen(port);
+  await app.listen(port, '127.0.0.1');
   app.get(CameraStreamGateway).attach(app.getHttpServer());
 }
 bootstrap().catch((error) => {

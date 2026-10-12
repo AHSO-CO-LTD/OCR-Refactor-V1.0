@@ -1,11 +1,18 @@
 # Tham Khảo Live Camera Và Checking Từ Dự Án Gốc
 
+Trạng thái: Tài liệu lịch sử, chỉ dùng để hiểu nguồn hành vi cũ.
+
+Cập nhật chú thích: `2026-10-05`. Kiến trúc và hành vi hiện tại phải được đối
+chiếu với [`01-architecture.md`](01-architecture.md),
+[`02-runtime-flow.md`](02-runtime-flow.md) và [`13-plc-runtime.md`](13-plc-runtime.md).
+Không dùng tài liệu này làm đặc tả hiện hành nếu có xung đột.
+
 Ngày ghi chú: 2026-06-29
 
 Nguồn tham khảo:
 
 - Dự án gốc: `C:\duyhai\AHSO\OCR\OCR-Metal-Core-Washing`
-- Dự án refactor hiện tại: `C:\duyhai\AHSO\OCR\OCR-Metal-Core-Washing-Refactor`
+- Dự án refactor hiện tại: `C:\duyhai\AHSO\OCR\OCR-Refactor-V1.0`
 
 Tài liệu này ghi lại cách dự án gốc chạy live camera kèm OCR checking trong lúc live, sau đó đối chiếu với kiến trúc refactor hiện tại để làm tài liệu tham khảo khi áp dụng ngược lại. Đây là tài liệu phân tích, không phải đề xuất copy nguyên logic PyQt vào frontend mới.
 

@@ -1,8 +1,25 @@
 # Windows Setup And Update Flow
 
+Status: Stable `v1.5.0` was published on 2026-10-12 after local candidate
+`1.5.0-rc.2` corrected the dev API URL found in RC1. The user reported
+successful installed-RC2 acceptance on 2026-10-09. Target-machine update and
+rollback acceptance remain separate.
+
+Last source review: `2026-10-12`. This document describes the checked-in
+installer/release implementation. A local candidate does not imply publication.
+
+Related records: [`../PROJECT_PROFILE.md`](../PROJECT_PROFILE.md),
+[`17-logging-and-diagnostics.md`](17-logging-and-diagnostics.md), and
+[`adr/0006-nsis-update-recovery.md`](adr/0006-nsis-update-recovery.md).
+
 ## Goal
 
 Build one Windows setup file for the local OCR station.
+
+The protected source boundaries remain unchanged during packaging: release
+automation may copy or consume an approved encrypted Tool bundle and compiled
+license artifacts, but application work must not edit `tool/` or the original
+license implementation/binaries.
 
 The setup must install the desktop shell, backend, frontend runtime, Device/OCR
 Tool, local environment, and PostgreSQL database bootstrap. The browser must
@@ -90,13 +107,55 @@ npm run release:win
 For a local/offline bundle, bypass GitHub download with:
 
 ```powershell
-$env:DEVICE_TOOL_BUNDLE_PATH = "C:\duyhai\AHSO\tool-2026.Jul.06.2"
+$env:DEVICE_TOOL_BUNDLE_PATH = "C:\duyhai\AHSO\tool-2026.Jul.22.3"
 npm run release:win
 ```
 
 The override accepts an extracted bundle directory or the exact release zip.
 The package structure is still validated. Zip overrides are also checked
 against the configured SHA-256.
+
+### Previous local candidate
+
+The 2026-10-07 build produced
+`release/AHSO-OCR-Setup-1.5.0-rc.1-x64.exe` with SHA-256
+`B7D00C2E48302B9EBA350E7EB5DF1218EF924B368CEF0FEBE6F47878A569B726`.
+It was built with Node `v22.23.3`, publish disabled, and the pinned encrypted
+Tool release `2026.Jul.22.3`. See
+[`plans/2026-10-07-release-candidate-1.5.0-rc.1.md`](plans/2026-10-07-release-candidate-1.5.0-rc.1.md)
+for full evidence and remaining packaged checks.
+
+Packaged testing invalidated RC1 for pilot use because its browser bundle called
+the development API on port `3980` while the packaged backend listened on
+`3979`. RC2 sets the production API URL before the frontend build and fails the
+release preparation if a dev API URL remains. See
+[`plans/2026-10-08-rc2-local-api-and-safe-uninstall.md`](plans/2026-10-08-rc2-local-api-and-safe-uninstall.md).
+
+The 2026-10-08 build produced
+`release/AHSO-OCR-Setup-1.5.0-rc.2-x64.exe` with SHA-256
+`EFEB014AA300844710FD58E83AD782CC0880BB0962E68C40BFA9E33A7149F73C`.
+Static verification found the required packaged API URL and no dev API URL.
+The user later reported the installed application, local API/login, repeated
+restart/cold boot, in-app restart and safe default uninstall preservation
+working. This is user-reported acceptance rather than an agent-captured
+installer transcript. Update rollback, downgrade recovery and destructive
+uninstall options were not separately evidenced.
+
+### Published stable release
+
+Tag `v1.5.0` points to release commit
+`f0b3bc01ca6f48458284361c2e6e06c97c32dbd8`. GitHub Actions run
+`38199196122` completed successfully and published exactly these updater assets:
+
+- `AHSO-OCR-Setup-1.5.0-x64.exe` (`112853917` bytes; SHA-256
+  `3DEBBA5034B6744D8C1287AEFB3DD5F221262054F1FBB28A547DDB83F2462662`)
+- `AHSO-OCR-Setup-1.5.0-x64.exe.blockmap` (`118874` bytes)
+- `latest.yml` (`353` bytes)
+
+The downloaded `latest.yml` reports version `1.5.0`, the expected installer
+name, and the same installer size. The release is public, non-draft,
+non-prerelease, and GitHub reports it as latest. CI-generated artifacts may
+differ byte-for-byte from a local build because the builds are independent.
 
 ## Env Rule
 
@@ -163,8 +222,8 @@ Normal admin screens still hide and protect `dev`.
 
 ## Uninstall Rule
 
-The uninstaller shows options before removal starts. The default is a clean
-uninstall with no boxes checked.
+The uninstaller shows options before removal starts. The safe default has both
+keep options selected and removes only application files and shortcuts.
 
 When the uninstaller is invoked by an application update (`--updated`), it
 removes only the previous application files. It must not run runtime cleanup:
@@ -172,8 +231,9 @@ the PostgreSQL database, `C:\ProgramData\AHSO OCR`, runtime configuration,
 support credentials, recovery checkpoints, Node.js, PostgreSQL, and other
 frameworks are all preserved for the new version.
 
-- Clean uninstall: app files, shortcuts, local OCR database/config, and runtime
-  frameworks installed by this setup are removed.
+- Explicit destructive cleanup: if the user clears the keep options, app files,
+  shortcuts, selected local OCR database/config, and setup-owned runtime
+  frameworks are removed.
 - Keep database: app files are removed, but the local PostgreSQL database and
   runtime config are preserved for reinstall/update recovery.
 - Keep frameworks: app files and selected local data are removed, but runtime
@@ -189,8 +249,8 @@ If the database is kept, PostgreSQL is kept too even when framework cleanup is
 selected, because the preserved database depends on the local PostgreSQL
 runtime.
 
-An explicit silent uninstall that is not part of an application update uses
-the default clean mode.
+An explicit silent uninstall that is not part of an application update also
+uses app-only removal by default and preserves database/config/frameworks.
 
 ## Customer Admin Account
 

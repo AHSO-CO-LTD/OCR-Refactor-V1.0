@@ -88,5 +88,10 @@ describe('ProductsController AI settings permissions', () => {
 });
 
 function createUser(role: string): AuthenticatedRequest['user'] {
-  return { id: `${role}-id`, username: role, role };
+  return {
+    id: `${role}-id`,
+    username: role,
+    role,
+    sessionId: `${role}-session`,
+  };
 }

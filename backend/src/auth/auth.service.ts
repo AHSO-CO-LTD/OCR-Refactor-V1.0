@@ -4,7 +4,9 @@ import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcrypt';
 import { SystemService } from '../system/system.service';
 import { UsersService } from '../users/users.service';
+import { AuthSessionService } from './auth-session.service';
 import { LoginDto } from './dto/login.dto';
+import { RememberedLoginService } from './remembered-login.service';
 
 @Injectable()
 export class AuthService {
@@ -13,6 +15,8 @@ export class AuthService {
     private readonly jwtService: JwtService,
     private readonly systemService: SystemService,
     private readonly usersService: UsersService,
+    private readonly authSessions: AuthSessionService,
+    private readonly rememberedLogin: RememberedLoginService,
   ) {}
 
   async login(dto: LoginDto) {
@@ -42,6 +46,9 @@ export class AuthService {
     }
 
     await this.usersService.markLoginSuccess(user.id);
+    if (dto.rememberLogin !== true) {
+      await this.rememberedLogin.disableForLoginChoice(user.id);
+    }
     const refreshedUser = await this.usersService.findById(user.id);
 
     if (!refreshedUser) {
@@ -49,11 +56,13 @@ export class AuthService {
     }
 
     const sessionUser = this.usersService.toSessionUser(refreshedUser);
+    const session = await this.authSessions.create(sessionUser.id, 'password');
     const accessToken = await this.jwtService.signAsync(
       {
         sub: sessionUser.id,
         username: sessionUser.username,
         role: sessionUser.role,
+        sid: session.id,
       },
       {
         secret: this.configService.getOrThrow<string>('JWT_SECRET'),
@@ -73,16 +82,6 @@ export class AuthService {
 
     if (!licenseAllowed) {
       throw new UnauthorizedException('License dongle is missing');
-    }
-
-    return this.resolveSession(userId);
-  }
-
-  async restore(userId: string) {
-    const licenseAllowed = await this.systemService.assertAutoLoginAllowed();
-
-    if (!licenseAllowed) {
-      throw new UnauthorizedException('Physical license dongle is required');
     }
 
     return this.resolveSession(userId);

@@ -1,7 +1,20 @@
-import { IsIn, IsOptional, IsString, IsUrl, Length, Matches } from 'class-validator';
+import {
+  Equals,
+  IsIn,
+  IsOptional,
+  IsString,
+  IsUrl,
+  Length,
+  Matches,
+} from 'class-validator';
+import { LOCAL_DONGIL_MACHINE_TYPE_CODE } from '../dongil-sync.constants';
 
 export class BootstrapDongilSyncDto {
-  @IsUrl({ protocols: ['http', 'https'], require_protocol: true, require_tld: false })
+  @IsUrl({
+    protocols: ['http', 'https'],
+    require_protocol: true,
+    require_tld: false,
+  })
   serverUrl!: string;
 
   @IsString()
@@ -10,8 +23,7 @@ export class BootstrapDongilSyncDto {
   machineId!: string;
 
   @IsString()
-  @Length(2, 80)
-  @Matches(/^[A-Z][A-Z0-9_]*$/)
+  @Equals(LOCAL_DONGIL_MACHINE_TYPE_CODE)
   machineTypeCode!: string;
 
   @IsIn(['LICENSED', 'UNLICENSED'])

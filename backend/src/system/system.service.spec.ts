@@ -1,5 +1,5 @@
 import { PrismaService } from '../database/prisma.service';
-import { DongleCheckerService } from './dongle-checker.service';
+import { DongleCheckCoordinatorService } from './dongle-check-coordinator.service';
 import { SystemService } from './system.service';
 
 describe('SystemService auto-login dongle gate', () => {
@@ -20,15 +20,16 @@ function createService(result: { ok: boolean; code: string }) {
   const prisma = {
     licenseLog: { create: jest.fn().mockResolvedValue(undefined) },
   } as unknown as PrismaService;
-  const dongleChecker = {
+  const dongleChecks = {
     check: jest.fn().mockResolvedValue({
       ...result,
+      failureKind: null,
       retcode: result.ok ? 0 : null,
       checkedAt: new Date().toISOString(),
       message: result.code,
       dllPath: result.code === 'DONGLE_OK' ? 'System8.dll' : null,
     }),
-  } as unknown as DongleCheckerService;
+  } as unknown as DongleCheckCoordinatorService;
 
-  return new SystemService(prisma, dongleChecker);
+  return new SystemService(prisma, dongleChecks);
 }

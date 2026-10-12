@@ -690,6 +690,11 @@ export class DeviceToolService {
       { method: 'GET', signal },
       'list camera devices',
     );
+
+    if (devices.length === 0) {
+      return [];
+    }
+
     const now = new Date();
 
     for (const device of devices) {
@@ -717,10 +722,7 @@ export class DeviceToolService {
     }
 
     return this.prisma.cameraIdentity.findMany({
-      where:
-        devices.length > 0
-          ? { serial: { in: devices.map((device) => device.serial) } }
-          : undefined,
+      where: { serial: { in: devices.map((device) => device.serial) } },
       orderBy: [{ active: 'desc' }, { displayName: 'asc' }, { serial: 'asc' }],
     });
   }

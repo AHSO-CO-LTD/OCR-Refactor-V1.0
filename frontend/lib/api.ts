@@ -248,6 +248,13 @@ export type SystemLicenseState = {
   lastCheckedAt: string | null;
   code: string | null;
   message: string | null;
+  failureKind?:
+    | "NOT_FOUND"
+    | "INVALID"
+    | "TIMEOUT"
+    | "HELPER_ERROR"
+    | "TRANSIENT_BUSY"
+    | null;
 };
 
 export type InspectionSlotState = {
@@ -848,13 +855,17 @@ async function fetchAuthenticatedBlob(url: string, accessToken: string) {
   return response.blob();
 }
 
-export async function login(username: string, password: string) {
+export async function login(
+  username: string,
+  password: string,
+  rememberLogin: boolean,
+) {
   const response = await fetch(`${API_BASE_URL}/auth/login`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({ username, password }),
+    body: JSON.stringify({ username, password, rememberLogin }),
   });
 
   if (!response.ok) {
@@ -869,24 +880,6 @@ export async function getCurrentSession(
   options: { signal?: AbortSignal } = {},
 ) {
   const response = await fetch(`${API_BASE_URL}/auth/me`, {
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-    },
-    signal: options.signal,
-  });
-
-  if (!response.ok) {
-    throw new ApiError(await parseError(response), response.status);
-  }
-
-  return (await response.json()) as MeResponse;
-}
-
-export async function restoreRememberedSession(
-  accessToken: string,
-  options: { signal?: AbortSignal } = {},
-) {
-  const response = await fetch(`${API_BASE_URL}/auth/restore`, {
     headers: {
       Authorization: `Bearer ${accessToken}`,
     },
@@ -2353,17 +2346,6 @@ export async function listDongilHistorySyncInvalid(
   }>(
     accessToken,
     `/dongil-sync/history/invalid?page=${page}&limit=${limit}`,
-  );
-}
-
-export async function startDongilHistorySync(accessToken: string) {
-  return plcRequest<{
-    data: DongilHistorySyncRun | null;
-    alreadyVerified?: boolean;
-  }>(
-    accessToken,
-    "/dongil-sync/history/start",
-    { method: "POST" },
   );
 }
 

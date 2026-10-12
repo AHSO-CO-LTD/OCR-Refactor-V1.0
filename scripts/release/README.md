@@ -1,5 +1,15 @@
 # Release Setup Notes
 
+Status: Current release-script reference for published stable `v1.5.0`.
+Installed RC2 acceptance was reported successful by the user before promotion.
+
+Last source review: `2026-10-12`. Stable publication evidence and the remaining
+target-machine acceptance scope are recorded in the associated release plan.
+
+The release process may stage an approved encrypted Tool bundle and compiled
+license artifacts. It must not modify `tool/` or original license source and
+binaries.
+
 The Windows setup is built with Electron Builder NSIS.
 
 Production bootstrap writes machine-local secrets to:
@@ -20,10 +30,10 @@ installs Node dependencies, installs Tool requirements into `tool/python-embed`,
 generates the Prisma Client, runs migrations, and seeds production data.
 
 When the online preflight installs Node.js or PostgreSQL, it records
-that ownership in `C:\ProgramData\AHSO OCR\runtime-ownership.json`. The
-uninstaller uses that file so the default clean uninstall removes only runtime
-frameworks installed by this setup, not frameworks that already existed on the
-customer PC.
+that ownership in `C:\ProgramData\AHSO OCR\runtime-ownership.json`. Normal and
+silent uninstall both default to app-only removal: database, ProgramData,
+configuration, logs, backups, and runtime frameworks are preserved. Interactive
+users may explicitly clear a keep option when destructive cleanup is intended.
 
 When setup installs PostgreSQL itself, the generated local PostgreSQL `postgres`
 superuser password is fixed to `0123456789` so service administrators can log in
@@ -33,6 +43,12 @@ instance.
 The staged `frontend-standalone` folder must contain its own `package.json` so
 the installer can install production Next.js dependencies beside the standalone
 server.
+
+The release preparation script sets
+`NEXT_PUBLIC_API_BASE_URL=http://127.0.0.1:3979/api` before `next build` and
+rejects any production browser bundle that still contains the dev API on port
+`3980`. Writing this variable during installation is not sufficient because
+Next.js embeds `NEXT_PUBLIC_*` values at build time.
 
 The staged backend runtime must include `native\dongle-checker.exe`; the backend
 license service loads that helper before calling `System8.dll`. The Python
@@ -68,8 +84,8 @@ After preflight finishes, the bootstrap script expects PostgreSQL through
 
 Both local and GitHub Actions builds use
 `scripts/release/private-tool-release.json`. The current source is the private
-GitHub release asset `AHSO-CO-LTD/API-Tool-v1@2026.Jul.06.2` /
-`tool-2026.Jul.06.2.zip`.
+GitHub release asset `AHSO-CO-LTD/API-Tool-v1@2026.Jul.22.3` /
+`tool-2026.Jul.22.3.zip`.
 
 The staging script verifies the configured SHA-256 and rejects a package that
 does not contain the compiled `api`, `core`, and `drivers` `.pyd` modules. It
@@ -88,7 +104,7 @@ For an offline/local bundle override, point to either the extracted directory or
 the exact zip archive:
 
 ```powershell
-$env:DEVICE_TOOL_BUNDLE_PATH = "C:\duyhai\AHSO\tool-2026.Jul.06.2"
+$env:DEVICE_TOOL_BUNDLE_PATH = "C:\duyhai\AHSO\tool-2026.Jul.22.3"
 npm run release:win
 ```
 
@@ -102,5 +118,5 @@ To upgrade the bundled Tool, update tag, asset name, and SHA-256 together in
 checked with:
 
 ```powershell
-gh release view 2026.Jul.06.2 --repo AHSO-CO-LTD/API-Tool-v1 --json assets
+gh release view 2026.Jul.22.3 --repo AHSO-CO-LTD/API-Tool-v1 --json assets
 ```

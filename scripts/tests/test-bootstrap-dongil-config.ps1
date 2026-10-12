@@ -30,4 +30,10 @@ $existingInstall = Resolve-DongilBootstrapConfig -EnvValues @{
 Assert-Equal -Actual $existingInstall.serverUrl -Expected "http://192.168.1.10:3979" -Label "Preserved server URL"
 Assert-Equal -Actual $existingInstall.machineTypeCode -Expected "WASHING_MACHINE" -Label "Preserved machine type"
 
+$incorrectExistingType = Resolve-DongilBootstrapConfig -EnvValues @{
+  DONGIL_SERVER_URL = "http://192.168.1.10:3979"
+  DONGIL_MACHINE_TYPE_CODE = "WASHING_MACHINE_DONGLE_CHECK_TIMEOUT_MS=7000"
+}
+Assert-Equal -Actual $incorrectExistingType.machineTypeCode -Expected "WASHING_MACHINE" -Label "Corrected machine type"
+
 Write-Host "Dongil bootstrap config tests passed."
