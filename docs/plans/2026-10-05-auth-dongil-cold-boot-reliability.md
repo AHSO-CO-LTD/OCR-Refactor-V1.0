@@ -1,6 +1,6 @@
 # Kế hoạch ổn định cold boot, đăng nhập ghi nhớ và kết nối Dongil
 
-Status: **Approved — source implementation and manual source pilot accepted; packaged pilot pending**
+Status: **Implemented — source and installed RC2 operation accepted by user report; residual acceptance matrix remains open**
 Plan version: **3**
 Approved date: **2026-10-05**  
 Execution rule updated: **2026-10-06**
@@ -580,7 +580,7 @@ Exit gate:
 
 ### Phase 1 — Env parser và runtime bootstrap
 
-Status: **Source runtime user-accepted — packaged cold boot pending**
+Status: **Source and installed RC2 cold boot user-accepted**
 
 Feasibility result: **Feasible with adjustment**
 
@@ -626,7 +626,7 @@ Exit gate:
 
 ### Phase 2 — Fixed machine type
 
-Status: **Source fixed type/live assignment user-accepted — packaged verification pending**
+Status: **Source and installed RC2 Dongil operation user-accepted; mismatch case not separately captured**
 
 Feasibility result: **Feasible with adjustment**
 
@@ -664,7 +664,7 @@ Exit gate:
 
 ### Phase 3 — DB-authoritative Dongil configuration
 
-Status: **Workstation schema current and source runtime user-accepted — packaged migration pending**
+Status: **Installed RC2 operation user-accepted; representative-data migration/rollback evidence pending**
 
 Feasibility result: **Feasible with sequencing adjustment**
 
@@ -712,7 +712,7 @@ Exit gate:
 
 ### Phase 4 — Dongil reliability
 
-Status: **Live source Dongil/outbox flow user-accepted — packaged verification pending**
+Status: **Source and installed RC2 Dongil flow user-accepted; detailed failure matrix remains**
 
 Feasibility result: **Feasible with targeted corrections**
 
@@ -756,7 +756,7 @@ Exit gate:
 
 ### Phase 5 — Operator Dongil permissions
 
-Status: **Source operator UI/runtime boundary user-accepted — packaged verification pending**
+Status: **Source boundary and installed RC2 operation user-accepted**
 
 Feasibility result: **Feasible with an authoritative IPC/API boundary**
 
@@ -791,7 +791,7 @@ Exit gate:
 
 ### Phase 6 — Secure remembered login cho mọi role
 
-Status: **Source Electron safeStorage/cold boot user-accepted — packaged verification pending**
+Status: **Source and installed RC2 safeStorage/restart/cold boot user-accepted**
 
 Feasibility result: **Feasible with revocation-state clarification**
 
@@ -844,7 +844,7 @@ Exit gate:
 
 ### Phase 7 — Dongle check coordination
 
-Status: **Physical dongle and source cold-boot coordination accepted — packaged verification pending**
+Status: **Physical dongle source flow and installed RC2 operation user-accepted; overlap stress not separately captured**
 
 Feasibility result: **Feasible without changing protected license code**
 
@@ -876,7 +876,7 @@ Exit gate:
 
 ### Phase 8 — UI, i18n, logging và documentation
 
-Status: **Source visual/runtime/log review accepted — packaged UI pending**
+Status: **Source review and installed RC2 core UI operation user-accepted**
 
 Feasibility result: **Feasible without a layout redesign**
 
@@ -918,7 +918,7 @@ Exit gate:
 
 ### Phase 9 — Verification và pilot
 
-Status: **Phase 9A/9B/9C complete; user-reported manual source pilot accepted — packaged pilot pending**
+Status: **Phase 9A/9B/9C complete; source and installed RC2 pilot accepted by user report**
 
 Pre-execution feasibility assessment: **Feasible with staged authorization**
 
@@ -1084,6 +1084,19 @@ Manual source acceptance reported by the user on **2026-10-06**:
 - A separate read-only Prisma audit found the workstation `ocrahso` database at
   all 48 migrations and reported the schema up to date. No migration or seed was
   executed by the audit, and deployment provenance was not inferred.
+
+Manual installed-RC2 acceptance reported by the user on **2026-10-09**:
+
+- The packaged local API/login path worked on an installed machine.
+- Remembered login restored across repeated application restart and full cold boot.
+- Restart initiated from the user interface worked.
+- Safe uninstall defaults preserved database/config/frameworks as intended.
+- PLC, camera and Dongil operation were reported working.
+- This closes the core packaged pilot by user report. It is not an
+  agent-captured transcript and does not separately prove every server
+  assignment mismatch, permanent-400, role/deactivation revocation, active
+  WebSocket closure, representative-data migration, updater rollback or
+  downgrade-recovery case.
 
 Final source-diff and migration audit recorded on **2026-10-06**:
 
@@ -1270,15 +1283,15 @@ Kế hoạch chỉ hoàn thành khi đáp ứng toàn bộ điều kiện áp d�
 | Phase | Trạng thái |
 | --- | --- |
 | Phase 0 — Plan và baseline | Done — documentation and feasibility only |
-| Phase 1 — Env parser/bootstrap | Source runtime user-accepted — packaged cold boot pending |
-| Phase 2 — Fixed machine type | Source fixed type/live assignment user-accepted — packaged verification pending |
-| Phase 3 — DB-authoritative Dongil config | Workstation schema current and source runtime user-accepted — packaged migration pending |
-| Phase 4 — Dongil reliability | Live source Dongil/outbox flow user-accepted — packaged verification pending |
-| Phase 5 — Operator permissions | Source operator UI/runtime boundary user-accepted — packaged verification pending |
-| Phase 6 — Secure remembered login | Source Electron opt-in, restart and cold boot user-accepted — packaged verification pending |
-| Phase 7 — Dongle coordination | Physical dongle and source cold-boot coordination accepted — packaged verification pending |
-| Phase 8 — UI/i18n/logging/docs | Source visual/runtime/log review accepted — packaged Electron UI pending |
-| Phase 9 — Verification/pilot | Automated/isolated checks complete and manual source pilot user-accepted — packaged pilot pending |
+| Phase 1 — Env parser/bootstrap | Source and installed RC2 cold boot user-accepted |
+| Phase 2 — Fixed machine type | Source and installed RC2 operation user-accepted; mismatch case remains |
+| Phase 3 — DB-authoritative Dongil config | Installed RC2 operation user-accepted; representative migration/rollback remains |
+| Phase 4 — Dongil reliability | Source and installed RC2 flow user-accepted; detailed failure matrix remains |
+| Phase 5 — Operator permissions | Source boundary and installed RC2 operation user-accepted |
+| Phase 6 — Secure remembered login | Source and installed RC2 restart/cold boot user-accepted |
+| Phase 7 — Dongle coordination | Physical source flow and installed RC2 operation user-accepted; overlap stress remains |
+| Phase 8 — UI/i18n/logging/docs | Source review and installed RC2 core UI user-accepted |
+| Phase 9 — Verification/pilot | Automated/isolated checks complete; installed RC2 pilot accepted by user report |
 
 Mọi thay đổi architecture, database, API, permission, security hoặc rollback
 khác với plan này phải dừng triển khai, cập nhật plan và được duyệt lại trước

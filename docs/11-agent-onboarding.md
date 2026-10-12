@@ -82,10 +82,14 @@ collapse them into one unqualified “verified” claim.
 ## Current Engineering Risks
 
 - ROI free-angle/runtime crop mismatch.
-- Local session revocation passed isolated verification; packaged acceptance and
-  project-wide audit coverage remain incomplete.
+- Local session revocation passed isolated verification. The user reported the
+  installed RC2 login/restart flows working, but the complete revoke/WebSocket
+  matrix and project-wide audit coverage remain incomplete.
 - Local Tool network exposure.
-- Runtime `.env` parser, backup, ACL and downgrade recovery are implemented but
-  not yet verified in a packaged cold-boot acceptance run.
+- Runtime `.env` parser, backup and ACL handling are implemented. The user
+  reported packaged cold boot working; downgrade recovery was not separately
+  verified.
 - Large cross-domain modules and inactive shared contracts.
-- Hardware and update acceptance still require explicit target-machine evidence.
+- PLC, camera and Dongil operation were accepted by user report on installed
+  RC2. Update/rollback and detailed hardware failure cases still require
+  explicit target-machine evidence.

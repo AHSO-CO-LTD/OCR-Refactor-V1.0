@@ -1,7 +1,8 @@
 # Project Profile
 
-Last source review: 2026-10-08
-Current source candidate: `1.5.0-rc.2` on branch `remote`; last published release: `v1.4.0`
+Last source review: 2026-10-12
+Current source version: `1.5.0` on branch `remote`; publication is pending and
+the last published release remains `v1.4.0`.
 
 ## Project
 
@@ -78,8 +79,9 @@ See [docs/14-database.md](docs/14-database.md).
 - Current source creates a local PostgreSQL `AuthSession` for each password or
   remembered login and places its ID in JWT `sid`. HTTP guards and camera
   WebSocket authorization reject revoked/inactive sessions. Static checks and
-  isolated migration/runtime verification have passed; packaged acceptance is
-  still pending.
+  isolated migration/runtime verification have passed. The user reported the
+  installed RC2 login, automatic restore, restart and cold-boot flows working;
+  the full revoke/WebSocket acceptance matrix was not independently captured.
 
 JWT expiry remains intentionally unset under the accepted no-inactivity-timeout
 policy. Login rate limiting and enforced failed-attempt lockout are deferred;
@@ -148,7 +150,10 @@ See [docs/12-dongil-server-integration.md](docs/12-dongil-server-integration.md)
   but packaged testing found that its frontend bundle retained the dev API URL
   on port `3980`. Local candidate `1.5.0-rc.2` corrects the production build
   guard and safe uninstall defaults and was built without publishing on
-  2026-10-08; packaged acceptance remains pending.
+  2026-10-08. The user subsequently reported successful installed-RC2
+  acceptance for local API/login, remembered login across restart/cold boot,
+  in-app restart, safe uninstall defaults, PLC, camera and Dongil. Publication
+  and release-asset verification remain pending.
 - Online preflight checks Node.js 22+, bundled Tool Python 3.11, PostgreSQL 14+,
   and network access only when a missing runtime must be downloaded.
 - The installer supports new databases, reuse, selection of a different name,
@@ -230,14 +235,19 @@ that database returned healthy and listened only on `127.0.0.1`; its process was
 stopped, port `3981` was released, and the isolated database was removed. The
 workstation `ocrahso` database was not migrated or written by this verification.
 
-The user subsequently reported successful manual acceptance on the development
+The user first reported successful manual acceptance on the development
 Electron source runtime: real remembered-login opt-in survived application
 restart and a full Windows cold boot, operator Dongil controls respected the
 approved allow/deny boundary, temporary LAN loss recovered with outbox replay,
 and the reviewed runtime logs did not expose passwords, JWTs, remember tokens,
-or machine credentials. This evidence is user-reported rather than
-agent-captured and does not cover the packaged installer.
-Changed source files pass non-fixing ESLint; full frontend and backend lint
-remain blocked by documented baseline issues outside this change set. No seed,
-installer acceptance, camera, PLC, updater, packaged cold boot, or
-production-data migration pilot has been performed for this change.
+or machine credentials.
+
+On 2026-10-09, the user additionally reported that the installed RC2 worked for
+the local API/login path, remembered login across repeated restart and cold
+boot, in-app restart, default app-only uninstall preservation, PLC, camera and
+Dongil operation. Both manual acceptance sets are user-reported rather than
+agent-captured. They do not separately prove every revocation/WebSocket case,
+update/rollback, downgrade recovery, representative production-data migration,
+or release publication. Changed source files previously passed non-fixing
+ESLint; full frontend and backend lint remain blocked by documented baseline
+issues outside this change set.

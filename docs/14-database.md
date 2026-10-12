@@ -59,8 +59,10 @@ account deletion revoke it transactionally; `AuditLog` retains the event.
 `AuthSession` uses an additive user foreign key with cascade delete and an index
 on `(userId, revokedAt)`. Active sessions have `revokedAt = null`; logout, role
 change and account deactivation set revocation metadata instead of deleting the
-row. The migration and DB behavior have passed isolated PostgreSQL verification;
-packaged compatibility verification remains pending.
+row. The migration and DB behavior have passed isolated PostgreSQL verification.
+The user reported successful installed-RC2 operation on a target machine, but
+representative production-data migration, backup/restore and rollback were not
+independently captured as a separate acceptance matrix.
 
 ## Migration Policy
 
@@ -134,3 +136,8 @@ revocation and audit redaction. Final evidence showed 49 completed migrations,
 zero failed migrations and no remaining test users, sessions or remembered-login
 rows. The temporary database was then removed. This did not apply a migration to
 or write data into the workstation `ocrahso` database.
+
+On 2026-10-09, the user reported the installed RC2 application operating
+successfully. This supports packaged compatibility for that installation but
+does not establish data-distribution compatibility across other factory
+databases or prove the update backup/rollback path.

@@ -15,22 +15,25 @@
   handling, remembered-login restore, camera WebSocket session checks, backend
   loopback binding, and denied renderer-created windows. Static checks,
   isolated migration/integration tests, and source backend runtime verification
-  are complete; packaged acceptance remains pending.
+  are complete. Installed RC2 login/restart operation was subsequently accepted
+  by user report; detailed revoke/WebSocket cases remain separately unobserved.
 
 ## Current Hardening Priorities
 
-1. Complete packaged target-machine acceptance for the additive `AuthSession`
-   migration, remembered login, camera, PLC, dongle, installer, updater,
-   database backup/restore, and Dongil connectivity loss.
-2. Verify packaged backend loopback binding, Electron external-window policy,
+1. Decide the public release version, align metadata if promoting RC2 to a
+   final version, then commit/push/tag and verify the GitHub Actions artifacts.
+2. Preserve detailed acceptance evidence for update/rollback, representative
+   production-data migration, session revocation/WebSocket closure and
+   downgrade recovery; the user-reported RC2 pass does not isolate these cases.
+3. Verify packaged backend loopback binding, Electron external-window policy,
    local IPC boundaries, log redaction, and Device Tool firewall/network policy.
-3. Add complete audit coverage for privileged mutations through a separately
+4. Add complete audit coverage for privileged mutations through a separately
    inspected and approved plan.
-4. Remove or clearly isolate production demo fallback behavior through a
+5. Remove or clearly isolate production demo fallback behavior through a
    separately approved behavior-preserving change.
-5. Split oversized frontend API, inspection, Electron main, and service-manager
+6. Split oversized frontend API, inspection, Electron main, and service-manager
    modules through separately approved behavior-preserving refactors.
-6. Promote stable frontend/backend contracts into `shared/` only where this
+7. Promote stable frontend/backend contracts into `shared/` only where this
    reduces demonstrated drift.
 
 ## Documentation Baseline
@@ -38,14 +41,14 @@
 The completed documentation refresh is tracked in
 [plans/2026-10-05-documentation-baseline-refresh.md](plans/2026-10-05-documentation-baseline-refresh.md).
 
-The current packaged acceptance gates are tracked in
+The source/pilot acceptance history is tracked in
 [plans/2026-10-05-auth-dongil-cold-boot-reliability.md](plans/2026-10-05-auth-dongil-cold-boot-reliability.md)
 and
 [plans/2026-10-06-local-auth-session-and-runtime-security.md](plans/2026-10-06-local-auth-session-and-runtime-security.md).
 
 ## Release Acceptance Gate
 
-A release candidate is not production-ready until explicitly verified for:
+A broad rollout still needs explicit evidence appropriate to the target machine for:
 
 - clean install, reuse, update, rollback, uninstall, and reinstall;
 - database migration, backup, restore, and preserved configuration;

@@ -1,10 +1,11 @@
 # Windows Setup And Update Flow
 
-Status: Implemented baseline; local candidate `1.5.0-rc.2` was built after
-packaged testing found a dev API URL in the `1.5.0-rc.1` frontend bundle.
-Packaged RC2 acceptance remains pending. The last published release is `v1.4.0`.
+Status: Stable source `1.5.0` is being prepared for publication after local
+candidate `1.5.0-rc.2` corrected the dev API URL found in RC1. The user reported
+successful installed-RC2 acceptance on 2026-10-09. Publication remains pending
+and the last published release is `v1.4.0`.
 
-Last source review: `2026-10-08`. This document describes the checked-in
+Last source review: `2026-10-09`. This document describes the checked-in
 installer/release implementation. A local candidate does not imply publication.
 
 Related records: [`../PROJECT_PROFILE.md`](../PROJECT_PROFILE.md),
@@ -106,7 +107,7 @@ npm run release:win
 For a local/offline bundle, bypass GitHub download with:
 
 ```powershell
-$env:DEVICE_TOOL_BUNDLE_PATH = "C:\duyhai\AHSO\tool-2026.Jul.06.2"
+$env:DEVICE_TOOL_BUNDLE_PATH = "C:\duyhai\AHSO\tool-2026.Jul.22.3"
 npm run release:win
 ```
 
@@ -133,8 +134,12 @@ release preparation if a dev API URL remains. See
 The 2026-10-08 build produced
 `release/AHSO-OCR-Setup-1.5.0-rc.2-x64.exe` with SHA-256
 `EFEB014AA300844710FD58E83AD782CC0880BB0962E68C40BFA9E33A7149F73C`.
-Static verification found the required packaged API URL and no dev API URL;
-installer/uninstaller execution remains pending.
+Static verification found the required packaged API URL and no dev API URL.
+The user later reported the installed application, local API/login, repeated
+restart/cold boot, in-app restart and safe default uninstall preservation
+working. This is user-reported acceptance rather than an agent-captured
+installer transcript. Update rollback, downgrade recovery and destructive
+uninstall options were not separately evidenced.
 
 ## Env Rule
 

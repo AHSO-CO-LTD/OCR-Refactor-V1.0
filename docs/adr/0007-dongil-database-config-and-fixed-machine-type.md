@@ -1,6 +1,6 @@
 # 0007 — Database-authoritative Dongil configuration and fixed washing type
 
-Status: Accepted — implementation complete; verification pending
+Status: Accepted — implementation complete; installed RC2 operation accepted by user report
 
 ## Context
 
@@ -74,5 +74,6 @@ renderer.
   configuration.
 - Machine-type mismatch becomes visible and blocking, which may expose existing
   server assignment errors during rollout.
-- Target-machine migration, cold boot, ACL, rollback, and connected-server
-  behavior require explicit pilot verification.
+- The user reported installed RC2 cold boot and connected Dongil operation
+  working. Representative-data migration, assignment-mismatch handling,
+  downgrade and rollback still require separately captured evidence.

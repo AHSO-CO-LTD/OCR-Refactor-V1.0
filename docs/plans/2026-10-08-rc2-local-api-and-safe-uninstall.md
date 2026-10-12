@@ -1,6 +1,6 @@
 # Kế hoạch hotfix RC2: API local và uninstall an toàn
 
-Status: **Done — Packaged acceptance pending**
+Status: **Done — Packaged acceptance reported successful by user**
 Approved date: **2026-10-08**
 Target version: **1.5.0-rc.2**
 
@@ -50,7 +50,7 @@ Target version: **1.5.0-rc.2**
 | H4 | Mặc định giữ database/config/frameworks khi uninstall | Done |
 | H5 | Đồng bộ version và tài liệu RC2 | Done |
 | H6 | Chạy các kiểm tra/build đã duyệt và kiểm tra artifact | Done |
-| H7 | Packaged acceptance trên máy thật | Pending |
+| H7 | Packaged acceptance trên máy thật | Done — user-reported on 2026-10-09 |
 
 ## Rollback
 
@@ -92,5 +92,11 @@ Target version: **1.5.0-rc.2**
   diff trong Tool hoặc protected license paths.
 - `git diff --check` không báo whitespace error; cảnh báo line-ending hiện hữu
   không phải lỗi check.
-- Chưa chạy installer/uninstaller RC2, login, cold boot, restart, PLC, camera,
-  dongle runtime hoặc Dongil trên packaged app. Đây là H7.
+- Agent build phase did not run installer/uninstaller RC2, login, cold boot,
+  restart, PLC, camera, dongle runtime or Dongil. On 2026-10-09, the user later
+  reported the installed RC2 local API/login, remembered login through repeated
+  restart/cold boot, in-app restart, default uninstall preservation, PLC,
+  camera and Dongil operation working. H7 is therefore closed by user-reported
+  acceptance, not by an agent-captured test transcript. Update rollback,
+  destructive uninstall options and every hardware failure case were not
+  separately exercised by this plan.

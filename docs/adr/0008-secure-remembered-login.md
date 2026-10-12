@@ -1,6 +1,6 @@
 # 0008 — Secure machine-bound remembered login for all roles
 
-Status: Accepted — source-runtime cold boot accepted; packaged verification pending
+Status: Accepted — source and installed RC2 restart/cold-boot restore accepted by user report
 
 ## Context
 
@@ -88,5 +88,13 @@ applied instead of trusting a stale authorization snapshot.
   application-session cleanup flow.
 - Users must manually sign in and opt in once after upgrading from the legacy
   local-storage implementation.
-- Cold boot, role-change, revocation, safe-storage failure, and transient-error
-  behavior require explicit verification on a target Windows workstation.
+- Role-change, revocation and secure-storage failure behavior still require
+  explicit packaged evidence beyond the accepted restart/cold-boot path.
+
+## Acceptance note
+
+On 2026-10-09, the user reported that installed RC2 restored remembered login
+across repeated application restart and full cold boot. Earlier source-runtime
+checks also covered opt-in, restart and cold boot. These are user-reported
+manual results; role-change, revocation and every secure-storage failure case
+were not independently captured in the packaged application.

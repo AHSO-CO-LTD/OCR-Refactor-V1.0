@@ -1,6 +1,6 @@
 # 0009 — Local revocable authentication sessions
 
-Status: Accepted — implemented; isolated verification complete, packaged acceptance pending
+Status: Accepted — implemented; isolated verification complete, installed core flow accepted by user report
 
 ## Context
 
@@ -71,3 +71,10 @@ do not consume OCR user JWTs, so no Dongil Server change is required.
 - Revoked-session retention/cleanup can be planned separately if table growth
   becomes material; it is not part of this decision.
 - No external Dongil Server deployment or compatibility coordination is needed.
+
+## Acceptance note
+
+On 2026-10-09, the user reported the installed RC2 login, automatic restore and
+restart flows working. This confirms the core packaged path by user report but
+does not replace the isolated evidence for logout/role/account revocation, nor
+does it separately capture active camera WebSocket closure after revocation.

@@ -1,119 +1,98 @@
 # Current Planner
 
-Last source review: 2026-10-08
+Last source review: 2026-10-09
 
 ## Delivered
 
-- Repository, backend, database, frontend, and permission foundation.
-- Product, camera identity, camera, AI, OCR variant, and ROI configuration.
-- Line operation, Line Test, PLC runtime, DEV simulator, history reports, and exports.
-- Electron startup, license gate, service watchdog, shutdown, installer, updater, and recovery.
-- Dongil registration, presence, live outbox, machine information, and historical reconciliation.
-- Source-runtime stabilization for DB-authoritative Dongil configuration, fixed
-  washing-machine type, operator connection/synchronization permissions,
-  machine-bound remembered login, dongle-check coordination, and camera
-  discovery count correctness. Manual source cold-boot, Dongil/outbox and
-  operator acceptance were reported successful; packaged acceptance remains
-  pending.
+- Repository, backend, database, frontend and permission foundation.
+- Product, camera identity, camera, AI, OCR variant and ROI configuration.
+- Line operation, Line Test, PLC runtime, DEV simulator, history reports and exports.
+- Electron startup, license gate, service watchdog, shutdown, installer, updater and recovery.
+- Dongil registration, presence, live outbox, machine information and historical reconciliation.
+- DB-authoritative Dongil configuration, fixed `WASHING_MACHINE` type, staged
+  connection diagnostics, operator connection/history permissions and durable
+  recovery after temporary LAN loss.
+- Secure remembered login for all roles using Electron `safeStorage`, a
+  PostgreSQL token hash, real-dongle restore and current-session JWT storage.
 - OCR-local revocable sessions using PostgreSQL `AuthSession` and JWT `sid`,
-  dedicated logout, role/account-state revocation, camera WebSocket validation,
-  backend loopback binding, and denied renderer-created windows. Prisma/schema,
-  targeted tests, workspace typechecks, isolated 49-migration integration, and
-  source backend loopback runtime checks passed; packaged acceptance remains
-  pending.
-- Version 1.4.0 source and historical Windows release workflow.
-- Local Windows release candidate `1.5.0-rc.1`, built without publishing using
-  verified Node 22 and the pinned encrypted Tool release. Static, manifest,
-  checksum, secret-exclusion, and protected-boundary checks passed. Packaged
-  testing then found a dev API URL embedded in the frontend bundle.
-- Local Windows release candidate `1.5.0-rc.2` was built without publishing. It
-  enforces the packaged local API URL and makes app-only uninstall the safe
-  default; target-machine acceptance remains pending.
+  dedicated logout, account-state revocation, camera WebSocket validation,
+  backend loopback binding and denied renderer-created windows.
+- Static, targeted, isolated 49-migration and source-runtime verification
+  recorded in the approved plans.
+- Local Windows RC1 build, diagnosis of its embedded dev API URL, and replacement
+  RC2 build with production URL guard and safe app-only uninstall defaults.
+- User-reported installed-RC2 acceptance on 2026-10-09 for local API/login,
+  remembered login across repeated restart/cold boot, in-app restart, default
+  uninstall preservation, PLC, camera and Dongil operation.
 
-## Current Approved Plans
+The installed acceptance is a user report, not agent-captured evidence. It does
+not imply that every update/rollback, downgrade, representative-data migration,
+session revocation/WebSocket or hardware failure case was separately exercised.
 
-The completed documentation baseline refresh is tracked at
-[plans/2026-10-05-documentation-baseline-refresh.md](plans/2026-10-05-documentation-baseline-refresh.md).
+## Current Approved And Historical Plans
 
-The completed source implementation and remaining packaged pilot for auth and
-Dongil reliability are tracked at
-[plans/2026-10-05-auth-dongil-cold-boot-reliability.md](plans/2026-10-05-auth-dongil-cold-boot-reliability.md).
+- [Documentation baseline refresh](plans/2026-10-05-documentation-baseline-refresh.md): done.
+- [Auth, Dongil and cold-boot reliability](plans/2026-10-05-auth-dongil-cold-boot-reliability.md): source and installed RC2 operation accepted by user report; detailed residual gates remain documented.
+- [Local auth session and runtime security](plans/2026-10-06-local-auth-session-and-runtime-security.md): source/isolated verification complete; installed core flow accepted by user report.
+- [RC1 release candidate](plans/2026-10-07-release-candidate-1.5.0-rc.1.md): historical invalidated candidate because of the embedded dev API URL.
+- [RC2 API and safe uninstall](plans/2026-10-08-rc2-local-api-and-safe-uninstall.md): done, including user-reported packaged acceptance.
+- [Documentation progress refresh](plans/2026-10-09-documentation-progress-refresh.md): current documentation audit.
 
-The completed source implementation and remaining packaged acceptance for
-revocable local sessions and runtime boundaries are tracked at
-[plans/2026-10-06-local-auth-session-and-runtime-security.md](plans/2026-10-06-local-auth-session-and-runtime-security.md).
+## Next Release Path
 
-The completed local RC build and its packaged-pilot handoff are tracked at
-[plans/2026-10-07-release-candidate-1.5.0-rc.1.md](plans/2026-10-07-release-candidate-1.5.0-rc.1.md).
+1. Publish the approved stable `v1.5.0` release and verify its updater assets.
+2. If promoting to final, align all workspace, lockfile, Swagger and release
+   metadata before creating the release commit.
+3. Recheck Git status, protected boundaries, version consistency, artifact
+   policy and release workflow inputs.
+4. Commit and push the approved documentation/version changes only when
+   explicitly requested.
+5. Push the corresponding immutable tag and let `Windows Setup` build the
+   installer with the pinned private Tool artifact.
+6. Verify the workflow, GitHub Release metadata, installer/blockmap/latest.yml,
+   checksums and download availability.
+7. Preserve RC2 acceptance notes and record any final-version delta; if the
+   final build differs materially, repeat the affected acceptance cases.
 
-The approved RC2 API/uninstall hotfix is tracked at
-[plans/2026-10-08-rc2-local-api-and-safe-uninstall.md](plans/2026-10-08-rc2-local-api-and-safe-uninstall.md).
+No `v1.5.0*` tag or GitHub Release exists at this review point. The latest
+published release remains `v1.4.0`.
 
-## Recommended Next Engineering Plan
+## Residual Risks And Deferred Work
 
-The remaining release path is:
-
-1. Obtain explicit Phase C approval and select the pilot workstation.
-2. Back up and checksum the selected pilot workstation database/config before
-   any packaged migration or installation.
-3. Run the approved target-machine acceptance matrix for migration, remembered
-   login/session revocation, install/update/rollback, dongle, camera, PLC, OCR,
-   offline behavior, Dongil reconciliation, loopback binding, and secret-free
-   diagnostics.
-4. Update final evidence and close the two active plans only after packaged
-   acceptance succeeds.
-
-After release acceptance, separately inspect and seek approval to isolate demo
-fallback behavior and then decompose oversized service/API modules. Do not mix
-those refactors into the release candidate.
-
-Each item is separate scope and requires inspection, plan, approval, implementation,
-and verification. Do not combine them silently.
-
-## Current Known Gaps
-
-- Free-angle ROI editor versus 90-degree runtime crop normalization.
+- Free-angle ROI editor versus 90-degree runtime crop normalization. ROI remains
+  outside current scope because the user explicitly asked not to change it.
 - No complete mutation audit pipeline.
-- Packaged migration and target-machine acceptance for DB-backed session
-  revocation/logout remain pending. JWT expiry is intentionally unset; login
-  lockout and rate limiting are explicitly deferred.
+- JWT expiry remains intentionally unset; login lockout and rate limiting are
+  explicitly deferred. Do not introduce the rejected five-attempt/60-second policy.
+- Detailed packaged evidence is still absent for role/deactivation revocation,
+  active camera WebSocket closure, update rollback, downgrade env recovery and
+  migration against representative production data.
 - Device Tool binds beyond loopback and has no application authentication.
-- The new CR/LF/BOM-aware runtime parser and legacy ProgramData backup path are
-  implemented. Runtime Dongil settings are DB-only; packaged-machine parsing,
-  backup, cold-boot, and downgrade behavior still require verification.
 - Shared TypeScript contract workspace remains inactive.
-- Packaged hardware and recovery behavior are not yet accepted for the current
-  source candidate.
+- Core service and frontend API files remain large and require a separately
+  approved behavior-preserving refactor.
+- A restart/service-cleanup race was previously identified during investigation.
+  The user reported the installed RC2 restart flow working, but no source fix or
+  isolated stress evidence was recorded for that race.
 
-ROI remains outside the current approved work because its existing behavior was
-explicitly kept stable. No Dongil Server source/API/database/business-flow,
-Device Tool, protected license, or ROI change is allowed in the release path.
+No Dongil Server source/API/database/business-flow, Device Tool, protected
+license or ROI change is allowed in the release path.
 
-## Source Candidate Snapshot — 2026-10-07
+## Current Source Snapshot — 2026-10-09
 
 - Branch: `remote`.
-- Baseline commit: `149b944c7d1d7f29d00bb369cada1330cf72f829`
-  (`Feat: Fixing Remembered Login`).
-- Worktree is intentionally uncommitted and contains 19 paths: nine project
-  documentation files, eight test files, and two production service files whose
-  diffs are formatting-only. No changes are staged.
-- Dependency manifests, Prisma schema, and migration files have no uncommitted
-  diff. The additive `AuthSession` migration is already part of the baseline
-  commit.
-- `tool/`, protected license paths, `backend/src/dongil-sync/`, and ROI code have
-  no worktree diff.
-- `git diff --check`, conflict-marker inspection, and changed-file secret-pattern
-  scanning passed. Git continues to report only the repository's existing
-  LF-to-CRLF checkout warnings.
-- The source/static/isolated verification evidence is recorded in the two active
-  plans. Phase A did not run a build, installer, migration, seed, Electron, or
-  hardware flow.
-
-This snapshot is the input boundary for Phase B. Any later source, schema,
-dependency, or contract change requires another candidate audit before build.
+- HEAD and `origin/remote`:
+  `e152c9d4c5fe203c94682279b1fa9ab7cf9c6620` (`Fix Auto login`).
+- Workspace, lockfile and Swagger version: `1.5.0`.
+- Prisma migration directories: 49.
+- Worktree was clean before this documentation refresh.
+- Latest local tag and GitHub Release: `v1.4.0`; no `v1.5.0*` remote tag.
+- RC2 local installer SHA-256:
+  `EFEB014AA300844710FD58E83AD782CC0880BB0962E68C40BFA9E33A7149F73C`.
+- `tool/` and protected license boundaries remain outside documentation edits.
 
 ## Definition Of Done For Future Features
 
-Applicable plans cover business rules, permission enforcement, error/loading/empty
-states, data migration, audit, concurrency, idempotency, hardware behavior,
-rollback, documentation, and explicit verification status.
+Applicable plans cover business rules, permission enforcement,
+error/loading/empty states, data migration, audit, concurrency, idempotency,
+hardware behavior, rollback, documentation and explicit verification status.

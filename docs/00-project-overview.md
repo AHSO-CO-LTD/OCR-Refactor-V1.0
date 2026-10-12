@@ -51,9 +51,12 @@ retaining Python for device and OCR work behind a versioned local API.
 ## Current Maturity
 
 The source is beyond the original scaffold and foundation phases. The current
-source candidate is `1.5.0-rc.2`; `v1.4.0` has historical release evidence.
-Production readiness still requires explicit
-target-machine validation covering database, installer, updater, dongle, camera,
-PLC, OCR, offline recovery, and Dongil behavior.
+source version is `1.5.0`; publication is pending and `v1.4.0` remains the
+latest published release.
+The user reported successful installed-RC2 operation for login/local API,
+remembered login across restart/cold boot, app restart, safe uninstall defaults,
+PLC, camera and Dongil. This is user-reported acceptance, not independently
+captured evidence for every update/rollback, migration, hardware or recovery
+case. Publication of the next release remains pending.
 
 Use [../PROJECT_PROFILE.md](../PROJECT_PROFILE.md) for the central current profile.

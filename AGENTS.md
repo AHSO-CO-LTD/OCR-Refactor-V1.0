@@ -19,7 +19,7 @@ Python Device Tool owns camera, OCR, Modbus TCP, and SLMP operations.
 
 ## Current Source Baseline
 
-- Version metadata: `1.4.0`.
+- Version metadata: `1.5.0`; last published release: `v1.4.0`.
 - Git branch used by this checkout: `remote`.
 - Frontend dev port: `3970`.
 - Backend dev port: `3980`.
@@ -82,13 +82,16 @@ Do not rely on old status text that describes these areas as unimplemented.
 - Free-angle ROI display and the runtime crop path are not fully equivalent;
   Device Tool accepts only 90-degree crop rotation increments.
 - Local DB-backed JWT session revocation is implemented and has passed isolated
-  migration/integration/runtime verification; packaged acceptance remains
-  pending. JWT expiry is intentionally unset, login rate limiting and lockout
-  enforcement are deferred, and audit coverage is not yet complete project-wide.
+  migration/integration/runtime verification. The user reported the installed
+  RC2 login/restart flows working; the detailed revoke/WebSocket matrix was not
+  independently captured. JWT expiry is intentionally unset, login rate
+  limiting and lockout enforcement are deferred, and audit coverage is not yet
+  complete project-wide.
 - Device Tool currently binds to all interfaces and has no application JWT layer.
 - Electron CR/LF/BOM-aware `.env` parsing and legacy ProgramData backup are
-  implemented. Runtime Dongil changes are DB-only and do not rewrite `.env`;
-  packaged cold-boot and downgrade verification remain pending.
+  implemented. Runtime Dongil changes are DB-only and do not rewrite `.env`.
+  The user reported RC2 cold boot and Dongil operation working; downgrade and
+  recovery behavior still require separate evidence.
 - Core service and frontend API files have grown large and need separately approved refactoring.
 
 ## Task Workflow

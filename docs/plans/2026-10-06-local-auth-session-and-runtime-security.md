@@ -1,6 +1,6 @@
 # Kế hoạch vòng đời phiên cục bộ và bảo vệ runtime OCR
 
-Status: **Approved — Phases 0-6 source and isolated verification complete; packaged acceptance pending**
+Status: **Implemented — source/isolated verification complete; installed core flow accepted by user report; residual acceptance remains open**
 Approved date: **2026-10-06**
 Source baseline: **v1.4.0**, branch **remote**
 
@@ -188,12 +188,12 @@ database credential hoặc Dongil machine credential.
 | --- | --- | --- |
 | 0 | Discovery, plan, ADR và scope boundary | Done |
 | 1 | Additive `AuthSession` migration và local session service | Done — schema/client and isolated migration verified |
-| 2 | JWT issuance/guard và camera WebSocket validation | Done — targeted unit/integration checks passed; packaged runtime pending |
-| 3 | Logout IPC/API và account-state revocation hooks | Done — targeted unit/integration checks passed; packaged runtime pending |
+| 2 | JWT issuance/guard và camera WebSocket validation | Done — targeted checks passed; installed login/restore user-accepted, active-socket revoke not separately captured |
+| 3 | Logout IPC/API và account-state revocation hooks | Done — targeted checks passed; installed core flow user-accepted, detailed mutation matrix not separately captured |
 | 4 | Loopback bind, external URL allowlist và IPC review | Done — targeted static checks and source runtime loopback check passed |
 | 5 | Audit/docs/error handling | Done — targeted checks and isolated DB audit verification passed |
 | 6 | Approved source verification | Done — static, isolated DB and source backend runtime checks passed |
-| 7 | Packaged build và target-machine acceptance | Deferred until all functions complete |
+| 7 | Packaged build và target-machine acceptance | Done for core installed flow by user report; detailed revoke/WebSocket matrix remains unobserved |
 
 Mỗi phase phải được điều tra lại trước khi sửa. Nếu phát hiện cần thay đổi
 Dongil Server, Device Tool, license, ROI, business contract hoặc migration theo
@@ -227,6 +227,16 @@ hướng khác plan này thì dừng và báo lại; không tự mở rộng ph�
   0 `AuthSession`, 0 `RememberedLogin`; DB test sau đó đã được xóa.
 - Không migrate hoặc ghi vào DB workstation `ocrahso`; không seed, không chạy
   Electron/camera/PLC, chưa build và chưa kiểm tra packaged installer.
+
+### 8.2. Nghiệm thu packaged do người dùng báo cáo ngày 2026-10-09
+
+- Bản cài RC2 đăng nhập và tự khôi phục remembered login thành công qua restart
+  ứng dụng và cold boot.
+- Restart từ giao diện người dùng được báo cáo hoạt động.
+- PLC, camera và Dongil trên bản cài được báo cáo hoạt động.
+- Đây là bằng chứng thủ công do người dùng báo cáo, không phải transcript do
+  agent thu thập. Role/deactivation revocation, active camera WebSocket closure,
+  packaged listener capture và update rollback chưa được quan sát riêng.
 
 ## 9. Rủi ro và giảm thiểu
 

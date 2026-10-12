@@ -1,6 +1,6 @@
 # Kế hoạch build release candidate 1.5.0-rc.1
 
-Status: **Done — Packaged pilot pending**
+Status: **Done — Invalidated by packaged pilot; superseded by RC2**
 Approved date: **2026-10-07**
 Baseline branch/commit: **remote / 149b944c7d1d7f29d00bb369cada1330cf72f829**
 
@@ -114,5 +114,7 @@ version. Sau khi pilot RC đạt, version final `1.5.0` sẽ là một phase ri�
   SHA-256 `3BC6AF86C6C4145628E835995C85FFBA6BBA8FD5D953BA0F797C46EA592F65B1`.
 - Installer hiện chưa có chữ ký Authenticode công khai (`NotSigned`), phù hợp
   baseline nội bộ nhưng phải được xem là cảnh báo khi pilot.
-- Chưa chạy installer, packaged Electron, migration trên workstation, camera,
-  PLC, dongle, OCR, Dongil runtime hay rollback. Đây là phạm vi Phase C.
+- Build phase itself did not run installer, packaged Electron, migration on the
+  workstation, camera, PLC, dongle, OCR, Dongil runtime or rollback. Later
+  packaged testing found that RC1 called the dev API on port `3980`, so RC1 was
+  invalidated and superseded by `1.5.0-rc.2`. Do not use RC1 for pilot rollout.

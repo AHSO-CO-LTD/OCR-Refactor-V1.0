@@ -1,9 +1,10 @@
 # Dongil Server integration
 
-Status: Implemented; connected-server verification remains environment
-dependent.
+Status: Implemented; source runtime and installed RC2 Dongil operation were
+accepted by user report. Connected-server verification remains environment
+dependent for each target factory network.
 
-Last source review: `2026-10-06`. Related architecture records:
+Last source review: `2026-10-09`. Related architecture records:
 [`adr/0005-dongil-durable-outbox.md`](adr/0005-dongil-durable-outbox.md) and
 [`adr/0007-dongil-database-config-and-fixed-machine-type.md`](adr/0007-dongil-database-config-and-fixed-machine-type.md).
 
@@ -87,7 +88,7 @@ Payload:
   "machineId": "XXXX-XXXX-XXXX-XXXX",
   "machineTypeCode": "WASHING_MACHINE",
   "licenseStatus": "LICENSED",
-  "appVersion": "1.5.0-rc.2"
+  "appVersion": "1.5.0"
 }
 ```
 
@@ -235,6 +236,12 @@ No local inspection data is deleted after server confirmation.
 12. Close the local app normally and confirm `SHUTDOWN`; restart, then interrupt the LAN and confirm `CONNECTION_LOST` followed by automatic `ONLINE` recovery.
 
 ## Diagnostics
+
+The user reported that installed RC2 connected and operated with Dongil and
+that the earlier temporary-LAN source pilot replayed pending outbox results.
+These reports do not independently prove every registration rejection,
+credential recovery, permanent-400, full historical reconciliation or server
+assignment-mismatch case.
 
 Electron terminal logs use the `[dongil]` prefix and never include the credential. Local outbox error fields contain sanitized server error codes/messages. Important recovery states:
 

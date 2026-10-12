@@ -37,7 +37,9 @@ Current limitations:
 - Source now implements server-side logout revocation through JWT plus the
   per-process desktop token before Electron deletes its encrypted file and the
   renderer session. Static and isolated database/runtime verification passed;
-  packaged verification remains pending.
+  the user reported installed RC2 login/restart operation working. The full
+  logout, role/deactivation revocation and active-WebSocket matrix was not
+  independently captured on the packaged app.
 - Failed attempts are counted but do not currently enforce a lock threshold.
 - Login rate limiting is not implemented.
 
@@ -84,7 +86,8 @@ scheme and destination allowlist before opening it.
 
 - Electron calls backend and Tool through loopback URLs.
 - NestJS binds explicitly to `127.0.0.1`; a source runtime check on 2026-10-07
-  confirmed a loopback-only listener. Packaged verification remains pending.
+  confirmed a loopback-only listener. The installed app was reported working,
+  but packaged listener binding was not separately captured with network evidence.
 - `tool/config.json` currently binds Device Tool to `0.0.0.0`.
 - Device Tool camera and PLC endpoints do not implement application JWT authorization.
 
@@ -139,8 +142,8 @@ complete audit coverage.
 Before production acceptance, verify:
 
 - Tool firewall policy and packaged backend loopback binding.
-- Packaged local session migration and logout/revocation; lockout and login rate
-  limiting remain explicitly deferred.
+- Detailed packaged logout/revocation and active-WebSocket closure; lockout and
+  login rate limiting remain explicitly deferred.
 - IPC sender validation and external URL allowlisting.
 - Audit coverage for privileged changes.
 - Update artifact trust and backup integrity on the target workstation.

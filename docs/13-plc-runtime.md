@@ -2,9 +2,10 @@
 
 Status: Implemented operational baseline.
 
-Last source review: `2026-10-05`. The checked-in backend and Device Tool HTTP
-contracts are the source of truth. This documentation update did not exercise
-physical PLC or camera hardware. See
+Last source review: `2026-10-09`. The checked-in backend and Device Tool HTTP
+contracts are the source of truth. The user reported installed-RC2 PLC and
+camera operation working; this documentation refresh did not itself exercise
+physical PLC or camera hardware or isolate each failure/recovery case. See
 [`adr/0004-plc-through-device-tool.md`](adr/0004-plc-through-device-tool.md).
 
 ## Desktop login startup integration

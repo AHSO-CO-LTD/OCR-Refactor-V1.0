@@ -1,10 +1,10 @@
 # Release Setup Notes
 
-Status: Current release-script reference for local candidate `1.5.0-rc.2`;
-packaged acceptance remains pending.
+Status: Current release-script reference for stable source `1.5.0`; installed
+RC2 acceptance was reported successful by the user and publication is pending.
 
-Last source review: `2026-10-08`. The RC2 release build and packaged acceptance
-status are recorded in the associated plan; no publish is implied.
+Last source review: `2026-10-09`. The RC2 release build and user-reported
+installed acceptance are recorded in the associated plan; no publish is implied.
 
 The release process may stage an approved encrypted Tool bundle and compiled
 license artifacts. It must not modify `tool/` or original license source and
@@ -84,8 +84,8 @@ After preflight finishes, the bootstrap script expects PostgreSQL through
 
 Both local and GitHub Actions builds use
 `scripts/release/private-tool-release.json`. The current source is the private
-GitHub release asset `AHSO-CO-LTD/API-Tool-v1@2026.Jul.06.2` /
-`tool-2026.Jul.06.2.zip`.
+GitHub release asset `AHSO-CO-LTD/API-Tool-v1@2026.Jul.22.3` /
+`tool-2026.Jul.22.3.zip`.
 
 The staging script verifies the configured SHA-256 and rejects a package that
 does not contain the compiled `api`, `core`, and `drivers` `.pyd` modules. It
@@ -104,7 +104,7 @@ For an offline/local bundle override, point to either the extracted directory or
 the exact zip archive:
 
 ```powershell
-$env:DEVICE_TOOL_BUNDLE_PATH = "C:\duyhai\AHSO\tool-2026.Jul.06.2"
+$env:DEVICE_TOOL_BUNDLE_PATH = "C:\duyhai\AHSO\tool-2026.Jul.22.3"
 npm run release:win
 ```
 
@@ -118,5 +118,5 @@ To upgrade the bundled Tool, update tag, asset name, and SHA-256 together in
 checked with:
 
 ```powershell
-gh release view 2026.Jul.06.2 --repo AHSO-CO-LTD/API-Tool-v1 --json assets
+gh release view 2026.Jul.22.3 --repo AHSO-CO-LTD/API-Tool-v1 --json assets
 ```
